@@ -6,6 +6,8 @@ Phones are colour-coded by who holds them — yours, your cell's, hostile, and u
 
 Runs locally using Docker.
 
+Sorry Android users, instructions for mobile setup are for iOS.
+
 ## Stack
 
 - **Backend**: Python + FastAPI
