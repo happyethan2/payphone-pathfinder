@@ -4,7 +4,7 @@ A route optimiser for [Payphone Tag](https://payphonetag.com). Select phones on 
 
 Phones are colour-coded by who holds them — yours, your cell's, hostile, and uncaptured. You can click to select individual phones or draw a lasso around a group. Once you've got a route, it splits it into legs and opens each one directly in Google Maps.
 
-Runs entirely on your own machine via Docker. No external APIs or accounts needed beyond Payphone Tag itself.
+Runs locally using Docker.
 
 ## Stack
 
