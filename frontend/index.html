@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Payphone Pathfinder</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body { height: 100%; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: #0d0d1a; color: #dde; }
+
+    #map { position: fixed; inset: 0; z-index: 0; }
+
+    /* ── Panel ──────────────────────────────────────────────── */
+    #panel {
+      position: fixed;
+      top: 10px; left: 10px;
+      z-index: 1000;
+      width: 280px;
+      background: rgba(13, 13, 30, 0.93);
+      border: 1px solid rgba(100,110,200,0.25);
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.7);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: flex; flex-direction: column;
+    }
+
+    #panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 12px 9px;
+      border-bottom: 1px solid rgba(100,110,200,0.15);
+      cursor: pointer; user-select: none; flex-shrink: 0;
+    }
+    #panel-title { font-size: 13px; font-weight: 600; color: #c8ceff; letter-spacing: 0.3px; }
+    #panel-toggle {
+      background: none; border: none; color: #556; font-size: 12px;
+      cursor: pointer; padding: 2px 4px; line-height: 1; flex: none;
+      transition: color 0.2s;
+    }
+    #panel-toggle:hover { color: #99a; }
+
+    #panel-body {
+      padding: 10px 12px;
+      display: flex; flex-direction: column; gap: 10px;
+      overflow-y: auto; -webkit-overflow-scrolling: touch;
+    }
+    #panel-body.collapsed { display: none; }
+
+    /* ── Section ────────────────────────────────────────────── */
+    .sec-title {
+      font-size: 9px; font-weight: 700; color: #556;
+      text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;
+    }
+
+    /* ── Inputs ─────────────────────────────────────────────── */
+    input[type=text] {
+      width: 100%; padding: 6px 9px;
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(100,110,200,0.2);
+      border-radius: 7px; color: #dde; font-size: 12px; outline: none;
+    }
+    input[type=text]:focus { border-color: rgba(100,130,255,0.5); }
+    input[type=text] + input[type=text] { margin-top: 5px; }
+
+    /* ── Buttons ─────────────────────────────────────────────── */
+    .btn-row { display: flex; gap: 5px; }
+
+    button {
+      flex: 1; padding: 7px 6px;
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(100,110,200,0.2);
+      border-radius: 7px; color: #aab; font-size: 11px; cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      min-height: 34px; white-space: nowrap;
+    }
+    button:hover  { background: rgba(100,110,200,0.15); color: #dde; }
+    button.active { background: rgba(70,90,220,0.35); border-color: rgba(100,130,255,0.5); color: #c8d0ff; }
+    button.danger { background: rgba(180,40,40,0.2); border-color: rgba(220,80,80,0.3); color: #f99; }
+    button.danger:hover { background: rgba(200,50,50,0.35); }
+    button.go     { background: rgba(30,120,60,0.3); border-color: rgba(50,180,90,0.4); color: #7ee8a2; font-weight: 600; }
+    button.go:hover { background: rgba(30,140,70,0.45); }
+    button.maps   { background: rgba(30,80,160,0.3); border-color: rgba(60,130,255,0.4); color: #7ab8ff; font-weight: 600; }
+    button.maps:hover { background: rgba(30,90,180,0.45); }
+    button:disabled { opacity: 0.35; cursor: not-allowed; }
+    button.icon-only { flex: none; padding: 7px 10px; }
+
+    /* ── Legend dots ─────────────────────────────────────────── */
+    .legend { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; }
+    .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #99a; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+    /* ── Misc text ───────────────────────────────────────────── */
+    .sub-text { font-size: 10px; color: #556; margin-top: 4px; }
+
+    #endpoint-box {
+      font-size: 10px; color: #667;
+      background: rgba(255,255,255,0.03); border: 1px solid rgba(100,110,200,0.1);
+      border-radius: 6px; padding: 5px 8px; line-height: 1.8;
+    }
+
+    #route-result {
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(100,110,200,0.15);
+      border-radius: 7px; padding: 8px 10px; display: none;
+    }
+    #route-stats { font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 3px; }
+    #route-order { font-size: 10px; color: #556; line-height: 1.5; }
+
+    /* ── Waypoint markers ────────────────────────────────────── */
+    .wp {
+      width: 22px; height: 22px; border-radius: 50%;
+      background: #e67e22; color: #fff; font-size: 10px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      border: 2px solid rgba(255,255,255,0.8);
+      box-shadow: 0 1px 5px rgba(0,0,0,0.6);
+    }
+    .wp-start { background: #2ecc71; }
+    .wp-end   { background: #e74c3c; }
+
+    /* ── Spinner ─────────────────────────────────────────────── */
+    #spinner {
+      display: none; width: 18px; height: 18px; margin: 4px auto;
+      border: 2px solid rgba(100,110,200,0.2); border-top-color: #6677ff;
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Live location dot ───────────────────────────────────── */
+    .loc-dot {
+      width: 13px; height: 13px; border-radius: 50%;
+      background: #4a9eff; border: 2px solid #fff;
+      animation: pulse 2.2s ease-out infinite;
+    }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0   rgba(74,158,255,0.7); }
+      70%  { box-shadow: 0 0 0 11px rgba(74,158,255,0); }
+      100% { box-shadow: 0 0 0 0   rgba(74,158,255,0); }
+    }
+
+    /* ── Floating buttons (bottom-right) ─────────────────────── */
+    #fab-stack {
+      position: fixed; bottom: 20px; right: 14px;
+      z-index: 1001;
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+    }
+    #loc-badge {
+      font-size: 9px; color: #556;
+      background: rgba(13,13,30,0.85); border: 1px solid rgba(100,110,200,0.15);
+      border-radius: 4px; padding: 2px 5px; white-space: nowrap;
+    }
+    #fab-centre {
+      width: 44px; height: 44px; border-radius: 50%;
+      background: rgba(13,13,30,0.92);
+      border: 1px solid rgba(100,110,200,0.25);
+      font-size: 20px; cursor: pointer;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.6);
+      display: flex; align-items: center; justify-content: center;
+      flex: none; transition: background 0.15s;
+    }
+    #fab-centre:hover { background: rgba(40,40,80,0.95); }
+
+    /* ── Mobile ──────────────────────────────────────────────── */
+    @media (max-width: 600px) {
+      #panel { width: calc(100vw - 20px); max-height: calc(100vh - 80px); }
+      #panel-body { max-height: calc(100vh - 130px); }
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- ── Control panel ──────────────────────────────────────────── -->
+<div id="panel">
+  <div id="panel-header" onclick="togglePanel()">
+    <span id="panel-title">Payphone Pathfinder</span>
+    <button id="panel-toggle">▼</button>
+  </div>
+
+  <div id="panel-body" class="collapsed">
+
+    <!-- Identity -->
+    <div>
+      <div class="sec-title">Identity</div>
+      <input type="text" id="username" placeholder="Username" autocomplete="off" autocorrect="off" autocapitalize="off">
+      <input type="text" id="cell"     placeholder="Cell tag"  autocomplete="off" autocorrect="off" autocapitalize="characters">
+      <div class="btn-row" style="margin-top:5px">
+        <button id="btn-load" onclick="loadPhones()">Load phones</button>
+      </div>
+      <div id="load-status" class="sub-text"></div>
+    </div>
+
+    <!-- Legend -->
+    <div>
+      <div class="sec-title">Legend</div>
+      <div class="legend">
+        <div class="legend-item"><span class="dot" style="background:#888"></span>Uncaptured</div>
+        <div class="legend-item"><span class="dot" style="background:#2ecc71"></span>Mine</div>
+        <div class="legend-item"><span class="dot" style="background:#3498db"></span>Cellmate</div>
+        <div class="legend-item"><span class="dot" style="background:#e74c3c"></span>Hostile</div>
+      </div>
+    </div>
+
+    <!-- Selection -->
+    <div>
+      <div class="sec-title">Selection</div>
+      <div class="btn-row">
+        <button id="btn-click" onclick="setMode('click')" class="active">Click</button>
+        <button id="btn-lasso" onclick="setMode('lasso')">Lasso</button>
+        <button onclick="clearSelection()" class="danger icon-only">✕</button>
+      </div>
+      <div id="sel-count" class="sub-text">0 selected</div>
+    </div>
+
+    <!-- Transport -->
+    <div>
+      <div class="sec-title">Transport</div>
+      <div class="btn-row">
+        <button id="btn-foot"    onclick="setProfile('foot')">🚶 Foot</button>
+        <button id="btn-bicycle" onclick="setProfile('bicycle')">🚲 Bike</button>
+        <button id="btn-car"     onclick="setProfile('car')"     class="active">🚗 Car</button>
+      </div>
+    </div>
+
+    <!-- Endpoints -->
+    <div>
+      <div class="sec-title">Start &amp; End</div>
+      <div class="btn-row">
+        <button id="btn-set-endpoints" onclick="startSetEndpoints()">📍 Set Start &amp; End</button>
+      </div>
+    </div>
+
+    <!-- Route -->
+    <div>
+      <div class="sec-title">Route</div>
+      <div class="btn-row">
+        <button onclick="findRoute()" id="btn-route" class="go">Find optimal route</button>
+        <button onclick="clearRoute()" class="danger icon-only">✕</button>
+      </div>
+      <div id="spinner"></div>
+      <div id="route-result" style="margin-top:10px;">
+        <div id="route-stats"></div>
+        <div id="maps-nav" style="display:none;margin-top:8px;">
+          <div class="btn-row" style="margin-bottom:5px;">
+            <button id="leg-prev" onclick="changeLeg(-1)" class="icon-only">◀</button>
+            <span id="leg-label"
+              style="flex:1;display:flex;align-items:center;justify-content:center;
+                     font-size:10px;color:#778;"></span>
+            <button id="leg-next" onclick="changeLeg(1)" class="icon-only">▶</button>
+          </div>
+          <button onclick="openCurrentLeg()" class="maps" style="font-size:11px;width:100%;">
+            Open in Google Maps ↗
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Status bar (set-endpoint prompts) ──────────────────────── -->
+<div id="status-bar" style="
+  display:none; position:fixed; bottom:0; left:0; right:0; z-index:1002;
+  background:rgba(13,13,30,0.95); border-top:1px solid rgba(100,110,200,0.25);
+  padding:12px 20px; text-align:center;
+  font-size:13px; color:#c8d0ff; letter-spacing:0.2px;">
+</div>
+
+<!-- ── Floating GPS button ─────────────────────────────────────── -->
+<div id="fab-stack">
+  <div id="loc-badge">no GPS</div>
+  <button id="fab-centre" onclick="centreOnMe()" title="Centre on my location">📡</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.js"></script>
+<script>
+// ── State ─────────────────────────────────────────────────────────
+const state = {
+  phones:          [],
+  markers:         {},
+  selectedIds:     new Set(),
+  mode:            'click',
+  profile:         'car',
+  start:           null,
+  end:             null,
+  startMarker:     null,
+  endMarker:       null,
+  routeLayers:     [],
+  decorators:      [],
+  waypointMarkers: [],
+  lassoPoints:     [],
+  lassoLayer:      null,
+  lassoDragging:   false,
+  lastRoute:       null,
+  mapsLegs:        [],
+  currentLeg:      0,
+};
+
+const STATUS_COLORS = {
+  uncaptured: '#888888',
+  mine:       '#2ecc71',
+  cellmate:   '#3498db',
+  hostile:    '#e74c3c',
+};
+
+// ── Map init ──────────────────────────────────────────────────────
+const map = L.map('map', {
+  center: [-25.0, 134.0], zoom: 5,
+  zoomControl: false,        // we'll add it at bottom-left
+  preferCanvas: true,
+});
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19,
+}).addTo(map);
+
+// Zoom control at bottom-left so it doesn't clash with panel
+L.control.zoom({ position: 'bottomleft' }).addTo(map);
+
+const mapEl = map.getContainer();
+
+// ── Panel ─────────────────────────────────────────────────────────
+let panelOpen = false;
+function togglePanel() {
+  panelOpen = !panelOpen;
+  document.getElementById('panel-body').classList.toggle('collapsed', !panelOpen);
+  document.getElementById('panel-toggle').textContent = panelOpen ? '▲' : '▼';
+}
+
+// ── Load phones ───────────────────────────────────────────────────
+async function loadPhones() {
+  const username = document.getElementById('username').value.trim();
+  const cell     = document.getElementById('cell').value.trim();
+  if (!username) { setStatus('Enter username first', '#e74c3c'); return; }
+  setStatus('Loading…', '#556');
+  document.getElementById('btn-load').disabled = true;
+  try {
+    const res  = await fetch(`/api/phones?${new URLSearchParams({ username, cell })}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    state.phones = data.phones;
+    renderMarkers();
+    setStatus(`${state.phones.length} phones loaded`, '#2ecc71');
+  } catch (e) {
+    setStatus(`Error: ${e.message}`, '#e74c3c');
+  } finally {
+    document.getElementById('btn-load').disabled = false;
+  }
+}
+
+function setStatus(msg, color) {
+  const el = document.getElementById('load-status');
+  el.textContent = msg;
+  el.style.color = color || '#556';
+}
+
+// ── Markers ───────────────────────────────────────────────────────
+function renderMarkers() {
+  Object.values(state.markers).forEach(m => map.removeLayer(m));
+  state.markers = {};
+  for (const phone of state.phones) {
+    const m = makeMarker(phone);
+    m.addTo(map);
+    state.markers[phone.id] = m;
+  }
+  updateSelCount();
+}
+
+function makeMarker(phone) {
+  const sel   = state.selectedIds.has(phone.id);
+  const color = STATUS_COLORS[phone.status] || '#888';
+  const m = L.circleMarker([phone.lat, phone.lon], mkStyle(color, sel));
+  const tip = [`#${phone.id}`, phone.status, phone.holder_name ? `held by ${phone.holder_name}` : null]
+    .filter(Boolean).join('<br>');
+  m.bindTooltip(tip, { direction: 'top', sticky: true });
+  m.on('click', e => { L.DomEvent.stopPropagation(e); onMarkerClick(phone); });
+  return m;
+}
+
+function mkStyle(color, sel) {
+  return { radius: sel ? 9 : 7, fillColor: color, color: sel ? '#fff' : color,
+           weight: sel ? 2.5 : 1, fillOpacity: 0.9, opacity: 1 };
+}
+
+function refreshMarker(phone) {
+  const m = state.markers[phone.id];
+  if (!m) return;
+  const sel = state.selectedIds.has(phone.id);
+  m.setStyle(mkStyle(STATUS_COLORS[phone.status] || '#888', sel));
+  m.setRadius(sel ? 9 : 7);
+}
+
+function updateSelCount() {
+  document.getElementById('sel-count').textContent =
+    `${state.selectedIds.size} phone${state.selectedIds.size !== 1 ? 's' : ''} selected`;
+}
+
+// ── Selection mode ────────────────────────────────────────────────
+function setMode(mode) {
+  mapEl.removeEventListener('touchstart', onLassoTouchStart);
+  mapEl.removeEventListener('touchmove',  onLassoTouchMove);
+  mapEl.removeEventListener('touchend',   onLassoTouchEnd);
+
+  state.mode = mode;
+  document.getElementById('btn-click').classList.toggle('active', mode === 'click');
+  document.getElementById('btn-lasso').classList.toggle('active', mode === 'lasso');
+
+  if (mode === 'lasso') {
+    map.dragging.disable();
+    if (map.tap) map.tap.disable();
+    map.on('mousedown', onLassoStart);
+    mapEl.addEventListener('touchstart', onLassoTouchStart, { passive: false });
+    mapEl.addEventListener('touchmove',  onLassoTouchMove,  { passive: false });
+    mapEl.addEventListener('touchend',   onLassoTouchEnd,   { passive: false });
+  } else {
+    map.dragging.enable();
+    if (map.tap) map.tap.enable();
+    map.off('mousedown', onLassoStart);
+    cleanupLasso();
+  }
+}
+
+function clearSelection() {
+  state.selectedIds.clear();
+  state.phones.forEach(p => refreshMarker(p));
+  updateSelCount();
+}
+
+// ── Lasso (mouse) ─────────────────────────────────────────────────
+function onLassoStart(e) {
+  if (e.originalEvent.button !== 0) return;
+  state.lassoPoints = [[e.latlng.lat, e.latlng.lng]];
+  state.lassoDragging = true;
+  map.on('mousemove', onLassoMove);
+  map.on('mouseup',   onLassoEnd);
+}
+function onLassoMove(e) {
+  if (!state.lassoDragging) return;
+  state.lassoPoints.push([e.latlng.lat, e.latlng.lng]);
+  drawLassoPreview();
+}
+function onLassoEnd() {
+  state.lassoDragging = false;
+  map.off('mousemove', onLassoMove);
+  map.off('mouseup',   onLassoEnd);
+  finishLasso();
+}
+
+// ── Lasso (touch — native DOM so passive:false works) ─────────────
+function touchLatLng(e) {
+  const t = e.touches[0];
+  const r = mapEl.getBoundingClientRect();
+  return map.containerPointToLatLng(L.point(t.clientX - r.left, t.clientY - r.top));
+}
+function onLassoTouchStart(e) {
+  e.preventDefault();
+  const ll = touchLatLng(e);
+  state.lassoPoints  = [[ll.lat, ll.lng]];
+  state.lassoDragging = true;
+}
+function onLassoTouchMove(e) {
+  if (!state.lassoDragging) return;
+  e.preventDefault();
+  const ll = touchLatLng(e);
+  state.lassoPoints.push([ll.lat, ll.lng]);
+  drawLassoPreview();
+}
+function onLassoTouchEnd(e) {
+  if (!state.lassoDragging) return;
+  state.lassoDragging = false;
+  finishLasso();
+}
+
+function drawLassoPreview() {
+  if (state.lassoLayer) map.removeLayer(state.lassoLayer);
+  if (state.lassoPoints.length < 2) return;
+  state.lassoLayer = L.polygon(state.lassoPoints, {
+    color: '#6677ff', fillColor: '#6677ff', fillOpacity: 0.08,
+    weight: 1.5, dashArray: '5 4',
+  }).addTo(map);
+}
+function finishLasso() {
+  cleanupLasso();
+  if (state.lassoPoints.length < 3) return;
+  const poly = state.lassoPoints;
+  state.phones.forEach(phone => {
+    if (pointInPolygon([phone.lat, phone.lon], poly)) {
+      state.selectedIds.add(phone.id);
+      refreshMarker(phone);
+    }
+  });
+  state.lassoPoints = [];
+  updateSelCount();
+}
+function cleanupLasso() {
+  if (state.lassoLayer) { map.removeLayer(state.lassoLayer); state.lassoLayer = null; }
+}
+function pointInPolygon(pt, poly) {
+  const [px, py] = pt;
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if (((yi > py) !== (yj > py)) && px < (xj - xi) * (py - yi) / (yj - yi) + xi)
+      inside = !inside;
+  }
+  return inside;
+}
+
+// ── Marker click ──────────────────────────────────────────────────
+function onMarkerClick(phone) {
+  if (state.mode === 'setStart') {
+    setEndpoint('start', { lat: phone.lat, lon: phone.lon, phone_id: phone.id });
+    return;
+  }
+  if (state.mode === 'setEnd') {
+    setEndpoint('end', { lat: phone.lat, lon: phone.lon, phone_id: phone.id });
+    return;
+  }
+  state.selectedIds.has(phone.id) ? state.selectedIds.delete(phone.id) : state.selectedIds.add(phone.id);
+  refreshMarker(phone);
+  updateSelCount();
+}
+
+// ── Endpoints ─────────────────────────────────────────────────────
+function showStatusBar(msg) {
+  const bar = document.getElementById('status-bar');
+  bar.textContent = msg;
+  bar.style.display = 'block';
+}
+function hideStatusBar() {
+  document.getElementById('status-bar').style.display = 'none';
+}
+
+function startSetEndpoints() {
+  document.getElementById('btn-set-endpoints').classList.add('active');
+  setMode('setStart');
+  showStatusBar('Tap your starting location on the map');
+}
+
+// Snap to nearest phone within SNAP_PX pixels, otherwise raw coords
+const SNAP_PX = 44;
+function snapPoint(latlng) {
+  const clickPt = map.latLngToContainerPoint(latlng);
+  let nearest = null, minDist = SNAP_PX;
+  for (const phone of state.phones) {
+    const pt = map.latLngToContainerPoint([phone.lat, phone.lon]);
+    const d  = Math.hypot(clickPt.x - pt.x, clickPt.y - pt.y);
+    if (d < minDist) { minDist = d; nearest = phone; }
+  }
+  return nearest
+    ? { lat: nearest.lat, lon: nearest.lon, phone_id: nearest.id }
+    : { lat: latlng.lat, lon: latlng.lng };
+}
+
+function setEndpoint(which, point) {
+  state[which] = point;
+  const oldKey = `${which}Marker`;
+  if (state[oldKey]) map.removeLayer(state[oldKey]);
+  const icon = L.divIcon({
+    html: `<div style="width:12px;height:12px;border-radius:50%;
+      background:${which === 'start' ? '#2ecc71' : '#e74c3c'};
+      border:2px solid #fff;box-shadow:0 0 0 3px ${which === 'start' ? '#2ecc714d' : '#e74c3c4d'}"></div>`,
+    className: '', iconSize: [12, 12], iconAnchor: [6, 6],
+  });
+  state[oldKey] = L.marker([point.lat, point.lon], { icon, zIndexOffset: 500 }).addTo(map);
+
+  // Sequential flow: after start is set, automatically prompt for end
+  if (which === 'start') {
+    setMode('setEnd');
+    showStatusBar('Now tap your ending location on the map');
+  } else {
+    setMode('click');
+    hideStatusBar();
+    document.getElementById('btn-set-endpoints').classList.remove('active');
+  }
+}
+
+// ── Transport ─────────────────────────────────────────────────────
+function setProfile(p) {
+  state.profile = p;
+  ['foot','bicycle','car'].forEach(n =>
+    document.getElementById(`btn-${n}`).classList.toggle('active', n === p));
+}
+
+// ── Map click: endpoint setting with snap ─────────────────────────
+map.on('click', (e) => {
+  if (state.mode === 'setStart') {
+    setEndpoint('start', snapPoint(e.latlng));
+  } else if (state.mode === 'setEnd') {
+    setEndpoint('end', snapPoint(e.latlng));
+  }
+});
+
+// ── Route ─────────────────────────────────────────────────────────
+async function findRoute() {
+  if (!state.selectedIds.size) { alert('Select at least one phone first.'); return; }
+  if (!state.start) { alert('Set a start point first.'); return; }
+  if (!state.end)   { alert('Set an end point first.'); return; }
+
+  document.getElementById('btn-route').disabled = true;
+  document.getElementById('spinner').style.display = 'block';
+  document.getElementById('route-result').style.display = 'none';
+
+  try {
+    const res = await fetch('/api/route', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phone_ids: Array.from(state.selectedIds),
+        start: state.start, end: state.end, profile: state.profile,
+      }),
+    });
+    if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || `HTTP ${res.status}`); }
+    const data = await res.json();
+    state.lastRoute = data;
+    displayRoute(data);
+  } catch (e) {
+    alert(`Route error: ${e.message}`);
+  } finally {
+    document.getElementById('btn-route').disabled = false;
+    document.getElementById('spinner').style.display = 'none';
+  }
+}
+
+function displayRoute(data) {
+  clearRoute();
+  const { ordered_ids, path, total_distance_m, total_duration_s } = data;
+
+  for (const feature of path.features) {
+    const coords = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+    const line = L.polyline(coords, { color: '#e67e22', weight: 4, opacity: 0.85 }).addTo(map);
+    state.routeLayers.push(line);
+    const dec = L.polylineDecorator(line, { patterns: [{ offset: '10%', repeat: 110,
+      symbol: L.Symbol.arrowHead({ pixelSize: 9, fill: true, fillOpacity: 1,
+        pathOptions: { color: '#e67e22', weight: 0 } }) }] }).addTo(map);
+    state.decorators.push(dec);
+  }
+
+  ordered_ids.forEach((id, idx) => {
+    const phone = state.phones.find(p => p.id === id);
+    if (!phone) return;
+    const isFirst = idx === 0, isLast = idx === ordered_ids.length - 1;
+    const icon = L.divIcon({
+      html: `<div class="wp ${isFirst ? 'wp-start' : isLast ? 'wp-end' : ''}">${isFirst ? '▶' : isLast ? '■' : idx}</div>`,
+      className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+    });
+    state.waypointMarkers.push(L.marker([phone.lat, phone.lon], { icon, zIndexOffset: 200 }).addTo(map));
+  });
+
+  const allCoords = path.features.flatMap(f => f.geometry.coordinates.map(([lon, lat]) => [lat, lon]));
+  if (allCoords.length) map.fitBounds(L.latLngBounds(allCoords), { padding: [50, 50] });
+
+  const km   = (total_distance_m / 1000).toFixed(1);
+  const mins = Math.round(total_duration_s / 60);
+  document.getElementById('route-stats').textContent = `${km} km · ${mins} min · ${ordered_ids.length} stops`;
+  document.getElementById('route-result').style.display = 'block';
+  updateMapsLink(data);
+}
+
+function clearRoute() {
+  state.routeLayers.forEach(l => map.removeLayer(l));
+  state.decorators.forEach(d => map.removeLayer(d));
+  state.waypointMarkers.forEach(m => map.removeLayer(m));
+  state.routeLayers = []; state.decorators = []; state.waypointMarkers = [];
+  state.lastRoute = null;
+  updateMapsLink(null);
+  document.getElementById('route-result').style.display = 'none';
+}
+
+// ── Google Maps legs ──────────────────────────────────────────────
+// Google Maps URL scheme: origin + up to 8 waypoints + destination = 10 stops per leg.
+// Consecutive legs share one stop (the handoff point), so each leg advances 9 stops.
+const GMAPS_STOPS_PER_LEG = 10; // origin + 8 waypoints + destination
+
+function buildLegs(data) {
+  if (!data || !state.start || !state.end) return [];
+
+  const phoneLookup = Object.fromEntries(state.phones.map(p => [p.id, p]));
+  const mode = { foot: 'walking', bicycle: 'bicycling', car: 'driving' }[state.profile] || 'walking';
+
+  // Full ordered stop list as [lat, lon] pairs
+  const all = [
+    [state.start.lat, state.start.lon],
+    ...data.ordered_ids.map(id => { const p = phoneLookup[id]; return p ? [p.lat, p.lon] : null; }).filter(Boolean),
+    [state.end.lat, state.end.lon],
+  ];
+
+  if (all.length < 2) return [];
+
+  // comgooglemaps:// scheme: saddr + daddr joined with +to: (no separate waypoints param)
+  // Each leg: origin + up to 9 more stops = 10 total, overlap of 1 between legs
+  const appMode = { foot: 'walking', bicycle: 'bicycling', car: 'driving' }[state.profile] || 'driving';
+  const legs = [];
+  const advance = GMAPS_STOPS_PER_LEG - 1; // 9
+  for (let i = 0; i < all.length - 1; i += advance) {
+    const chunk  = all.slice(i, i + GMAPS_STOPS_PER_LEG);
+    const saddr  = chunk[0].join(',');
+    const daddr  = chunk.slice(1).map(s => s.join(',')).join('+to:');
+    // Native app URL — opens Google Maps directly without browser redirect
+    const appUrl = `comgooglemaps://?saddr=${saddr}&daddr=${daddr}&directionsmode=${appMode}`;
+    // Web fallback in case app isn't installed
+    const origin = chunk[0].join(',');
+    const dest   = chunk[chunk.length - 1].join(',');
+    const wpts   = chunk.slice(1, -1).map(s => s.join(',')).join('|');
+    const webUrl = `https://www.google.com/maps/dir/?api=1` +
+      `&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(dest)}` +
+      (wpts ? `&waypoints=${encodeURIComponent(wpts)}` : '') +
+      `&travelmode=${mode}`;
+    legs.push({ appUrl, webUrl, firstStop: i, lastStop: Math.min(i + advance, all.length - 1) });
+  }
+  return legs;
+}
+
+function updateMapsLink(data) {
+  const nav = document.getElementById('maps-nav');
+  if (!data) { nav.style.display = 'none'; return; }
+
+  state.mapsLegs   = buildLegs(data);
+  state.currentLeg = 0;
+  nav.style.display = state.mapsLegs.length ? 'block' : 'none';
+  renderLeg();
+}
+
+function renderLeg() {
+  const legs = state.mapsLegs;
+  if (!legs.length) return;
+  const i    = state.currentLeg;
+  const leg  = legs[i];
+  const total = legs.length;
+
+  document.getElementById('leg-prev').disabled = i === 0;
+  document.getElementById('leg-next').disabled = i === total - 1;
+
+  // Human-readable label: "Leg 2 of 7"  or just link if only 1 leg
+  const label = total === 1
+    ? 'All stops'
+    : `Leg ${i + 1} of ${total}`;
+  document.getElementById('leg-label').textContent = label;
+}
+
+function changeLeg(delta) {
+  state.currentLeg = Math.max(0, Math.min(state.mapsLegs.length - 1, state.currentLeg + delta));
+  renderLeg();
+}
+
+function openCurrentLeg() {
+  const leg = state.mapsLegs[state.currentLeg];
+  if (!leg) return;
+  // window.location.href with a custom scheme causes iOS to hand off to the
+  // registered app (Google Maps) without navigating Firefox away from this page.
+  window.location.href = leg.appUrl;
+}
+
+// ── Geolocation ───────────────────────────────────────────────────
+const locIcon = L.divIcon({ html: '<div class="loc-dot"></div>',
+  className: '', iconSize: [13, 13], iconAnchor: [6, 6] });
+
+let locMarker = null, locCircle = null, lastLatLng = null;
+
+function startGeolocation() {
+  if (!navigator.geolocation) { setLocBadge('no GPS'); return; }
+  navigator.geolocation.watchPosition(onPosition, onPositionError,
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
+}
+
+function onPosition(pos) {
+  const { latitude: lat, longitude: lon, accuracy } = pos.coords;
+  lastLatLng = [lat, lon];
+  if (!locMarker) locMarker = L.marker([lat, lon], { icon: locIcon, zIndexOffset: 1000 }).addTo(map);
+  else locMarker.setLatLng([lat, lon]);
+  if (!locCircle) locCircle = L.circle([lat, lon], { radius: accuracy, color: '#4a9eff',
+    fillColor: '#4a9eff', fillOpacity: 0.07, weight: 1 }).addTo(map);
+  else locCircle.setLatLng([lat, lon]).setRadius(accuracy);
+  setLocBadge(`±${Math.round(accuracy)} m`);
+}
+
+function onPositionError(err) {
+  if (err.code === 1 && location.protocol === 'http:' && location.hostname !== 'localhost') {
+    setLocBadge('needs HTTPS');
+  } else {
+    setLocBadge(err.code === 3 ? 'GPS timeout' : 'GPS denied');
+  }
+}
+
+function setLocBadge(txt) { document.getElementById('loc-badge').textContent = txt; }
+
+function centreOnMe() {
+  if (lastLatLng) { map.setView(lastLatLng, Math.max(map.getZoom(), 16)); return; }
+  navigator.geolocation && navigator.geolocation.getCurrentPosition(
+    pos => map.setView([pos.coords.latitude, pos.coords.longitude], 16),
+    () => {}, { enableHighAccuracy: true, timeout: 10000 }
+  );
+}
+
+startGeolocation();
+
+// ── URL prefill ───────────────────────────────────────────────────
+(function() {
+  const p = new URLSearchParams(location.search);
+  if (p.get('username')) document.getElementById('username').value = p.get('username');
+  if (p.get('cell'))     document.getElementById('cell').value     = p.get('cell');
+  if (p.get('username')) { panelOpen = true; document.getElementById('panel-body').classList.remove('collapsed'); document.getElementById('panel-toggle').textContent = '▲'; loadPhones(); }
+})();
+</script>
+</body>
+</html>

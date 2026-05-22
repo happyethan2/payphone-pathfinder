@@ -1,0 +1,64 @@
+services:
+  osrm-foot:
+    image: ghcr.io/project-osrm/osrm-backend
+    command: osrm-routed --algorithm mld /data/australia-latest.osrm
+    volumes:
+      - ./osrm-data/foot:/data:ro
+    networks:
+      - payphone-net
+    restart: unless-stopped
+    # Uncomment to expose for debugging: ports: ["5001:5000"]
+
+  osrm-bicycle:
+    image: ghcr.io/project-osrm/osrm-backend
+    command: osrm-routed --algorithm mld /data/australia-latest.osrm
+    volumes:
+      - ./osrm-data/bicycle:/data:ro
+    networks:
+      - payphone-net
+    restart: unless-stopped
+    # Uncomment to expose for debugging: ports: ["5002:5000"]
+
+  osrm-car:
+    image: ghcr.io/project-osrm/osrm-backend
+    command: osrm-routed --algorithm mld /data/australia-latest.osrm
+    volumes:
+      - ./osrm-data/car:/data:ro
+    networks:
+      - payphone-net
+    restart: unless-stopped
+    # Uncomment to expose for debugging: ports: ["5003:5000"]
+
+  vroom:
+    image: vroomvrp/vroom-docker:v1.13.0
+    volumes:
+      - ./vroom-config:/conf
+    networks:
+      - payphone-net
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./frontend:/app/frontend:ro
+    env_file:
+      - .env
+    environment:
+      OSRM_FOOT_URL: http://osrm-foot:5000
+      OSRM_BICYCLE_URL: http://osrm-bicycle:5000
+      OSRM_CAR_URL: http://osrm-car:5000
+      VROOM_URL: http://vroom:3000
+    depends_on:
+      - osrm-foot
+      - osrm-bicycle
+      - osrm-car
+      - vroom
+    networks:
+      - payphone-net
+    restart: unless-stopped
+
+networks:
+  payphone-net:
+    driver: bridge

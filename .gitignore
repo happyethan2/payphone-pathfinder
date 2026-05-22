@@ -1,0 +1,11 @@
+.claude/
+osrm-data/
+*.osm.pbf
+*.osrm
+*.osrm.*
+.env
+backend/certs/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
