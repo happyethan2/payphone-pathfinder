@@ -210,6 +210,9 @@
         <button id="btn-lasso" onclick="setMode('lasso')">Lasso</button>
         <button onclick="clearSelection()" class="danger icon-only">✕</button>
       </div>
+      <div class="btn-row" style="margin-top:5px">
+        <button id="btn-exclude-owned" onclick="toggleExcludeOwned()" title="When active, lasso skips phones you already own">Skip owned</button>
+      </div>
       <div id="sel-count" class="sub-text">0 selected</div>
     </div>
 
@@ -293,6 +296,7 @@ const state = {
   lassoPoints:     [],
   lassoLayer:      null,
   lassoDragging:   false,
+  lassoExcludeOwned: false,
   lastRoute:       null,
   mapsLegs:        [],
   currentLeg:      0,
@@ -433,6 +437,11 @@ function clearSelection() {
   updateSelCount();
 }
 
+function toggleExcludeOwned() {
+  state.lassoExcludeOwned = !state.lassoExcludeOwned;
+  document.getElementById('btn-exclude-owned').classList.toggle('active', state.lassoExcludeOwned);
+}
+
 // ── Lasso (mouse) ─────────────────────────────────────────────────
 function onLassoStart(e) {
   if (e.originalEvent.button !== 0) return;
@@ -491,6 +500,7 @@ function finishLasso() {
   if (state.lassoPoints.length < 3) return;
   const poly = state.lassoPoints;
   state.phones.forEach(phone => {
+    if (state.lassoExcludeOwned && phone.status === 'mine') return;
     if (pointInPolygon([phone.lat, phone.lon], poly)) {
       state.selectedIds.add(phone.id);
       refreshMarker(phone);
