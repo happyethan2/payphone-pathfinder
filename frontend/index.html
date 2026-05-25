@@ -186,6 +186,7 @@
       <input type="text" id="cell"     placeholder="Cell tag"  autocomplete="off" autocorrect="off" autocapitalize="characters">
       <div class="btn-row" style="margin-top:5px">
         <button id="btn-load" onclick="loadPhones()">Load phones</button>
+        <button onclick="refreshPhones()" class="icon-only" title="Refresh phone statuses">↺</button>
       </div>
       <div id="load-status" class="sub-text"></div>
     </div>
@@ -342,6 +343,11 @@ async function loadPhones() {
     state.phones = data.phones;
     renderMarkers();
     setStatus(`${state.phones.length} phones loaded`, '#2ecc71');
+    restoreEndpointMarkers();
+    const routeData = state.lastRoute;
+    if (routeData) { displayRoute(routeData); state.lastRoute = routeData; }
+    saveSession();
+    startBackgroundRefresh();
   } catch (e) {
     setStatus(`Error: ${e.message}`, '#e74c3c');
   } finally {
@@ -612,8 +618,9 @@ async function findRoute() {
     });
     if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || `HTTP ${res.status}`); }
     const data = await res.json();
-    state.lastRoute = data;
     displayRoute(data);
+    state.lastRoute = data;
+    saveSession();
   } catch (e) {
     alert(`Route error: ${e.message}`);
   } finally {
@@ -665,6 +672,7 @@ function clearRoute() {
   state.lastRoute = null;
   updateMapsLink(null);
   document.getElementById('route-result').style.display = 'none';
+  saveSession();
 }
 
 // ── Google Maps legs ──────────────────────────────────────────────
@@ -800,12 +808,115 @@ function centreOnMe() {
 
 startGeolocation();
 
+// ── Session persistence ───────────────────────────────────────────
+const SESSION_KEY = 'payphone_pathfinder_session';
+
+function saveSession() {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      username:    document.getElementById('username').value.trim(),
+      cell:        document.getElementById('cell').value.trim(),
+      profile:     state.profile,
+      selectedIds: Array.from(state.selectedIds),
+      start:       state.start,
+      end:         state.end,
+      lastRoute:   state.lastRoute,
+    }));
+  } catch (_) {}
+}
+
+function restoreSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+    if (s.username)    document.getElementById('username').value = s.username;
+    if (s.cell)        document.getElementById('cell').value     = s.cell;
+    if (s.profile)     setProfile(s.profile);
+    if (s.selectedIds) s.selectedIds.forEach(id => state.selectedIds.add(id));
+    if (s.start)       state.start     = s.start;
+    if (s.end)         state.end       = s.end;
+    if (s.lastRoute)   state.lastRoute = s.lastRoute;
+    return !!s.username;
+  } catch (_) {
+    return false;
+  }
+}
+
+function restoreEndpointMarkers() {
+  ['start', 'end'].forEach(which => {
+    const point = state[which];
+    if (!point) return;
+    const markerKey = `${which}Marker`;
+    if (state[markerKey]) map.removeLayer(state[markerKey]);
+    const icon = L.divIcon({
+      html: `<div style="width:12px;height:12px;border-radius:50%;
+        background:${which === 'start' ? '#2ecc71' : '#e74c3c'};
+        border:2px solid #fff;box-shadow:0 0 0 3px ${which === 'start' ? '#2ecc714d' : '#e74c3c4d'}"></div>`,
+      className: '', iconSize: [12, 12], iconAnchor: [6, 6],
+    });
+    state[markerKey] = L.marker([point.lat, point.lon], { icon, zIndexOffset: 500 }).addTo(map);
+  });
+}
+
+// ── Background phone refresh ──────────────────────────────────────
+let refreshTimer = null;
+const REFRESH_INTERVAL_MS = 2 * 60 * 1000;
+
+async function refreshPhones() {
+  const username = document.getElementById('username').value.trim();
+  const cell     = document.getElementById('cell').value.trim();
+  if (!username || !state.phones.length) return;
+  try {
+    const res = await fetch(`/api/phones?${new URLSearchParams({ username, cell })}`);
+    if (!res.ok) return;
+    const data   = await res.json();
+    const newMap = Object.fromEntries(data.phones.map(p => [p.id, p]));
+    let changed  = 0;
+    for (const phone of state.phones) {
+      const updated = newMap[phone.id];
+      if (!updated) continue;
+      if (updated.status !== phone.status || updated.holder_name !== phone.holder_name) {
+        phone.status      = updated.status;
+        phone.holder_name = updated.holder_name;
+        const m = state.markers[phone.id];
+        if (m) {
+          const tip = [`#${phone.id}`, phone.status,
+            phone.holder_name ? `held by ${phone.holder_name}` : null]
+            .filter(Boolean).join('<br>');
+          m.setTooltipContent(tip);
+          refreshMarker(phone);
+        }
+        changed++;
+      }
+    }
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setStatus(`Updated ${now}${changed ? ` · ${changed} changed` : ''}`, '#2ecc71');
+  } catch (_) {}
+}
+
+function startBackgroundRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(refreshPhones, REFRESH_INTERVAL_MS);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') saveSession();
+});
+
 // ── URL prefill ───────────────────────────────────────────────────
 (function() {
+  restoreSession();
   const p = new URLSearchParams(location.search);
   if (p.get('username')) document.getElementById('username').value = p.get('username');
   if (p.get('cell'))     document.getElementById('cell').value     = p.get('cell');
-  if (p.get('username')) { panelOpen = true; document.getElementById('panel-body').classList.remove('collapsed'); document.getElementById('panel-toggle').textContent = '▲'; loadPhones(); }
+  const hasUsername = document.getElementById('username').value.trim();
+  if (hasUsername) {
+    panelOpen = true;
+    document.getElementById('panel-body').classList.remove('collapsed');
+    document.getElementById('panel-toggle').textContent = '▲';
+    loadPhones();
+  }
 })();
 </script>
 </body>
