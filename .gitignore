@@ -9,3 +9,4 @@ __pycache__/
 *.pyc
 *.pyo
 .DS_Store
+vroom-config/access.log

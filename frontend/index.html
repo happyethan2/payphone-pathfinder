@@ -746,9 +746,15 @@ function changeLeg(delta) {
 function openCurrentLeg() {
   const leg = state.mapsLegs[state.currentLeg];
   if (!leg) return;
-  // window.location.href with a custom scheme causes iOS to hand off to the
-  // registered app (Google Maps) without navigating Firefox away from this page.
-  window.location.href = leg.appUrl;
+  if (/Android/.test(navigator.userAgent)) {
+    // Android doesn't recognise comgooglemaps://; open the web URL in a new tab so
+    // Chrome's App Links can hand off to the Google Maps app without losing this page.
+    window.open(leg.webUrl, '_blank');
+  } else {
+    // iOS (and unknown platforms): comgooglemaps:// hands off to the GMaps app
+    // without navigating this page away.
+    window.location.href = leg.appUrl;
+  }
 }
 
 // ── Geolocation ───────────────────────────────────────────────────
