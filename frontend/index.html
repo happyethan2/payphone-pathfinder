@@ -555,7 +555,8 @@ map.on('zoomend', () => {
     const ordIdx = state.routeOrderedIds.indexOf(id);
     if (ordIdx === -1) continue;
     const ns = state.nodeStates[id];
-    m.setIcon(makeWpIcon(ordIdx + 1, ns === 'skipped' ? 'wp-skipped' : ''));
+    const cls = ns === 'skipped' ? 'wp-skipped' : ns === 'tagged' ? 'wp-tagged' : '';
+    m.setIcon(makeWpIcon(ordIdx + 1, cls));
   }
 });
 
