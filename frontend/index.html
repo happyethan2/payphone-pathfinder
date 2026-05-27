@@ -315,13 +315,23 @@
             </div>
             <!-- RHS: leg switcher (expands to fill when stop-indicator hidden) -->
             <div style="flex:1;display:flex;flex-direction:column;align-items:center;
-                 justify-content:center;gap:4px;padding:9px 12px;"
-                 title="Swipe left or right to change leg" aria-label="Swipe to navigate legs">
+                 justify-content:center;gap:4px;padding:9px 6px;">
               <div style="font-size:8px;color:#556;text-transform:uppercase;letter-spacing:0.9px;">leg</div>
-              <div style="display:flex;align-items:center;gap:6px;margin-top:1px;">
-                <span aria-hidden="true" style="font-size:16px;color:#889;opacity:0.65;line-height:1;">‹</span>
-                <span id="leg-label" style="font-size:12px;color:#ccd;white-space:nowrap;font-weight:600;"></span>
-                <span aria-hidden="true" style="font-size:16px;color:#889;opacity:0.65;line-height:1;">›</span>
+              <div style="display:flex;align-items:center;width:100%;margin-top:1px;">
+                <span id="leg-prev-hint" onclick="changeLeg(-1)" role="button" tabindex="0"
+                      aria-label="Previous leg"
+                      onkeydown="if(event.key==='Enter'||event.key===' '){changeLeg(-1);event.preventDefault();}"
+                      style="flex:1;display:flex;justify-content:flex-end;align-items:center;
+                             padding:6px 8px;cursor:pointer;user-select:none;
+                             font-size:18px;color:#889;line-height:1;transition:opacity 0.2s;">‹</span>
+                <span id="leg-label" style="flex:2;text-align:center;font-size:12px;color:#ccd;
+                                            white-space:nowrap;font-weight:600;pointer-events:none;"></span>
+                <span id="leg-next-hint" onclick="changeLeg(1)" role="button" tabindex="0"
+                      aria-label="Next leg"
+                      onkeydown="if(event.key==='Enter'||event.key===' '){changeLeg(1);event.preventDefault();}"
+                      style="flex:1;display:flex;justify-content:flex-start;align-items:center;
+                             padding:6px 8px;cursor:pointer;user-select:none;
+                             font-size:18px;color:#889;line-height:1;transition:opacity 0.2s;">›</span>
               </div>
             </div>
           </div>
@@ -939,9 +949,29 @@ function updateMapsLink(data) {
   renderLeg();
 }
 
+// Map a routeProgress index → the appropriate mapsLegs index.
+// all[] = [start, phone_0, ..., phone_N, end], so targetIdx = prog + 1.
+// Returns the latest leg whose firstStop ≤ targetIdx (legs overlap by 1 stop).
+function legForProgress(prog) {
+  const targetIdx = prog + 1;
+  let best = 0;
+  for (let j = 0; j < state.mapsLegs.length; j++) {
+    if (state.mapsLegs[j].firstStop <= targetIdx) best = j;
+  }
+  return best;
+}
+
 function renderLeg() {
   const legs = state.mapsLegs;
   if (!legs.length) return;
+
+  // Auto-advance currentLeg to follow the current target stop (never retreat it here)
+  const prog = state.routeProgress;
+  if (state.routeOrderedIds.length && prog < state.routeOrderedIds.length) {
+    const correctLeg = legForProgress(prog);
+    if (correctLeg > state.currentLeg) state.currentLeg = correctLeg;
+  }
+
   const i    = state.currentLeg;
   const leg  = legs[i];
   const total = legs.length;
@@ -951,6 +981,14 @@ function renderLeg() {
     ? 'All stops'
     : `Leg ${i + 1} of ${total}`;
   document.getElementById('leg-label').textContent = label;
+
+  // Chevron state: dim when navigation in that direction is locked/unavailable
+  const minLeg = (state.routeOrderedIds.length && prog < state.routeOrderedIds.length)
+    ? legForProgress(prog) : 0;
+  const canBack = i > minLeg;
+  const canFwd  = i < total - 1;
+  document.getElementById('leg-prev-hint').style.opacity = canBack ? '0.65' : '0.18';
+  document.getElementById('leg-next-hint').style.opacity = canFwd  ? '0.65' : '0.18';
 
   // Stop indicator + SKIP row — visible while there are still phones to visit
   const tagRow  = document.getElementById('tag-row');
@@ -984,7 +1022,10 @@ function renderLeg() {
 }
 
 function changeLeg(delta) {
-  state.currentLeg = Math.max(0, Math.min(state.mapsLegs.length - 1, state.currentLeg + delta));
+  const prog   = state.routeProgress;
+  const minLeg = (state.routeOrderedIds.length && prog < state.routeOrderedIds.length)
+    ? legForProgress(prog) : 0;
+  state.currentLeg = Math.max(minLeg, Math.min(state.mapsLegs.length - 1, state.currentLeg + delta));
   renderLeg();
   if (delta !== 0 && navigator.vibrate) navigator.vibrate(12);
 }
