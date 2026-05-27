@@ -16,41 +16,48 @@
 
     #map { position: fixed; inset: 0; z-index: 0; }
 
-    /* ── Panel ──────────────────────────────────────────────── */
+    /* ── Panel (bottom sheet on mobile, side panel on ≥640px) ── */
     #panel {
       position: fixed;
-      top: 10px; left: 10px;
+      bottom: 0; left: 0; right: 0;
       z-index: 1000;
-      width: 280px;
-      background: rgba(13, 13, 30, 0.93);
-      border: 1px solid rgba(100,110,200,0.25);
-      border-radius: 12px;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.7);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
+      background: rgba(13, 13, 30, 0.96);
+      border-top: 1px solid rgba(100,110,200,0.25);
+      border-radius: 16px 16px 0 0;
+      box-shadow: 0 -4px 30px rgba(0,0,0,0.6);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       display: flex; flex-direction: column;
+      max-height: 78vh;
+      transform: translateY(calc(100% - 52px));
+      transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+      will-change: transform;
     }
+    #panel.open { transform: translateY(0); }
 
-    #panel-header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 12px 9px;
-      border-bottom: 1px solid rgba(100,110,200,0.15);
-      cursor: pointer; user-select: none; flex-shrink: 0;
+    #panel-handle {
+      height: 52px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      cursor: pointer; user-select: none;
+      border-bottom: 1px solid transparent;
     }
-    #panel-title { font-size: 13px; font-weight: 600; color: #c8ceff; letter-spacing: 0.3px; }
-    #panel-toggle {
-      background: none; border: none; color: #556; font-size: 12px;
-      cursor: pointer; padding: 2px 4px; line-height: 1; flex: none;
-      transition: color 0.2s;
+    #panel.open #panel-handle { border-bottom-color: rgba(100,110,200,0.15); }
+    #panel-handle-pill {
+      width: 36px; height: 4px;
+      background: rgba(100,110,200,0.4); border-radius: 2px; flex-shrink: 0;
     }
-    #panel-toggle:hover { color: #99a; }
+    #panel-peek {
+      font-size: 11px; color: #778; letter-spacing: 0.2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-width: 220px;
+    }
 
     #panel-body {
-      padding: 10px 12px;
+      padding: 8px 14px 20px;
       display: flex; flex-direction: column; gap: 10px;
       overflow-y: auto; -webkit-overflow-scrolling: touch;
+      flex: 1;
     }
-    #panel-body.collapsed { display: none; }
 
     /* ── Section ────────────────────────────────────────────── */
     .sec-title {
@@ -148,7 +155,7 @@
 
     /* ── Floating buttons (bottom-right) ─────────────────────── */
     #fab-stack {
-      position: fixed; bottom: 20px; right: 14px;
+      position: fixed; bottom: 66px; right: 14px;
       z-index: 1001;
       display: flex; flex-direction: column; align-items: center; gap: 8px;
     }
@@ -182,10 +189,29 @@
     }
     #fab-centre:hover { background: rgba(40,40,80,0.95); }
 
-    /* ── Mobile ──────────────────────────────────────────────── */
-    @media (max-width: 600px) {
-      #panel { width: calc(100vw - 20px); max-height: calc(100vh - 80px); }
-      #panel-body { max-height: calc(100vh - 130px); }
+    /* ── Desktop: revert to side panel ──────────────────────── */
+    @media (min-width: 640px) {
+      #panel {
+        top: 10px; left: 10px; bottom: auto; right: auto;
+        width: 290px; border-radius: 12px;
+        border-top: 1px solid rgba(100,110,200,0.25);
+        box-shadow: 0 4px 24px rgba(0,0,0,0.7);
+        max-height: calc(100vh - 30px);
+        transform: none !important; transition: none;
+      }
+      #panel.open { transform: none !important; }
+      #panel-handle {
+        height: auto; padding: 10px 12px 9px;
+        justify-content: space-between;
+        border-bottom-color: rgba(100,110,200,0.15) !important;
+      }
+      #panel-handle-pill { display: none; }
+      #panel-peek {
+        font-size: 13px; font-weight: 600; color: #c8ceff;
+        max-width: none; letter-spacing: 0.3px;
+      }
+      #panel-body { max-height: calc(100vh - 110px); }
+      #fab-stack   { bottom: 20px; }
     }
   </style>
 </head>
@@ -193,14 +219,14 @@
 
 <div id="map"></div>
 
-<!-- ── Control panel ──────────────────────────────────────────── -->
+<!-- ── Control panel (bottom sheet) ──────────────────────────── -->
 <div id="panel">
-  <div id="panel-header" onclick="togglePanel()">
-    <span id="panel-title">Payphone Pathfinder</span>
-    <button id="panel-toggle">▼</button>
+  <div id="panel-handle" onclick="togglePanel()">
+    <div id="panel-handle-pill"></div>
+    <span id="panel-peek">Payphone Pathfinder</span>
   </div>
 
-  <div id="panel-body" class="collapsed">
+  <div id="panel-body">
 
     <!-- Identity -->
     <div>
@@ -294,7 +320,7 @@
 
 <!-- ── Status bar (set-endpoint prompts) ──────────────────────── -->
 <div id="status-bar" style="
-  display:none; position:fixed; bottom:0; left:0; right:0; z-index:1002;
+  display:none; position:fixed; bottom:52px; left:0; right:0; z-index:1002;
   background:rgba(13,13,30,0.95); border-top:1px solid rgba(100,110,200,0.25);
   padding:12px 20px; text-align:center;
   font-size:13px; color:#c8d0ff; letter-spacing:0.2px;">
@@ -398,12 +424,41 @@ function toggleMiniMap() {
 
 const mapEl = map.getContainer();
 
-// ── Panel ─────────────────────────────────────────────────────────
+// ── Panel (bottom sheet) ──────────────────────────────────────────
 let panelOpen = false;
 function togglePanel() {
   panelOpen = !panelOpen;
-  document.getElementById('panel-body').classList.toggle('collapsed', !panelOpen);
-  document.getElementById('panel-toggle').textContent = panelOpen ? '▲' : '▼';
+  document.getElementById('panel').classList.toggle('open', panelOpen);
+}
+
+// Swipe up on handle → open; swipe down → close
+{
+  let _sheetStartY = null;
+  const handleEl = document.getElementById('panel-handle');
+  handleEl.addEventListener('touchstart', e => {
+    _sheetStartY = e.touches[0].clientY;
+  }, { passive: true });
+  handleEl.addEventListener('touchend', e => {
+    if (_sheetStartY === null) return;
+    const dy = e.changedTouches[0].clientY - _sheetStartY;
+    _sheetStartY = null;
+    if (Math.abs(dy) < 20) return; // tiny movement = tap, handled by onclick
+    if (dy < 0 && !panelOpen) { panelOpen = true;  document.getElementById('panel').classList.add('open'); }
+    else if (dy > 0 && panelOpen) { panelOpen = false; document.getElementById('panel').classList.remove('open'); }
+  }, { passive: true });
+}
+
+function updatePanelPeek() {
+  const el = document.getElementById('panel-peek');
+  if (!el) return;
+  const parts = [];
+  if (state.phones.length)    parts.push(`${state.phones.length} phones`);
+  if (state.selectedIds.size) parts.push(`${state.selectedIds.size} selected`);
+  if (state.lastRoute) {
+    const km = (state.lastRoute.total_distance_m / 1000).toFixed(1);
+    parts.push(`${km} km route`);
+  }
+  el.textContent = parts.length ? parts.join(' · ') : 'Payphone Pathfinder';
 }
 
 // ── Load phones ───────────────────────────────────────────────────
@@ -420,6 +475,7 @@ async function loadPhones() {
     state.phones = data.phones;
     renderMarkers();
     setStatus(`${state.phones.length} phones loaded`, '#2ecc71');
+    updatePanelPeek();
     restoreEndpointMarkers();
     const routeData = state.lastRoute;
     if (routeData) { displayRoute(routeData); state.lastRoute = routeData; }
@@ -477,6 +533,7 @@ function refreshMarker(phone) {
 function updateSelCount() {
   document.getElementById('sel-count').textContent =
     `${state.selectedIds.size} phone${state.selectedIds.size !== 1 ? 's' : ''} selected`;
+  updatePanelPeek();
 }
 
 // ── Selection mode ────────────────────────────────────────────────
@@ -705,6 +762,7 @@ async function findRoute() {
     const data = await res.json();
     displayRoute(data);
     state.lastRoute = data;
+    updatePanelPeek();
     saveSession();
   } catch (e) {
     alert(`Route error: ${e.message}`);
@@ -769,6 +827,7 @@ function clearRoute() {
   state.lastRoute = null;
   updateMapsLink(null);
   document.getElementById('route-result').style.display = 'none';
+  updatePanelPeek();
   saveSession();
 }
 
@@ -1081,8 +1140,7 @@ document.addEventListener('visibilitychange', () => {
   const hasUsername = document.getElementById('username').value.trim();
   if (hasUsername) {
     panelOpen = true;
-    document.getElementById('panel-body').classList.remove('collapsed');
-    document.getElementById('panel-toggle').textContent = '▲';
+    document.getElementById('panel').classList.add('open');
     loadPhones();
   }
 })();
