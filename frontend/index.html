@@ -126,8 +126,6 @@
       border: 2px solid rgba(255,255,255,0.8);
       box-shadow: 0 1px 5px rgba(0,0,0,0.6);
     }
-    .wp-start   { background: #2ecc71; }
-    .wp-end     { background: #e74c3c; }
     .wp-tagged  { background: #27ae60 !important; opacity: 0.75; }
     .wp-skipped { background: #555 !important; opacity: 0.55; color: #aaa; }
 
@@ -751,16 +749,25 @@ async function findRoute() {
   }
 }
 
-// Colour palette for route legs — cycles if there are more legs than colours
-const LEG_COLORS = ['#e67e22','#3498db','#e74c3c','#2ecc71','#9b59b6','#f1c40f','#1abc9c','#e91e63'];
+// Generate n rainbow colours spread evenly across the visible spectrum (red → violet).
+// Adjacent legs share similar hues so the path reads as a continuous gradient.
+function rainbowColors(n) {
+  if (n <= 0) return [];
+  if (n === 1) return ['hsl(200,82%,57%)'];
+  return Array.from({ length: n }, (_, i) => {
+    const hue = Math.round((i / (n - 1)) * 280);  // 0° red → 280° violet
+    return `hsl(${hue},82%,57%)`;
+  });
+}
 
 function displayRoute(data) {
   clearRoute();
   const { ordered_ids, path, total_distance_m, total_duration_s } = data;
   state.routeOrderedIds = ordered_ids;   // available before state.lastRoute is set
 
+  const legColors = rainbowColors(path.features.length);
   path.features.forEach((feature, idx) => {
-    const color  = LEG_COLORS[idx % LEG_COLORS.length];
+    const color  = legColors[idx];
     const coords = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
     const line   = L.polyline(coords, { color, weight: 4, opacity: 0.85 }).addTo(map);
     state.routeLayers.push(line);
@@ -776,9 +783,8 @@ function displayRoute(data) {
   ordered_ids.forEach((id, idx) => {
     const phone = state.phones.find(p => p.id === id);
     if (!phone) return;
-    const isFirst = idx === 0, isLast = idx === ordered_ids.length - 1;
     const icon = L.divIcon({
-      html: `<div class="wp ${isFirst ? 'wp-start' : isLast ? 'wp-end' : ''}">${isFirst ? '▶' : isLast ? '■' : idx}</div>`,
+      html: `<div class="wp">${idx + 1}</div>`,
       className: '', iconSize: [22, 22], iconAnchor: [11, 11],
     });
     const m = L.marker([phone.lat, phone.lon], { icon, zIndexOffset: 200 }).addTo(map);
@@ -911,11 +917,8 @@ function tagCurrentLeg(action) {
   // Update waypoint marker icon with skipped state class
   const m = state.waypointMarkersById[phoneId];
   if (m) {
-    const isFirst = ordIdx === 0, isLast = ordIdx === orderedIds.length - 1;
-    const label   = isFirst ? '▶' : isLast ? '■' : ordIdx;
-    const baseClass = isFirst ? 'wp-start' : isLast ? 'wp-end' : '';
     m.setIcon(L.divIcon({
-      html: `<div class="wp ${baseClass} wp-skipped">${label}</div>`,
+      html: `<div class="wp wp-skipped">${ordIdx + 1}</div>`,
       className: '', iconSize: [22, 22], iconAnchor: [11, 11],
     }));
   }
@@ -937,11 +940,8 @@ function revertLeg() {
   // Restore waypoint marker to its original (unmarked) icon
   const m = state.waypointMarkersById[phoneId];
   if (m) {
-    const isFirst = ordIdx === 0, isLast = ordIdx === orderedIds.length - 1;
-    const label   = isFirst ? '▶' : isLast ? '■' : ordIdx;
-    const baseClass = isFirst ? 'wp-start' : isLast ? 'wp-end' : '';
     m.setIcon(L.divIcon({
-      html: `<div class="wp ${baseClass}">${label}</div>`,
+      html: `<div class="wp">${ordIdx + 1}</div>`,
       className: '', iconSize: [22, 22], iconAnchor: [11, 11],
     }));
   }
