@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Payphone Pathfinder</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.min.css">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -302,7 +300,7 @@
             <button id="leg-next" onclick="changeLeg(1)" class="icon-only">▶</button>
           </div>
           <div id="tag-row" class="btn-row" style="margin-bottom:5px;display:none;">
-            <button onclick="tagCurrentLeg('tagged')" class="tagged" style="font-size:11px;">✔ TAGGED</button>
+            <button id="btn-revert" onclick="revertLeg()" class="danger" style="font-size:11px;flex:0.6;" disabled>↩ REVERT</button>
             <button onclick="tagCurrentLeg('skipped')" class="skipped" style="font-size:11px;">✕ SKIP</button>
           </div>
           <button onclick="openCurrentLeg()" class="maps" style="font-size:11px;width:100%;">
@@ -335,7 +333,6 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.js"></script>
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.min.js"></script>
 <script>
 // ── State ─────────────────────────────────────────────────────────
@@ -386,23 +383,8 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
 // Zoom control at bottom-left so it doesn't clash with panel
 L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
-// Cluster group for phone markers — auto-clusters at low zoom, expands on tap
-const clusterGroup = L.markerClusterGroup({
-  maxClusterRadius: 40,
-  disableClusteringAtZoom: 16,
-  spiderfyOnMaxZoom: true,
-  showCoverageOnHover: false,
-  iconCreateFunction(cluster) {
-    const count = cluster.getChildCount();
-    return L.divIcon({
-      html: `<div style="width:28px;height:28px;border-radius:50%;
-        background:rgba(100,110,200,0.55);border:2px solid rgba(140,150,255,0.7);
-        color:#dde;font-size:10px;font-weight:700;display:flex;
-        align-items:center;justify-content:center;">${count}</div>`,
-      className: '', iconSize: [28, 28],
-    });
-  },
-}).addTo(map);
+// Layer group for phone markers — no clustering, all dots always visible
+const markerLayer = L.layerGroup().addTo(map);
 
 // Mini-map (toggleable) — shares the same tile layer
 let miniMap = null;
@@ -415,8 +397,8 @@ function toggleMiniMap() {
     const tiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
       { attribution: '', maxZoom: 19 });
     miniMap = new L.Control.MiniMap(tiles, {
-      position: 'bottomleft', width: 120, height: 90,
-      zoomLevelOffset: -6, toggleDisplay: false,
+      position: 'bottomleft', width: 130, height: 100,
+      zoomLevelOffset: -4, toggleDisplay: false,
     }).addTo(map);
     document.getElementById('btn-minimap').classList.add('active');
   }
@@ -496,13 +478,13 @@ function setStatus(msg, color) {
 
 // ── Markers ───────────────────────────────────────────────────────
 function renderMarkers() {
-  clusterGroup.clearLayers();
+  markerLayer.clearLayers();
   state.markers = {};
   for (const phone of state.phones) {
     const m = makeMarker(phone);
+    markerLayer.addLayer(m);
     state.markers[phone.id] = m;
   }
-  clusterGroup.addLayers(Object.values(state.markers));
   updateSelCount();
 }
 
@@ -907,11 +889,8 @@ function renderLeg() {
   const prog = state.routeProgress;
   if (orderedIds.length && prog < orderedIds.length) {
     tagRow.style.display = 'flex';
-    // Label the buttons with stop counter
-    const tagBtn  = tagRow.children[0];
-    const skipBtn = tagRow.children[1];
-    tagBtn.textContent  = `✔ TAGGED  (${prog + 1}/${orderedIds.length})`;
-    skipBtn.textContent = `✕ SKIP  (${prog + 1}/${orderedIds.length})`;
+    document.getElementById('btn-revert').disabled = prog === 0;
+    tagRow.children[1].textContent = `✕ SKIP  (${prog + 1}/${orderedIds.length})`;
   } else {
     tagRow.style.display = 'none';
   }
@@ -924,7 +903,7 @@ function changeLeg(delta) {
 }
 
 function tagCurrentLeg(action) {
-  // action: 'tagged' | 'skipped'
+  // action: 'skipped' (tagged state is determined automatically by API refresh)
   const orderedIds = state.routeOrderedIds;
   if (state.routeProgress >= orderedIds.length) return;
 
@@ -932,23 +911,45 @@ function tagCurrentLeg(action) {
   const ordIdx  = state.routeProgress;
   state.nodeStates[phoneId] = action;
 
-  // Update waypoint marker icon with tagged/skipped state class
+  // Update waypoint marker icon with skipped state class
   const m = state.waypointMarkersById[phoneId];
   if (m) {
     const isFirst = ordIdx === 0, isLast = ordIdx === orderedIds.length - 1;
     const label   = isFirst ? '▶' : isLast ? '■' : ordIdx;
     const baseClass = isFirst ? 'wp-start' : isLast ? 'wp-end' : '';
-    const stateClass = action === 'tagged' ? 'wp-tagged' : 'wp-skipped';
     m.setIcon(L.divIcon({
-      html: `<div class="wp ${baseClass} ${stateClass}">${label}</div>`,
+      html: `<div class="wp ${baseClass} wp-skipped">${label}</div>`,
       className: '', iconSize: [22, 22], iconAnchor: [11, 11],
     }));
   }
 
-  // Haptic: double-pulse for tagged, single short for skipped
-  if (navigator.vibrate) navigator.vibrate(action === 'tagged' ? [15, 60, 15] : 10);
-
+  if (navigator.vibrate) navigator.vibrate(10);
   state.routeProgress++;
+  renderLeg();
+}
+
+function revertLeg() {
+  if (state.routeProgress <= 0) return;
+  state.routeProgress--;
+
+  const orderedIds = state.routeOrderedIds;
+  const phoneId    = orderedIds[state.routeProgress];
+  const ordIdx     = state.routeProgress;
+  delete state.nodeStates[phoneId];
+
+  // Restore waypoint marker to its original (unmarked) icon
+  const m = state.waypointMarkersById[phoneId];
+  if (m) {
+    const isFirst = ordIdx === 0, isLast = ordIdx === orderedIds.length - 1;
+    const label   = isFirst ? '▶' : isLast ? '■' : ordIdx;
+    const baseClass = isFirst ? 'wp-start' : isLast ? 'wp-end' : '';
+    m.setIcon(L.divIcon({
+      html: `<div class="wp ${baseClass}">${label}</div>`,
+      className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+    }));
+  }
+
+  if (navigator.vibrate) navigator.vibrate(8);
   renderLeg();
 }
 
@@ -1082,7 +1083,7 @@ function restoreEndpointMarkers() {
 
 // ── Background phone refresh ──────────────────────────────────────
 let refreshTimer = null;
-const REFRESH_INTERVAL_MS = 2 * 60 * 1000;
+const REFRESH_INTERVAL_MS = 10 * 1000;  // 10s — safe with 30s server-side cache
 
 async function refreshPhones() {
   const username = document.getElementById('username').value.trim();
