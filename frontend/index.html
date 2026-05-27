@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Payphone Pathfinder</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.min.css">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -76,8 +79,8 @@
     }
     button:hover  { background: rgba(100,110,200,0.15); color: #dde; }
     button.active { background: rgba(70,90,220,0.35); border-color: rgba(100,130,255,0.5); color: #c8d0ff; }
-    button.danger { background: rgba(180,40,40,0.2); border-color: rgba(220,80,80,0.3); color: #f99; }
-    button.danger:hover { background: rgba(200,50,50,0.35); }
+    button.danger { background: rgba(255,255,255,0.04); border-color: rgba(100,110,200,0.2); color: #778; }
+    button.danger:hover { background: rgba(180,40,40,0.25); border-color: rgba(220,80,80,0.4); color: #f99; }
     button.go     { background: rgba(30,120,60,0.3); border-color: rgba(50,180,90,0.4); color: #7ee8a2; font-weight: 600; }
     button.go:hover { background: rgba(30,140,70,0.45); }
     button.maps   { background: rgba(30,80,160,0.3); border-color: rgba(60,130,255,0.4); color: #7ab8ff; font-weight: 600; }
@@ -148,6 +151,20 @@
       background: rgba(13,13,30,0.85); border: 1px solid rgba(100,110,200,0.15);
       border-radius: 4px; padding: 2px 5px; white-space: nowrap;
     }
+    #btn-minimap {
+      width: 44px; height: 44px; border-radius: 50%;
+      background: rgba(13,13,30,0.92);
+      border: 1px solid rgba(100,110,200,0.25);
+      font-size: 20px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex: none; transition: background 0.15s;
+    }
+    #btn-minimap:hover { background: rgba(40,40,80,0.95); }
+    #btn-minimap.active {
+      background: rgba(60,60,140,0.85);
+      border-color: rgba(140,150,255,0.5);
+    }
+
     #fab-centre {
       width: 44px; height: 44px; border-radius: 50%;
       background: rgba(13,13,30,0.92);
@@ -195,7 +212,7 @@
     <div>
       <div class="sec-title">Legend</div>
       <div class="legend">
-        <div class="legend-item"><span class="dot" style="background:#888"></span>Uncaptured</div>
+        <div class="legend-item"><span class="dot" style="background:#aaa"></span>Uncaptured</div>
         <div class="legend-item"><span class="dot" style="background:#2ecc71"></span>Mine</div>
         <div class="legend-item"><span class="dot" style="background:#3498db"></span>Cellmate</div>
         <div class="legend-item"><span class="dot" style="background:#e74c3c"></span>Hostile</div>
@@ -273,11 +290,14 @@
 <!-- ── Floating GPS button ─────────────────────────────────────── -->
 <div id="fab-stack">
   <div id="loc-badge">no GPS</div>
+  <button id="btn-minimap" onclick="toggleMiniMap()" title="Toggle mini-map">🗺</button>
   <button id="fab-centre" onclick="centreOnMe()" title="Centre on my location">📡</button>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.min.js"></script>
 <script>
 // ── State ─────────────────────────────────────────────────────────
 const state = {
@@ -303,7 +323,7 @@ const state = {
 };
 
 const STATUS_COLORS = {
-  uncaptured: '#888888',
+  uncaptured: '#aaaaaa',
   mine:       '#2ecc71',
   cellmate:   '#3498db',
   hostile:    '#e74c3c',
@@ -322,6 +342,42 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
 
 // Zoom control at bottom-left so it doesn't clash with panel
 L.control.zoom({ position: 'bottomleft' }).addTo(map);
+
+// Cluster group for phone markers — auto-clusters at low zoom, expands on tap
+const clusterGroup = L.markerClusterGroup({
+  maxClusterRadius: 40,
+  disableClusteringAtZoom: 16,
+  spiderfyOnMaxZoom: true,
+  showCoverageOnHover: false,
+  iconCreateFunction(cluster) {
+    const count = cluster.getChildCount();
+    return L.divIcon({
+      html: `<div style="width:28px;height:28px;border-radius:50%;
+        background:rgba(100,110,200,0.55);border:2px solid rgba(140,150,255,0.7);
+        color:#dde;font-size:10px;font-weight:700;display:flex;
+        align-items:center;justify-content:center;">${count}</div>`,
+      className: '', iconSize: [28, 28],
+    });
+  },
+}).addTo(map);
+
+// Mini-map (toggleable) — shares the same tile layer
+let miniMap = null;
+function toggleMiniMap() {
+  if (miniMap) {
+    miniMap.remove();
+    miniMap = null;
+    document.getElementById('btn-minimap').classList.remove('active');
+  } else {
+    const tiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      { attribution: '', maxZoom: 19 });
+    miniMap = new L.Control.MiniMap(tiles, {
+      position: 'bottomleft', width: 120, height: 90,
+      zoomLevelOffset: -6, toggleDisplay: false,
+    }).addTo(map);
+    document.getElementById('btn-minimap').classList.add('active');
+  }
+}
 
 const mapEl = map.getContainer();
 
@@ -367,13 +423,13 @@ function setStatus(msg, color) {
 
 // ── Markers ───────────────────────────────────────────────────────
 function renderMarkers() {
-  Object.values(state.markers).forEach(m => map.removeLayer(m));
+  clusterGroup.clearLayers();
   state.markers = {};
   for (const phone of state.phones) {
     const m = makeMarker(phone);
-    m.addTo(map);
     state.markers[phone.id] = m;
   }
+  clusterGroup.addLayers(Object.values(state.markers));
   updateSelCount();
 }
 
@@ -533,7 +589,9 @@ function onMarkerClick(phone) {
     setEndpoint('end', { lat: phone.lat, lon: phone.lon, phone_id: phone.id });
     return;
   }
-  state.selectedIds.has(phone.id) ? state.selectedIds.delete(phone.id) : state.selectedIds.add(phone.id);
+  const adding = !state.selectedIds.has(phone.id);
+  adding ? state.selectedIds.add(phone.id) : state.selectedIds.delete(phone.id);
+  if (adding && navigator.vibrate) navigator.vibrate(18);
   refreshMarker(phone);
   updateSelCount();
 }
@@ -639,19 +697,23 @@ async function findRoute() {
   }
 }
 
+// Colour palette for route legs — cycles if there are more legs than colours
+const LEG_COLORS = ['#e67e22','#3498db','#e74c3c','#2ecc71','#9b59b6','#f1c40f','#1abc9c','#e91e63'];
+
 function displayRoute(data) {
   clearRoute();
   const { ordered_ids, path, total_distance_m, total_duration_s } = data;
 
-  for (const feature of path.features) {
+  path.features.forEach((feature, idx) => {
+    const color  = LEG_COLORS[idx % LEG_COLORS.length];
     const coords = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
-    const line = L.polyline(coords, { color: '#e67e22', weight: 4, opacity: 0.85 }).addTo(map);
+    const line   = L.polyline(coords, { color, weight: 4, opacity: 0.85 }).addTo(map);
     state.routeLayers.push(line);
     const dec = L.polylineDecorator(line, { patterns: [{ offset: '10%', repeat: 110,
       symbol: L.Symbol.arrowHead({ pixelSize: 9, fill: true, fillOpacity: 1,
-        pathOptions: { color: '#e67e22', weight: 0 } }) }] }).addTo(map);
+        pathOptions: { color, weight: 0 } }) }] }).addTo(map);
     state.decorators.push(dec);
-  }
+  });
 
   ordered_ids.forEach((id, idx) => {
     const phone = state.phones.find(p => p.id === id);
