@@ -416,20 +416,20 @@ let _refreshFailCount = 0;
 
 function updateRefreshDot() {
   const dot = document.getElementById('refresh-dot');
-  if (!dot) return;
-  if (!_lastRefreshAt) { dot.style.display = 'none'; return; }
+  if (!dot) return '#556';
+  if (!_lastRefreshAt) { dot.style.display = 'none'; return '#556'; }
   dot.style.display = 'inline-block';
   const age = Date.now() - _lastRefreshAt;
+  let color;
   if (_refreshFailCount >= 2 || age > 120_000) {
-    dot.style.background = '#e74c3c';
-    dot.title = 'Data feed down';
+    color = '#e74c3c'; dot.title = 'Data feed down';
   } else if (age > 45_000) {
-    dot.style.background = '#e67e22';
-    dot.title = 'Data feed degraded';
+    color = '#e67e22'; dot.title = 'Data feed degraded';
   } else {
-    dot.style.background = '#2ecc71';
-    dot.title = 'Data feed healthy';
+    color = '#2ecc71'; dot.title = 'Data feed healthy';
   }
+  dot.style.background = color;
+  return color;
 }
 
 // ── Tooltip HTML builder ──────────────────────────────────────────
@@ -1300,9 +1300,9 @@ async function refreshPhones() {
 
     _lastRefreshAt    = Date.now();
     _refreshFailCount = 0;
-    updateRefreshDot();
+    const healthColor = updateRefreshDot();
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setStatus(`Updated ${now}${changed ? ` · ${changed} changed` : ''}`, '#556');
+    setStatus(`updated ${now}${changed ? ` · ${changed} changed` : ''}`, healthColor + 'b3');
   } catch (_) {
     _refreshFailCount++;
     updateRefreshDot();
