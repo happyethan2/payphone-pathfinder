@@ -85,6 +85,10 @@
     button.go:hover { background: rgba(30,140,70,0.45); }
     button.maps   { background: rgba(30,80,160,0.3); border-color: rgba(60,130,255,0.4); color: #7ab8ff; font-weight: 600; }
     button.maps:hover { background: rgba(30,90,180,0.45); }
+    button.tagged { background: rgba(30,140,70,0.35); border-color: rgba(50,200,100,0.45); color: #7ee8a2; font-weight: 700; }
+    button.tagged:hover { background: rgba(30,160,80,0.5); }
+    button.skipped { background: rgba(60,60,60,0.35); border-color: rgba(120,120,120,0.3); color: #999; font-weight: 700; }
+    button.skipped:hover { background: rgba(80,80,80,0.5); }
     button:disabled { opacity: 0.35; cursor: not-allowed; }
     button.icon-only { flex: none; padding: 7px 10px; }
 
@@ -117,8 +121,10 @@
       border: 2px solid rgba(255,255,255,0.8);
       box-shadow: 0 1px 5px rgba(0,0,0,0.6);
     }
-    .wp-start { background: #2ecc71; }
-    .wp-end   { background: #e74c3c; }
+    .wp-start   { background: #2ecc71; }
+    .wp-end     { background: #e74c3c; }
+    .wp-tagged  { background: #27ae60 !important; opacity: 0.75; }
+    .wp-skipped { background: #555 !important; opacity: 0.55; color: #aaa; }
 
     /* ── Spinner ─────────────────────────────────────────────── */
     #spinner {
@@ -269,9 +275,16 @@
                      font-size:10px;color:#778;"></span>
             <button id="leg-next" onclick="changeLeg(1)" class="icon-only">▶</button>
           </div>
+          <div id="tag-row" class="btn-row" style="margin-bottom:5px;display:none;">
+            <button onclick="tagCurrentLeg('tagged')" class="tagged" style="font-size:11px;">✔ TAGGED</button>
+            <button onclick="tagCurrentLeg('skipped')" class="skipped" style="font-size:11px;">✕ SKIP</button>
+          </div>
           <button onclick="openCurrentLeg()" class="maps" style="font-size:11px;width:100%;">
             Open in Google Maps ↗
           </button>
+          <div style="text-align:center;font-size:9px;color:#445;margin-top:4px;letter-spacing:0.3px;">
+            swipe ◀▶ to change leg
+          </div>
         </div>
       </div>
     </div>
@@ -312,7 +325,9 @@ const state = {
   endMarker:       null,
   routeLayers:     [],
   decorators:      [],
-  waypointMarkers: [],
+  waypointMarkers:      [],
+  waypointMarkersById:  {},   // phone_id → L.Marker (for live state updates)
+  nodeStates:           {},   // phone_id → 'tagged' | 'skipped'
   lassoPoints:     [],
   lassoLayer:      null,
   lassoDragging:   false,
@@ -320,6 +335,8 @@ const state = {
   lastRoute:       null,
   mapsLegs:        [],
   currentLeg:      0,
+  routeProgress:   0,   // index into routeOrderedIds (current stop being visited)
+  routeOrderedIds: [],  // ordered_ids of active route (set at display time, separate from lastRoute)
 };
 
 const STATUS_COLORS = {
@@ -703,6 +720,7 @@ const LEG_COLORS = ['#e67e22','#3498db','#e74c3c','#2ecc71','#9b59b6','#f1c40f',
 function displayRoute(data) {
   clearRoute();
   const { ordered_ids, path, total_distance_m, total_duration_s } = data;
+  state.routeOrderedIds = ordered_ids;   // available before state.lastRoute is set
 
   path.features.forEach((feature, idx) => {
     const color  = LEG_COLORS[idx % LEG_COLORS.length];
@@ -715,6 +733,9 @@ function displayRoute(data) {
     state.decorators.push(dec);
   });
 
+  state.nodeStates = {};
+  state.routeProgress = 0;
+  state.waypointMarkersById = {};
   ordered_ids.forEach((id, idx) => {
     const phone = state.phones.find(p => p.id === id);
     if (!phone) return;
@@ -723,7 +744,9 @@ function displayRoute(data) {
       html: `<div class="wp ${isFirst ? 'wp-start' : isLast ? 'wp-end' : ''}">${isFirst ? '▶' : isLast ? '■' : idx}</div>`,
       className: '', iconSize: [22, 22], iconAnchor: [11, 11],
     });
-    state.waypointMarkers.push(L.marker([phone.lat, phone.lon], { icon, zIndexOffset: 200 }).addTo(map));
+    const m = L.marker([phone.lat, phone.lon], { icon, zIndexOffset: 200 }).addTo(map);
+    state.waypointMarkers.push(m);
+    state.waypointMarkersById[id] = m;
   });
 
   const allCoords = path.features.flatMap(f => f.geometry.coordinates.map(([lon, lat]) => [lat, lon]));
@@ -741,6 +764,8 @@ function clearRoute() {
   state.decorators.forEach(d => map.removeLayer(d));
   state.waypointMarkers.forEach(m => map.removeLayer(m));
   state.routeLayers = []; state.decorators = []; state.waypointMarkers = [];
+  state.waypointMarkersById = {}; state.nodeStates = {};
+  state.routeProgress = 0; state.routeOrderedIds = [];
   state.lastRoute = null;
   updateMapsLink(null);
   document.getElementById('route-result').style.display = 'none';
@@ -816,11 +841,76 @@ function renderLeg() {
     ? 'All stops'
     : `Leg ${i + 1} of ${total}`;
   document.getElementById('leg-label').textContent = label;
+
+  // TAGGED/SKIP row — visible while there are still phones to mark in the route
+  const tagRow = document.getElementById('tag-row');
+  const orderedIds = state.routeOrderedIds;
+  const prog = state.routeProgress;
+  if (orderedIds.length && prog < orderedIds.length) {
+    tagRow.style.display = 'flex';
+    // Label the buttons with stop counter
+    const tagBtn  = tagRow.children[0];
+    const skipBtn = tagRow.children[1];
+    tagBtn.textContent  = `✔ TAGGED  (${prog + 1}/${orderedIds.length})`;
+    skipBtn.textContent = `✕ SKIP  (${prog + 1}/${orderedIds.length})`;
+  } else {
+    tagRow.style.display = 'none';
+  }
 }
 
 function changeLeg(delta) {
   state.currentLeg = Math.max(0, Math.min(state.mapsLegs.length - 1, state.currentLeg + delta));
   renderLeg();
+  if (delta !== 0 && navigator.vibrate) navigator.vibrate(12);
+}
+
+function tagCurrentLeg(action) {
+  // action: 'tagged' | 'skipped'
+  const orderedIds = state.routeOrderedIds;
+  if (state.routeProgress >= orderedIds.length) return;
+
+  const phoneId = orderedIds[state.routeProgress];
+  const ordIdx  = state.routeProgress;
+  state.nodeStates[phoneId] = action;
+
+  // Update waypoint marker icon with tagged/skipped state class
+  const m = state.waypointMarkersById[phoneId];
+  if (m) {
+    const isFirst = ordIdx === 0, isLast = ordIdx === orderedIds.length - 1;
+    const label   = isFirst ? '▶' : isLast ? '■' : ordIdx;
+    const baseClass = isFirst ? 'wp-start' : isLast ? 'wp-end' : '';
+    const stateClass = action === 'tagged' ? 'wp-tagged' : 'wp-skipped';
+    m.setIcon(L.divIcon({
+      html: `<div class="wp ${baseClass} ${stateClass}">${label}</div>`,
+      className: '', iconSize: [22, 22], iconAnchor: [11, 11],
+    }));
+  }
+
+  // Haptic: double-pulse for tagged, single short for skipped
+  if (navigator.vibrate) navigator.vibrate(action === 'tagged' ? [15, 60, 15] : 10);
+
+  state.routeProgress++;
+  renderLeg();
+}
+
+// ── Swipe gesture on #maps-nav ────────────────────────────────────
+{
+  let _swipeX = null, _swipeY = null;
+  const navEl = document.getElementById('maps-nav');
+  navEl.addEventListener('touchstart', e => {
+    const t = e.touches[0];
+    _swipeX = t.clientX; _swipeY = t.clientY;
+  }, { passive: true });
+  navEl.addEventListener('touchend', e => {
+    if (_swipeX === null) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - _swipeX;
+    const dy = t.clientY - _swipeY;
+    _swipeX = _swipeY = null;
+    // Require horizontal displacement ≥ 40px, more horizontal than vertical
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
+    changeLeg(dx < 0 ? 1 : -1);   // swipe left → next, swipe right → prev
+  }, { passive: true });
 }
 
 function openCurrentLeg() {
