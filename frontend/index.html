@@ -1301,7 +1301,7 @@ async function refreshPhones() {
     _lastRefreshAt    = Date.now();
     _refreshFailCount = 0;
     const healthColor = updateRefreshDot();
-    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
     setStatus(`updated ${now}${changed ? ` · ${changed} changed` : ''}`, healthColor + 'b3');
   } catch (_) {
     _refreshFailCount++;
