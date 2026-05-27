@@ -135,6 +135,16 @@
     }
     .wp-active { animation: wp-pulse 2s ease-out infinite; }
 
+    /* ── Leaflet tooltip — dark themed ──────────────────────── */
+    .leaflet-tooltip {
+      background: rgba(13,13,30,0.96); color: #dde;
+      border: 1px solid rgba(100,110,200,0.3); border-radius: 9px;
+      padding: 0; box-shadow: 0 4px 20px rgba(0,0,0,0.7);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      font-family: system-ui,-apple-system,sans-serif;
+    }
+    .leaflet-tooltip::before { border-top-color: rgba(100,110,200,0.3) !important; }
+
     /* ── Spinner ─────────────────────────────────────────────── */
     #spinner {
       display: none; width: 18px; height: 18px; margin: 4px auto;
@@ -245,7 +255,10 @@
         <input type="text" id="username" placeholder="Username" autocomplete="off" autocorrect="off" autocapitalize="off" style="flex:1;min-width:0;">
         <button id="btn-load" onclick="loadPhones()" style="flex:none;padding-left:10px;padding-right:10px;">Load phones</button>
       </div>
-      <div id="load-status" class="sub-text"></div>
+      <div style="display:flex;align-items:center;gap:5px;margin-top:4px;">
+        <span id="refresh-dot" style="display:none;width:6px;height:6px;border-radius:50%;flex-shrink:0;transition:background 0.4s;"></span>
+        <div id="load-status" class="sub-text" style="margin-top:0;flex:1;"></div>
+      </div>
     </div>
 
     <!-- Legend -->
@@ -262,13 +275,11 @@
     <!-- Selection -->
     <div>
       <div class="sec-title">Selection</div>
-      <div class="btn-row">
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;grid-template-rows:auto auto;gap:5px;">
         <button id="btn-click" onclick="setMode('click')" class="active">Click</button>
-        <button id="btn-lasso" onclick="setMode('lasso')">Lasso</button>
-        <button onclick="clearSelection()" class="danger icon-only">✕</button>
-      </div>
-      <div class="btn-row" style="margin-top:5px">
-        <button id="btn-exclude-owned" onclick="toggleExcludeOwned()" title="When active, lasso skips phones you already own">Skip owned</button>
+        <button id="btn-lasso" onclick="cycleLasso()">Lasso</button>
+        <button onclick="clearSelection()" class="danger icon-only" style="grid-row:1/3;align-self:stretch;height:auto;">✕</button>
+        <button id="btn-exclude-owned" onclick="toggleExcludeOwned()" style="grid-column:1/3;" title="When active, lasso skips phones you already own">Skip Owned</button>
       </div>
       <div id="sel-count" class="sub-text">0 selected</div>
     </div>
@@ -399,6 +410,43 @@ const state = {
   routeOrderedIds: [],  // ordered_ids of active route (set at display time, separate from lastRoute)
 };
 
+// ── Refresh health tracking ───────────────────────────────────────
+let _lastRefreshAt   = 0;
+let _refreshFailCount = 0;
+
+function updateRefreshDot() {
+  const dot = document.getElementById('refresh-dot');
+  if (!dot) return;
+  if (!_lastRefreshAt) { dot.style.display = 'none'; return; }
+  dot.style.display = 'inline-block';
+  const age = Date.now() - _lastRefreshAt;
+  if (_refreshFailCount >= 2 || age > 120_000) {
+    dot.style.background = '#e74c3c';
+    dot.title = 'Data feed down';
+  } else if (age > 45_000) {
+    dot.style.background = '#e67e22';
+    dot.title = 'Data feed degraded';
+  } else {
+    dot.style.background = '#2ecc71';
+    dot.title = 'Data feed healthy';
+  }
+}
+
+// ── Tooltip HTML builder ──────────────────────────────────────────
+const STATUS_LABELS = { uncaptured: 'Uncaptured', mine: 'Mine', cellmate: 'Cellmate', hostile: 'Hostile' };
+function makeTooltipHtml(phone) {
+  const color = STATUS_COLORS[phone.status] || '#888';
+  const label = STATUS_LABELS[phone.status] || phone.status;
+  return `<div style="padding:8px 11px;min-width:100px;">
+    <div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:5px;">#${phone.id}</div>
+    <div style="display:flex;align-items:center;gap:5px;">
+      <span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;display:inline-block;"></span>
+      <span style="font-size:11px;color:${color};font-weight:600;">${label}</span>
+    </div>
+    ${phone.holder_name ? `<div style="font-size:10px;color:#778;margin-top:4px;">held by ${phone.holder_name}</div>` : ''}
+  </div>`;
+}
+
 const STATUS_COLORS = {
   uncaptured: '#aaaaaa',
   mine:       '#2ecc71',
@@ -528,9 +576,7 @@ function makeMarker(phone) {
   const sel   = state.selectedIds.has(phone.id);
   const color = STATUS_COLORS[phone.status] || '#888';
   const m = L.circleMarker([phone.lat, phone.lon], mkStyle(color, sel));
-  const tip = [`#${phone.id}`, phone.status, phone.holder_name ? `held by ${phone.holder_name}` : null]
-    .filter(Boolean).join('<br>');
-  m.bindTooltip(tip, { direction: 'top', sticky: true });
+  m.bindTooltip(makeTooltipHtml(phone), { direction: 'top', sticky: true });
   m.on('click', e => { L.DomEvent.stopPropagation(e); onMarkerClick(phone); });
   return m;
 }
@@ -604,10 +650,13 @@ function setMode(mode) {
   mapEl.removeEventListener('touchend',   onLassoTouchEnd);
 
   state.mode = mode;
+  const lassoActive = mode === 'lasso' || mode === 'lasso-deselect';
   document.getElementById('btn-click').classList.toggle('active', mode === 'click');
-  document.getElementById('btn-lasso').classList.toggle('active', mode === 'lasso');
+  document.getElementById('btn-lasso').classList.toggle('active', lassoActive);
+  document.getElementById('btn-lasso').textContent =
+    mode === 'lasso-deselect' ? 'Lasso ✕' : 'Lasso';
 
-  if (mode === 'lasso') {
+  if (lassoActive) {
     map.dragging.disable();
     if (map.tap) map.tap.disable();
     map.on('mousedown', onLassoStart);
@@ -620,6 +669,11 @@ function setMode(mode) {
     map.off('mousedown', onLassoStart);
     cleanupLasso();
   }
+}
+
+function cycleLasso() {
+  if (state.mode === 'lasso') setMode('lasso-deselect');
+  else setMode('lasso');
 }
 
 function clearSelection() {
@@ -690,10 +744,11 @@ function finishLasso() {
   cleanupLasso();
   if (state.lassoPoints.length < 3) return;
   const poly = state.lassoPoints;
+  const deselecting = state.mode === 'lasso-deselect';
   state.phones.forEach(phone => {
-    if (state.lassoExcludeOwned && phone.status === 'mine') return;
+    if (!deselecting && state.lassoExcludeOwned && phone.status === 'mine') return;
     if (pointInPolygon([phone.lat, phone.lon], poly)) {
-      state.selectedIds.add(phone.id);
+      deselecting ? state.selectedIds.delete(phone.id) : state.selectedIds.add(phone.id);
       refreshMarker(phone);
     }
   });
@@ -823,6 +878,7 @@ async function findRoute() {
     const data = await res.json();
     displayRoute(data);
     state.lastRoute = data;
+    setMode('click');
     updatePanelPeek();
     saveSession();
   } catch (e) {
@@ -1217,10 +1273,7 @@ async function refreshPhones() {
         phone.holder_name = updated.holder_name;
         const m = state.markers[phone.id];
         if (m) {
-          const tip = [`#${phone.id}`, phone.status,
-            phone.holder_name ? `held by ${phone.holder_name}` : null]
-            .filter(Boolean).join('<br>');
-          m.setTooltipContent(tip);
+          m.setTooltipContent(makeTooltipHtml(phone));
           refreshMarker(phone);
         }
         changed++;
@@ -1245,9 +1298,15 @@ async function refreshPhones() {
       renderLeg();
     }
 
+    _lastRefreshAt    = Date.now();
+    _refreshFailCount = 0;
+    updateRefreshDot();
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setStatus(`Updated ${now}${changed ? ` · ${changed} changed` : ''}`, '#2ecc71');
-  } catch (_) {}
+    setStatus(`Updated ${now}${changed ? ` · ${changed} changed` : ''}`, '#556');
+  } catch (_) {
+    _refreshFailCount++;
+    updateRefreshDot();
+  }
 }
 
 async function manualRefreshPhones() {
