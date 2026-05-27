@@ -128,6 +128,12 @@
     }
     .wp-tagged  { background: #27ae60 !important; opacity: 0.75; }
     .wp-skipped { background: #555 !important; opacity: 0.55; color: #aaa; }
+    @keyframes wp-pulse {
+      0%   { box-shadow: 0 0 0 0   rgba(230,126,34,0.7), 0 1px 5px rgba(0,0,0,0.6); }
+      70%  { box-shadow: 0 0 0 9px rgba(230,126,34,0),   0 1px 5px rgba(0,0,0,0.6); }
+      100% { box-shadow: 0 0 0 0   rgba(230,126,34,0),   0 1px 5px rgba(0,0,0,0.6); }
+    }
+    .wp-active { animation: wp-pulse 2s ease-out infinite; }
 
     /* ── Spinner ─────────────────────────────────────────────── */
     #spinner {
@@ -294,6 +300,13 @@
               style="flex:1;display:flex;align-items:center;justify-content:center;
                      font-size:10px;color:#778;"></span>
             <button id="leg-next" onclick="changeLeg(1)" class="icon-only">▶</button>
+          </div>
+          <div id="stop-indicator" style="display:none;margin-bottom:7px;text-align:center;">
+            <div style="font-size:9px;color:#556;text-transform:uppercase;letter-spacing:0.9px;margin-bottom:5px;">targeting</div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:10px;">
+              <div id="stop-badge" class="wp wp-active" style="width:30px;height:30px;font-size:13px;border-width:2.5px;flex-shrink:0;"></div>
+              <span style="font-size:12px;color:#667;">of&nbsp;<span id="stop-total-label" style="color:#99a;font-weight:600;font-size:13px;"></span></span>
+            </div>
           </div>
           <div id="tag-row" class="btn-row" style="margin-bottom:5px;display:none;">
             <button id="btn-revert" onclick="revertLeg()" class="danger" style="font-size:11px;flex:0.6;" disabled>↩ UNDO</button>
@@ -847,7 +860,8 @@ function clearRoute() {
   state.routeProgress = 0; state.routeOrderedIds = [];
   state.lastRoute = null;
   updateMapsLink(null);
-  document.getElementById('route-result').style.display = 'none';
+  document.getElementById('route-result').style.display   = 'none';
+  document.getElementById('stop-indicator').style.display = 'none';
   updatePanelPeek();
   saveSession();
 }
@@ -922,16 +936,21 @@ function renderLeg() {
     : `Leg ${i + 1} of ${total}`;
   document.getElementById('leg-label').textContent = label;
 
-  // TAGGED/SKIP row — visible while there are still phones to mark in the route
-  const tagRow = document.getElementById('tag-row');
+  // Stop indicator + SKIP row — visible while there are still phones to visit
+  const tagRow  = document.getElementById('tag-row');
+  const stopInd = document.getElementById('stop-indicator');
   const orderedIds = state.routeOrderedIds;
   const prog = state.routeProgress;
   if (orderedIds.length && prog < orderedIds.length) {
+    stopInd.style.display = 'block';
+    document.getElementById('stop-badge').textContent       = prog + 1;
+    document.getElementById('stop-total-label').textContent = orderedIds.length;
     tagRow.style.display = 'flex';
     document.getElementById('btn-revert').disabled = prog === 0;
-    tagRow.children[1].textContent = `✕ SKIP  (${prog + 1}/${orderedIds.length})`;
+    tagRow.children[1].textContent = '✕ SKIP';
   } else {
-    tagRow.style.display = 'none';
+    stopInd.style.display = 'none';
+    tagRow.style.display  = 'none';
   }
 }
 
@@ -1136,6 +1155,25 @@ async function refreshPhones() {
         changed++;
       }
     }
+    // Auto-advance route progress when the current target stop is tagged as ours
+    while (
+      state.routeOrderedIds.length &&
+      state.routeProgress < state.routeOrderedIds.length &&
+      !state.nodeStates[state.routeOrderedIds[state.routeProgress]]
+    ) {
+      const targetId    = state.routeOrderedIds[state.routeProgress];
+      const targetPhone = state.phones.find(p => p.id === targetId);
+      if (!targetPhone || targetPhone.status !== 'mine') break;
+      // Mark waypoint as tagged and advance
+      const ordIdx = state.routeProgress;
+      const m = state.waypointMarkersById[targetId];
+      if (m) m.setIcon(makeWpIcon(ordIdx + 1, 'wp-tagged'));
+      state.nodeStates[targetId] = 'tagged';
+      state.routeProgress++;
+      if (navigator.vibrate) navigator.vibrate([15, 40, 15]);
+      renderLeg();
+    }
+
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setStatus(`Updated ${now}${changed ? ` · ${changed} changed` : ''}`, '#2ecc71');
   } catch (_) {}
