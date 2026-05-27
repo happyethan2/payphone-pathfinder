@@ -80,7 +80,7 @@
       background: rgba(255,255,255,0.05); border: 1px solid rgba(100,110,200,0.2);
       border-radius: 7px; color: #aab; font-size: 11px; cursor: pointer;
       transition: background 0.15s, color 0.15s, border-color 0.15s;
-      min-height: 34px; white-space: nowrap;
+      min-height: 34px; white-space: nowrap; text-transform: capitalize;
     }
     button:hover  { background: rgba(100,110,200,0.15); color: #dde; }
     button.active { background: rgba(70,90,220,0.35); border-color: rgba(100,130,255,0.5); color: #c8d0ff; }
@@ -230,7 +230,7 @@
     <div>
       <div class="sec-title">Identity</div>
       <input type="text" id="username" placeholder="Username" autocomplete="off" autocorrect="off" autocapitalize="off">
-      <input type="text" id="cell"     placeholder="Cell tag"  autocomplete="off" autocorrect="off" autocapitalize="characters">
+      <input type="text" id="cell"     placeholder="Cell tag (optional)"  autocomplete="off" autocorrect="off" autocapitalize="characters">
       <div class="btn-row" style="margin-top:5px">
         <button id="btn-load" onclick="loadPhones()">Load phones</button>
         <button onclick="manualRefreshPhones()" class="icon-only" title="Force-refresh phone statuses">↺</button>
