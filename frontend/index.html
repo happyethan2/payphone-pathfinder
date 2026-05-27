@@ -304,7 +304,7 @@
           <div id="stop-indicator" style="display:none;margin-bottom:7px;text-align:center;">
             <div style="font-size:9px;color:#556;text-transform:uppercase;letter-spacing:0.9px;margin-bottom:5px;">targeting</div>
             <div style="display:flex;align-items:center;justify-content:center;gap:10px;">
-              <div id="stop-badge" class="wp wp-active" style="width:30px;height:30px;font-size:13px;border-width:2.5px;flex-shrink:0;"></div>
+              <div id="stop-badge" class="wp wp-active" style="width:27px;height:27px;font-size:12px;border-width:2.5px;flex-shrink:0;"></div>
               <span style="font-size:12px;color:#667;">of&nbsp;<span id="stop-total-label" style="color:#99a;font-weight:600;font-size:13px;"></span></span>
             </div>
           </div>
@@ -554,8 +554,11 @@ map.on('zoomend', () => {
     const id     = parseInt(idStr);
     const ordIdx = state.routeOrderedIds.indexOf(id);
     if (ordIdx === -1) continue;
-    const ns = state.nodeStates[id];
-    const cls = ns === 'skipped' ? 'wp-skipped' : ns === 'tagged' ? 'wp-tagged' : '';
+    const ns  = state.nodeStates[id];
+    const cls = ns === 'skipped'                        ? 'wp-skipped'
+              : ns === 'tagged'                         ? 'wp-tagged'
+              : ordIdx === state.routeProgress          ? 'wp-active'
+              : '';
     m.setIcon(makeWpIcon(ordIdx + 1, cls));
   }
 });
@@ -952,6 +955,19 @@ function renderLeg() {
   } else {
     stopInd.style.display = 'none';
     tagRow.style.display  = 'none';
+  }
+
+  // Refresh waypoint marker classes: active pulse on current target, correct state on others
+  for (const [idStr, m] of Object.entries(state.waypointMarkersById)) {
+    const id     = parseInt(idStr);
+    const ordIdx = orderedIds.indexOf(id);
+    if (ordIdx === -1) continue;
+    const ns  = state.nodeStates[id];
+    const cls = ns === 'skipped' ? 'wp-skipped'
+              : ns === 'tagged'  ? 'wp-tagged'
+              : ordIdx === prog  ? 'wp-active'
+              : '';
+    m.setIcon(makeWpIcon(ordIdx + 1, cls));
   }
 }
 
