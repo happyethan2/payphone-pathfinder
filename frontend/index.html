@@ -1094,14 +1094,13 @@ function revertLeg() {
 function openCurrentLeg() {
   const leg = state.mapsLegs[state.currentLeg];
   if (!leg) return;
-  if (/Android/.test(navigator.userAgent)) {
-    // Android doesn't recognise comgooglemaps://; open the web URL in a new tab so
-    // Chrome's App Links can hand off to the Google Maps app without losing this page.
-    window.open(leg.webUrl, '_blank');
-  } else {
-    // iOS (and unknown platforms): comgooglemaps:// hands off to the GMaps app
-    // without navigating this page away.
+  if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+    // iOS only: comgooglemaps:// hands off to the GMaps app without navigating away.
     window.location.href = leg.appUrl;
+  } else {
+    // Android + desktop: open the standard web URL in a new tab.
+    // Android Chrome's App Links will offer to hand off to GMaps if installed.
+    window.open(leg.webUrl, '_blank');
   }
 }
 
