@@ -404,5 +404,21 @@ async def download_cert():
     return FileResponse("/app/cert.pem", media_type="application/x-pem-file",
                         headers={"Content-Disposition": "attachment; filename=payphone-pathfinder.pem"})
 
+
+@app.get("/")
+async def serve_index():
+    """Serve index.html with no-cache headers so browsers always get the latest version."""
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        "/app/frontend/index.html",
+        media_type="text/html",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma":        "no-cache",
+            "Expires":       "0",
+        },
+    )
+
+
 # Static files — MUST be mounted after all API routes
 app.mount("/", StaticFiles(directory="/app/frontend", html=True), name="frontend")
