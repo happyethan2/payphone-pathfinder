@@ -500,6 +500,22 @@ function markerRadius(sel) {
   return sel ? base + 2 : base;
 }
 
+// Waypoint (route stop) icon size — one tier larger than phone dots to stand out
+function waypointSize() {
+  const z = map.getZoom();
+  return z >= 15 ? 22 : z >= 13 ? 17 : z >= 11 ? 12 : 8;
+}
+
+function makeWpIcon(label, extraClass) {
+  const sz  = waypointSize();
+  const fs  = Math.max(6, Math.round(sz * 0.44));
+  const cls = ['wp', extraClass].filter(Boolean).join(' ');
+  return L.divIcon({
+    html: `<div class="${cls}" style="width:${sz}px;height:${sz}px;font-size:${fs}px">${sz > 9 ? label : ''}</div>`,
+    className: '', iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2],
+  });
+}
+
 function mkStyle(color, sel) {
   return { radius: markerRadius(sel), fillColor: color, color: sel ? '#fff' : color,
            weight: sel ? 2.5 : 1, fillOpacity: 0.9, opacity: 1 };
@@ -515,9 +531,18 @@ function refreshMarker(phone) {
 
 // Scale all markers when zoom changes
 map.on('zoomend', () => {
+  // Phone dots
   for (const phone of state.phones) {
     const m = state.markers[phone.id];
     if (m) m.setRadius(markerRadius(state.selectedIds.has(phone.id)));
+  }
+  // Route waypoint markers
+  for (const [idStr, m] of Object.entries(state.waypointMarkersById)) {
+    const id     = parseInt(idStr);
+    const ordIdx = state.routeOrderedIds.indexOf(id);
+    if (ordIdx === -1) continue;
+    const ns = state.nodeStates[id];
+    m.setIcon(makeWpIcon(ordIdx + 1, ns === 'skipped' ? 'wp-skipped' : ''));
   }
 });
 
@@ -797,10 +822,7 @@ function displayRoute(data) {
   ordered_ids.forEach((id, idx) => {
     const phone = state.phones.find(p => p.id === id);
     if (!phone) return;
-    const icon = L.divIcon({
-      html: `<div class="wp">${idx + 1}</div>`,
-      className: '', iconSize: [22, 22], iconAnchor: [11, 11],
-    });
+    const icon = makeWpIcon(idx + 1);
     const m = L.marker([phone.lat, phone.lon], { icon, zIndexOffset: 200 }).addTo(map);
     state.waypointMarkers.push(m);
     state.waypointMarkersById[id] = m;
@@ -931,10 +953,7 @@ function tagCurrentLeg(action) {
   // Update waypoint marker icon with skipped state class
   const m = state.waypointMarkersById[phoneId];
   if (m) {
-    m.setIcon(L.divIcon({
-      html: `<div class="wp wp-skipped">${ordIdx + 1}</div>`,
-      className: '', iconSize: [22, 22], iconAnchor: [11, 11],
-    }));
+    m.setIcon(makeWpIcon(ordIdx + 1, 'wp-skipped'));
   }
 
   if (navigator.vibrate) navigator.vibrate(10);
@@ -954,10 +973,7 @@ function revertLeg() {
   // Restore waypoint marker to its original (unmarked) icon
   const m = state.waypointMarkersById[phoneId];
   if (m) {
-    m.setIcon(L.divIcon({
-      html: `<div class="wp">${ordIdx + 1}</div>`,
-      className: '', iconSize: [22, 22], iconAnchor: [11, 11],
-    }));
+    m.setIcon(makeWpIcon(ordIdx + 1));
   }
 
   if (navigator.vibrate) navigator.vibrate(8);
