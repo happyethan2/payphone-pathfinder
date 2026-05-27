@@ -215,6 +215,11 @@
       #panel-body { max-height: calc(100vh - 110px); }
       #fab-stack   { bottom: 20px; }
     }
+
+    /* ── Mobile: FABs at top-right so the bottom sheet never covers them ── */
+    @media (max-width: 639px) {
+      #fab-stack { top: 14px; bottom: auto; }
+    }
   </style>
 </head>
 <body>
@@ -294,17 +299,30 @@
       <div id="route-result" style="margin-top:10px;">
         <div id="route-stats"></div>
         <div id="maps-nav" style="display:none;margin-top:8px;">
-          <!-- Stop indicator (LHS) + leg label (RHS) in one row -->
-          <div style="display:flex;align-items:center;min-height:30px;margin-bottom:7px;">
-            <div id="stop-indicator" style="display:none;align-items:center;gap:7px;">
-              <div id="stop-badge" class="wp wp-active" style="width:27px;height:27px;font-size:12px;border-width:2.5px;flex-shrink:0;"></div>
-              <span style="font-size:11px;color:#667;">of&nbsp;<span id="stop-total-label" style="color:#99a;font-weight:600;font-size:12px;"></span></span>
+          <!-- Stop indicator (LHS) + leg switcher (RHS) — card header -->
+          <div style="display:flex;align-items:stretch;margin-bottom:8px;
+                      background:rgba(255,255,255,0.05);
+                      border:1px solid rgba(100,110,200,0.2);border-radius:9px;overflow:hidden;">
+            <!-- LHS: stop indicator (shown when route active) -->
+            <div id="stop-indicator" style="display:none;flex-direction:column;align-items:center;
+                 justify-content:center;gap:4px;padding:9px 12px;
+                 border-right:1px solid rgba(100,110,200,0.15);">
+              <div style="font-size:8px;color:#556;text-transform:uppercase;letter-spacing:0.9px;">targeting</div>
+              <div style="display:flex;align-items:center;gap:7px;margin-top:1px;">
+                <div id="stop-badge" class="wp wp-active" style="width:32px;height:32px;font-size:14px;border-width:2.5px;flex-shrink:0;"></div>
+                <span style="font-size:12px;color:#889;">/<span id="stop-total-label" style="color:#bbc;font-weight:700;font-size:13px;margin-left:3px;"></span></span>
+              </div>
             </div>
-            <div style="display:flex;align-items:center;gap:4px;margin-left:auto;"
+            <!-- RHS: leg switcher (expands to fill when stop-indicator hidden) -->
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;
+                 justify-content:center;gap:4px;padding:9px 12px;"
                  title="Swipe left or right to change leg" aria-label="Swipe to navigate legs">
-              <span aria-hidden="true" style="font-size:13px;color:#99a;opacity:0.3;">‹</span>
-              <span id="leg-label" style="font-size:10px;color:#667;white-space:nowrap;letter-spacing:0.2px;"></span>
-              <span aria-hidden="true" style="font-size:13px;color:#99a;opacity:0.3;">›</span>
+              <div style="font-size:8px;color:#556;text-transform:uppercase;letter-spacing:0.9px;">leg</div>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:1px;">
+                <span aria-hidden="true" style="font-size:16px;color:#889;opacity:0.65;line-height:1;">‹</span>
+                <span id="leg-label" style="font-size:12px;color:#ccd;white-space:nowrap;font-weight:600;"></span>
+                <span aria-hidden="true" style="font-size:16px;color:#889;opacity:0.65;line-height:1;">›</span>
+              </div>
             </div>
           </div>
           <!-- UNDO + SKIP -->
