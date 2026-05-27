@@ -994,7 +994,6 @@ function renderLeg() {
   const tagRow  = document.getElementById('tag-row');
   const stopInd = document.getElementById('stop-indicator');
   const orderedIds = state.routeOrderedIds;
-  const prog = state.routeProgress;
   if (orderedIds.length && prog < orderedIds.length) {
     stopInd.style.display = 'flex';
     document.getElementById('stop-badge').textContent       = prog + 1;
