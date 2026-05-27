@@ -494,8 +494,14 @@ function makeMarker(phone) {
   return m;
 }
 
+function markerRadius(sel) {
+  const z = map.getZoom();
+  const base = z >= 15 ? 7 : z >= 13 ? 5 : z >= 11 ? 3 : 2;
+  return sel ? base + 2 : base;
+}
+
 function mkStyle(color, sel) {
-  return { radius: sel ? 9 : 7, fillColor: color, color: sel ? '#fff' : color,
+  return { radius: markerRadius(sel), fillColor: color, color: sel ? '#fff' : color,
            weight: sel ? 2.5 : 1, fillOpacity: 0.9, opacity: 1 };
 }
 
@@ -504,8 +510,16 @@ function refreshMarker(phone) {
   if (!m) return;
   const sel = state.selectedIds.has(phone.id);
   m.setStyle(mkStyle(STATUS_COLORS[phone.status] || '#888', sel));
-  m.setRadius(sel ? 9 : 7);
+  m.setRadius(markerRadius(sel));
 }
+
+// Scale all markers when zoom changes
+map.on('zoomend', () => {
+  for (const phone of state.phones) {
+    const m = state.markers[phone.id];
+    if (m) m.setRadius(markerRadius(state.selectedIds.has(phone.id)));
+  }
+});
 
 function updateSelCount() {
   document.getElementById('sel-count').textContent =
