@@ -229,10 +229,9 @@
     <!-- Identity -->
     <div>
       <div class="sec-title">Identity</div>
-      <input type="text" id="username" placeholder="username" autocomplete="off" autocorrect="off" autocapitalize="off">
-      <input type="text" id="cell"     placeholder="cell tag (optional)"  autocomplete="off" autocorrect="off" autocapitalize="characters">
-      <div class="btn-row" style="margin-top:5px">
-        <button id="btn-load" onclick="loadPhones()">Load phones</button>
+      <div class="btn-row">
+        <input type="text" id="username" placeholder="username" autocomplete="off" autocorrect="off" autocapitalize="off" style="flex:1;min-width:0;">
+        <button id="btn-load" onclick="loadPhones()" style="flex:none;padding-left:10px;padding-right:10px;">Load phones</button>
       </div>
       <div id="load-status" class="sub-text"></div>
     </div>
@@ -445,12 +444,11 @@ function updatePanelPeek() {
 // ── Load phones ───────────────────────────────────────────────────
 async function loadPhones() {
   const username = document.getElementById('username').value.trim();
-  const cell     = document.getElementById('cell').value.trim();
   if (!username) { setStatus('Enter username first', '#e74c3c'); return; }
   setStatus('Loading…', '#556');
   document.getElementById('btn-load').disabled = true;
   try {
-    const res  = await fetch(`/api/phones?${new URLSearchParams({ username, cell })}`);
+    const res  = await fetch(`/api/phones?${new URLSearchParams({ username })}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     state.phones = data.phones;
@@ -1036,7 +1034,6 @@ function saveSession() {
   try {
     localStorage.setItem(SESSION_KEY, JSON.stringify({
       username:    document.getElementById('username').value.trim(),
-      cell:        document.getElementById('cell').value.trim(),
       profile:     state.profile,
       selectedIds: Array.from(state.selectedIds),
       start:       state.start,
@@ -1052,7 +1049,6 @@ function restoreSession() {
     if (!raw) return false;
     const s = JSON.parse(raw);
     if (s.username)    document.getElementById('username').value = s.username;
-    if (s.cell)        document.getElementById('cell').value     = s.cell;
     if (s.profile)     setProfile(s.profile);
     if (s.selectedIds) s.selectedIds.forEach(id => state.selectedIds.add(id));
     if (s.start)       state.start     = s.start;
@@ -1086,10 +1082,9 @@ const REFRESH_INTERVAL_MS = 10 * 1000;  // 10s — safe with 30s server-side cac
 
 async function refreshPhones() {
   const username = document.getElementById('username').value.trim();
-  const cell     = document.getElementById('cell').value.trim();
   if (!username || !state.phones.length) return;
   try {
-    const res = await fetch(`/api/phones?${new URLSearchParams({ username, cell })}`);
+    const res = await fetch(`/api/phones?${new URLSearchParams({ username })}`);
     if (!res.ok) return;
     const data   = await res.json();
     const newMap = Object.fromEntries(data.phones.map(p => [p.id, p]));
@@ -1136,7 +1131,6 @@ document.addEventListener('visibilitychange', () => {
   restoreSession();
   const p = new URLSearchParams(location.search);
   if (p.get('username')) document.getElementById('username').value = p.get('username');
-  if (p.get('cell'))     document.getElementById('cell').value     = p.get('cell');
   const hasUsername = document.getElementById('username').value.trim();
   if (hasUsername) {
     panelOpen = true;
