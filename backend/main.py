@@ -1,4 +1,5 @@
 import os
+import time
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
@@ -27,6 +28,13 @@ IDX_STATUS = 4
 
 # Sentinel for unreachable OSRM pairs (must fit in Vroom's int32)
 UNREACHABLE = 999_999_999
+
+# ---------------------------------------------------------------------------
+# Phone data cache — one upstream fetch per TTL window, all clients share it
+# ---------------------------------------------------------------------------
+_PHONES_CACHE: dict | None = None
+_PHONES_CACHE_AT: float    = 0.0
+_PHONES_CACHE_TTL: float   = 30.0  # seconds
 
 
 # ---------------------------------------------------------------------------
@@ -63,10 +71,17 @@ def _classify_phone(p, my_player_id: str | None, cellmate_player_ids: set[str]) 
 
 
 async def _fetch_phones_data() -> dict:
+    """Return raw payphone API data, served from a 30s server-side cache."""
+    global _PHONES_CACHE, _PHONES_CACHE_AT
+    now = time.monotonic()
+    if _PHONES_CACHE is not None and (now - _PHONES_CACHE_AT) < _PHONES_CACHE_TTL:
+        return _PHONES_CACHE
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(PAYPHONE_API)
         resp.raise_for_status()
-    return resp.json()
+    _PHONES_CACHE    = resp.json()
+    _PHONES_CACHE_AT = time.monotonic()
+    return _PHONES_CACHE
 
 
 def _resolve_player(data: dict, username: str, cell_tag: str | None):
@@ -203,6 +218,14 @@ async def _vroom_solve(
 # ---------------------------------------------------------------------------
 # API routes
 # ---------------------------------------------------------------------------
+
+@app.post("/api/phones/refresh")
+async def bust_phones_cache():
+    """Force-expire the phone data cache so the next /api/phones call re-fetches upstream."""
+    global _PHONES_CACHE_AT
+    _PHONES_CACHE_AT = 0.0
+    return {"ok": True}
+
 
 @app.get("/api/phones")
 async def get_phones(

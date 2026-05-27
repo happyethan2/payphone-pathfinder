@@ -203,7 +203,7 @@
       <input type="text" id="cell"     placeholder="Cell tag"  autocomplete="off" autocorrect="off" autocapitalize="characters">
       <div class="btn-row" style="margin-top:5px">
         <button id="btn-load" onclick="loadPhones()">Load phones</button>
-        <button onclick="refreshPhones()" class="icon-only" title="Refresh phone statuses">↺</button>
+        <button onclick="manualRefreshPhones()" class="icon-only" title="Force-refresh phone statuses">↺</button>
       </div>
       <div id="load-status" class="sub-text"></div>
     </div>
@@ -965,6 +965,12 @@ async function refreshPhones() {
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setStatus(`Updated ${now}${changed ? ` · ${changed} changed` : ''}`, '#2ecc71');
   } catch (_) {}
+}
+
+async function manualRefreshPhones() {
+  // Bust the server-side cache so we get a live upstream fetch, then refresh.
+  try { await fetch('/api/phones/refresh', { method: 'POST' }); } catch (_) {}
+  await refreshPhones();
 }
 
 function startBackgroundRefresh() {
