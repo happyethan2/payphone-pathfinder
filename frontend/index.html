@@ -296,7 +296,7 @@
             <button id="leg-next" onclick="changeLeg(1)" class="icon-only">▶</button>
           </div>
           <div id="tag-row" class="btn-row" style="margin-bottom:5px;display:none;">
-            <button id="btn-revert" onclick="revertLeg()" class="danger" style="font-size:11px;flex:0.6;" disabled>↩ REVERT</button>
+            <button id="btn-revert" onclick="revertLeg()" class="danger" style="font-size:11px;flex:0.6;" disabled>↩ UNDO</button>
             <button onclick="tagCurrentLeg('skipped')" class="skipped" style="font-size:11px;">✕ SKIP</button>
           </div>
           <button onclick="openCurrentLeg()" class="maps" style="font-size:11px;width:100%;">
@@ -823,7 +823,7 @@ function displayRoute(data) {
     const phone = state.phones.find(p => p.id === id);
     if (!phone) return;
     const icon = makeWpIcon(idx + 1);
-    const m = L.marker([phone.lat, phone.lon], { icon, zIndexOffset: 200 }).addTo(map);
+    const m = L.marker([phone.lat, phone.lon], { icon, zIndexOffset: (ordered_ids.length - idx) * 10 }).addTo(map);
     state.waypointMarkers.push(m);
     state.waypointMarkersById[id] = m;
   });
