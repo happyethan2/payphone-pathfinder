@@ -511,7 +511,7 @@ function makeWpIcon(label, extraClass) {
   const fs  = Math.max(6, Math.round(sz * 0.44));
   const cls = ['wp', extraClass].filter(Boolean).join(' ');
   return L.divIcon({
-    html: `<div class="${cls}" style="width:${sz}px;height:${sz}px;font-size:${fs}px">${sz >= 22 ? label : ''}</div>`,
+    html: `<div class="${cls}" style="width:${sz}px;height:${sz}px;font-size:${fs}px">${sz >= 17 ? label : ''}</div>`,
     className: '', iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2],
   });
 }
