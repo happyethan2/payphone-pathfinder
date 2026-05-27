@@ -216,9 +216,12 @@
       #fab-stack   { bottom: 20px; }
     }
 
-    /* ── Mobile: FABs at top-right so the bottom sheet never covers them ── */
+    /* ── Mobile: FABs at bottom when panel closed, top when panel open ── */
     @media (max-width: 639px) {
-      #fab-stack { top: 14px; bottom: auto; }
+      #fab-stack { bottom: 66px; top: auto;
+                   transition: top 0.35s cubic-bezier(0.32,0.72,0,1),
+                               bottom 0.35s cubic-bezier(0.32,0.72,0,1); }
+      #panel.open ~ #fab-stack { top: 14px; bottom: auto; }
     }
   </style>
 </head>
