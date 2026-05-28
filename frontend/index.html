@@ -708,27 +708,24 @@ function toggleExcludeOwned() {
 
 async function togglePhotoFilter() {
   state.photoFilter = !state.photoFilter;
-  const btn = document.getElementById('btn-photo-filter');
+  const btn       = document.getElementById('btn-photo-filter');
+  const statusEl  = document.getElementById('wiki-photo-status');
   btn.classList.toggle('active', state.photoFilter);
 
-  if (state.photoFilter && state.wikiPhotoIds === null) {
+  if (!state.photoFilter) {
+    if (statusEl) statusEl.style.display = 'none';
+    state.phones.forEach(p => refreshMarker(p));
+    return;
+  }
+
+  if (state.wikiPhotoIds === null) {
     btn.textContent = '📷 Loading…';
     btn.disabled = true;
     try {
-      const res = await fetch('/api/wiki-photos');
+      const res  = await fetch('/api/wiki-photos');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       state.wikiPhotoIds = new Set((data.has_photo || []).map(Number));
-      // DEBUG — remove after confirming IDs match
-      console.log('[wiki-photos] raw has_photo (first 5):', (data.has_photo||[]).slice(0,5));
-      console.log('[wiki-photos] total IDs with photos:', state.wikiPhotoIds.size);
-      const samplePhone = state.phones[0];
-      if (samplePhone) console.log('[wiki-photos] sample phone.id:', samplePhone.id, typeof samplePhone.id);
-      // Check confirmed phones by sequential API id (08835506X2→9683, 08835605X2→?, 08844728X2→?, 02929904X1→?)
-      // 9683 is the known sequential id for 08835506X2
-      [9683].forEach(id => {
-        console.log(`[wiki-photos] has(${id}):`, state.wikiPhotoIds.has(id));
-      });
     } catch (_) {
       state.photoFilter = false;
       btn.classList.remove('active');
@@ -738,24 +735,15 @@ async function togglePhotoFilter() {
     }
     btn.disabled = false;
     btn.textContent = '📷 Wiki Photos';
+  }
+
+  if (statusEl) {
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-    const statusEl = document.getElementById('wiki-photo-status');
-    if (statusEl) {
-      statusEl.textContent = `● updated ${now} · 5m cache`;
-      statusEl.style.display = 'block';
-    }
+    statusEl.textContent = `● updated ${now}`;
+    statusEl.style.display = 'block';
   }
 
   state.phones.forEach(p => refreshMarker(p));
-  // DEBUG — check render for known sequential ID (9683 = 08835506X2)
-  [9683].forEach(id => {
-    const phone = state.phones.find(p => p.id === id);
-    const marker = state.markers[id];
-    if (!phone) { console.log(`[render-debug] ${id}: not in state.phones`); return; }
-    const hasPhoto = state.photoFilter && state.wikiPhotoIds !== null && state.wikiPhotoIds.has(Number(id));
-    const style = marker ? marker.options : null;
-    console.log(`[render-debug] ${id}: hasPhoto=${hasPhoto}, markerFound=${!!marker}, currentColor=${style?.color}, currentWeight=${style?.weight}`);
-  });
 }
 
 // ── Lasso (mouse) ─────────────────────────────────────────────────
