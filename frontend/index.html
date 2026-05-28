@@ -272,7 +272,7 @@
           <div class="legend-item"><span class="dot" style="background:#e74c3c"></span>Hostile</div>
         </div>
         <button id="btn-photo-filter" onclick="togglePhotoFilter()"
-                style="font-size:11px;white-space:nowrap;flex-shrink:0;"
+                style="font-size:11px;white-space:nowrap;width:50%;"
                 title="Highlight phones that have a wiki photo">
           📷 Photos
         </button>
@@ -715,6 +715,16 @@ async function togglePhotoFilter() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       state.wikiPhotoIds = new Set((data.has_photo || []).map(Number));
+      // DEBUG — remove after confirming IDs match
+      console.log('[wiki-photos] raw has_photo (first 5):', (data.has_photo||[]).slice(0,5));
+      console.log('[wiki-photos] total IDs with photos:', state.wikiPhotoIds.size);
+      const samplePhone = state.phones[0];
+      if (samplePhone) console.log('[wiki-photos] sample phone.id:', samplePhone.id, typeof samplePhone.id);
+      // Check confirmed phones by sequential API id (08835506X2→9683, 08835605X2→?, 08844728X2→?, 02929904X1→?)
+      // 9683 is the known sequential id for 08835506X2
+      [9683].forEach(id => {
+        console.log(`[wiki-photos] has(${id}):`, state.wikiPhotoIds.has(id));
+      });
     } catch (_) {
       state.photoFilter = false;
       btn.classList.remove('active');
@@ -727,6 +737,15 @@ async function togglePhotoFilter() {
   }
 
   state.phones.forEach(p => refreshMarker(p));
+  // DEBUG — check render for known sequential ID (9683 = 08835506X2)
+  [9683].forEach(id => {
+    const phone = state.phones.find(p => p.id === id);
+    const marker = state.markers[id];
+    if (!phone) { console.log(`[render-debug] ${id}: not in state.phones`); return; }
+    const hasPhoto = state.photoFilter && state.wikiPhotoIds !== null && state.wikiPhotoIds.has(Number(id));
+    const style = marker ? marker.options : null;
+    console.log(`[render-debug] ${id}: hasPhoto=${hasPhoto}, markerFound=${!!marker}, currentColor=${style?.color}, currentWeight=${style?.weight}`);
+  });
 }
 
 // ── Lasso (mouse) ─────────────────────────────────────────────────

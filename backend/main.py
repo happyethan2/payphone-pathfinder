@@ -94,37 +94,75 @@ async def _fetch_phones_data() -> dict:
 
 
 async def _fetch_wiki_photo_ids() -> set[int]:
-    """Paginate wiki allimages?aiprefix=Payphone- and return set of phone IDs with photos.
+    """Return the set of sequential payphone API IDs that have at least one wiki photo.
 
-    Filenames follow: Payphone-08826900X2-20260510_014129.jpg
-    Phone ID is extracted via regex, leading zeros stripped by int().
+    Two-step process:
+      1. Paginate allimages?aiprefix=Payphone- to collect unique CAB codes
+         (e.g. "08835506X2") from filenames like Payphone-08835506X2-timestamp.jpg
+      2. Batch-fetch the corresponding wiki pages (50 at a time) and parse the
+         `| id = XXXX` template field, which holds the sequential payphone API ID.
     """
     global _WIKI_CACHE, _WIKI_CACHE_AT
     now = time.monotonic()
     if _WIKI_CACHE is not None and (now - _WIKI_CACHE_AT) < _WIKI_CACHE_TTL:
         return _WIKI_CACHE
 
-    has_photo: set[int] = set()
-    params: dict = {
-        "action":    "query",
-        "list":      "allimages",
-        "aiprefix":  "Payphone-",
-        "ailimit":   "500",
-        "format":    "json",
+    # ── Step 1: collect unique CAB codes from all uploaded images ──
+    cab_ids: set[str] = set()
+    img_params: dict = {
+        "action":   "query",
+        "list":     "allimages",
+        "aiprefix": "Payphone-",
+        "ailimit":  "500",
+        "format":   "json",
     }
     async with httpx.AsyncClient(timeout=60.0) as client:
         while True:
-            resp = await client.get(WIKI_API, params=params)
+            resp = await client.get(WIKI_API, params=img_params)
             resp.raise_for_status()
             body = resp.json()
             for img in body.get("query", {}).get("allimages", []):
-                m = re.match(r"^Payphone-(\d+)X\d+", img["name"])
+                m = re.match(r"^Payphone-(\d+X\d+)-", img["name"])
                 if m:
-                    has_photo.add(int(m.group(1)))  # int() strips leading zeros
+                    cab_ids.add(m.group(1))
             cont = body.get("continue", {}).get("aicontinue")
             if not cont:
                 break
-            params["aicontinue"] = cont
+            img_params["aicontinue"] = cont
+
+    # ── Step 2: batch-fetch wiki pages and extract sequential API id ──
+    has_photo: set[int] = set()
+    cab_list  = sorted(cab_ids)
+    batch_size = 50
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for i in range(0, len(cab_list), batch_size):
+            batch  = cab_list[i : i + batch_size]
+            titles = "|".join(f"Payphone:{cab}" for cab in batch)
+            resp = await client.get(WIKI_API, params={
+                "action":  "query",
+                "titles":  titles,
+                "prop":    "revisions",
+                "rvprop":  "content",
+                "rvslots": "*",
+                "format":  "json",
+            })
+            resp.raise_for_status()
+            body = resp.json()
+            for page in body.get("query", {}).get("pages", {}).values():
+                if "revisions" not in page:
+                    continue
+                rev = page["revisions"][0]
+                # Support both old MediaWiki (rev["*"]) and new (rev["slots"]["main"])
+                content = (
+                    rev.get("*")
+                    or rev.get("content")
+                    or (rev.get("slots") or {}).get("main", {}).get("*", "")
+                    or (rev.get("slots") or {}).get("main", {}).get("content", "")
+                    or ""
+                )
+                id_match = re.search(r"\|\s*id\s*=\s*(\d+)", content)
+                if id_match:
+                    has_photo.add(int(id_match.group(1)))
 
     _WIKI_CACHE    = has_photo
     _WIKI_CACHE_AT = time.monotonic()
