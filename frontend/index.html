@@ -36,7 +36,7 @@
     #panel-handle {
       height: 52px; flex-shrink: 0;
       display: flex; align-items: center; justify-content: center; gap: 8px;
-      cursor: pointer; user-select: none;
+      cursor: pointer; user-select: none; touch-action: manipulation;
       border-bottom: 1px solid transparent;
     }
     #panel.open #panel-handle { border-bottom-color: rgba(100,110,200,0.15); }
@@ -81,6 +81,7 @@
       border-radius: 7px; color: #aab; font-size: 11px; cursor: pointer;
       transition: background 0.15s, color 0.15s, border-color 0.15s;
       min-height: 44px; white-space: nowrap; text-transform: capitalize;
+      touch-action: manipulation;
     }
     button:hover  { background: rgba(100,110,200,0.15); color: #dde; }
     button.active { background: rgba(70,90,220,0.55); border-color: rgba(130,160,255,0.7); color: #c8d0ff; }
@@ -373,7 +374,7 @@
                       aria-label="Previous leg"
                       onkeydown="if(event.key==='Enter'||event.key===' '){changeLeg(-1);event.preventDefault();}"
                       style="flex:1;display:flex;justify-content:flex-end;align-items:center;
-                             padding:6px 8px;cursor:pointer;user-select:none;
+                             padding:6px 8px;cursor:pointer;user-select:none;touch-action:manipulation;
                              font-size:18px;color:#889;line-height:1;transition:opacity 0.2s;">‹</span>
                 <span id="leg-label" style="flex:2;text-align:center;font-size:12px;color:#ccd;
                                             white-space:nowrap;font-weight:600;pointer-events:none;"></span>
@@ -381,7 +382,7 @@
                       aria-label="Next leg"
                       onkeydown="if(event.key==='Enter'||event.key===' '){changeLeg(1);event.preventDefault();}"
                       style="flex:1;display:flex;justify-content:flex-start;align-items:center;
-                             padding:6px 8px;cursor:pointer;user-select:none;
+                             padding:6px 8px;cursor:pointer;user-select:none;touch-action:manipulation;
                              font-size:18px;color:#889;line-height:1;transition:opacity 0.2s;">›</span>
               </div>
             </div>
