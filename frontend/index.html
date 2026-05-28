@@ -97,7 +97,7 @@
     button.skipped { background: rgba(60,60,60,0.35); border-color: rgba(120,120,120,0.3); color: #999; font-weight: 700; }
     button.skipped:hover { background: rgba(80,80,80,0.5); }
     button:disabled { opacity: 0.35; cursor: not-allowed; }
-    button.icon-only { flex: none; padding: 7px 10px; }
+    button.icon-only { flex: none; padding: 7px 10px; min-width: 44px; }
 
     /* ── Legend dots ─────────────────────────────────────────── */
     .legend { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 3px 6px; }
@@ -308,7 +308,7 @@
     <div>
       <div class="sec-title">Selection</div>
       <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:5px;">
-        <button id="btn-click" onclick="setMode('click')" class="active" style="grid-column:1;grid-row:1;">Click</button>
+        <button id="btn-click" onclick="toggleClickMode()" class="active" style="grid-column:1;grid-row:1;">Click</button>
         <button id="btn-lasso" onclick="cycleLasso()" style="grid-column:2;grid-row:1;">Lasso</button>
         <button id="btn-exclude-owned" onclick="toggleExcludeOwned()" style="grid-column:1/3;grid-row:2;" title="When active, lasso skips phones you already own">Skip Owned</button>
         <button onclick="clearSelection()" class="danger icon-only" style="grid-column:3;grid-row:1/3;align-self:stretch;" aria-label="Clear selection">✕</button>
@@ -728,9 +728,14 @@ function setMode(mode) {
   }
 }
 
+function toggleClickMode() {
+  setMode(state.mode === 'click' ? 'navigate' : 'click');
+}
+
 function cycleLasso() {
-  if (state.mode === 'lasso') setMode('lasso-deselect');
-  else setMode('lasso');
+  if      (state.mode === 'lasso')         setMode('lasso-deselect');
+  else if (state.mode === 'lasso-deselect') setMode('navigate');
+  else                                      setMode('lasso');
 }
 
 function clearSelection() {
@@ -876,6 +881,7 @@ function onMarkerClick(phone) {
     setEndpoint('end', { lat: phone.lat, lon: phone.lon, phone_id: phone.id });
     return;
   }
+  if (state.mode === 'navigate') return;
   const adding = !state.selectedIds.has(phone.id);
   adding ? state.selectedIds.add(phone.id) : state.selectedIds.delete(phone.id);
   if (adding && navigator.vibrate) navigator.vibrate(18);
