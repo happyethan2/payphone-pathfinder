@@ -264,16 +264,17 @@
     <!-- Legend -->
     <div>
       <div class="sec-title">Legend</div>
-      <div class="legend">
-        <div class="legend-item"><span class="dot" style="background:#aaa"></span>Uncaptured</div>
-        <div class="legend-item"><span class="dot" style="background:#2ecc71"></span>Mine</div>
-        <div class="legend-item"><span class="dot" style="background:#3498db"></span>Cellmate</div>
-        <div class="legend-item"><span class="dot" style="background:#e74c3c"></span>Hostile</div>
-      </div>
-      <div style="margin-top:6px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="legend" style="flex:1;">
+          <div class="legend-item"><span class="dot" style="background:#aaa"></span>Uncaptured</div>
+          <div class="legend-item"><span class="dot" style="background:#2ecc71"></span>Mine</div>
+          <div class="legend-item"><span class="dot" style="background:#3498db"></span>Cellmate</div>
+          <div class="legend-item"><span class="dot" style="background:#e74c3c"></span>Hostile</div>
+        </div>
         <button id="btn-photo-filter" onclick="togglePhotoFilter()"
-                style="width:100%;font-size:10px;" title="Highlight phones missing a wiki photo">
-          📷 Highlight unphotographed
+                style="font-size:11px;white-space:nowrap;flex-shrink:0;"
+                title="Highlight phones that have a wiki photo">
+          📷 Photos
         </button>
       </div>
     </div>
@@ -583,9 +584,9 @@ function renderMarkers() {
 function makeMarker(phone) {
   const sel         = state.selectedIds.has(phone.id);
   const color       = STATUS_COLORS[phone.status] || '#888';
-  const photoMissing = state.photoFilter && state.wikiPhotoIds !== null
-                       && !state.wikiPhotoIds.has(phone.id);
-  const m = L.circleMarker([phone.lat, phone.lon], mkStyle(color, sel, photoMissing));
+  const hasPhoto = state.photoFilter && state.wikiPhotoIds !== null
+                   && state.wikiPhotoIds.has(Number(phone.id));
+  const m = L.circleMarker([phone.lat, phone.lon], mkStyle(color, sel, hasPhoto));
   m.bindTooltip(makeTooltipHtml(phone), { direction: 'top', sticky: true });
   m.on('click', e => { L.DomEvent.stopPropagation(e); onMarkerClick(phone); });
   return m;
@@ -613,9 +614,9 @@ function makeWpIcon(label, extraClass) {
   });
 }
 
-function mkStyle(color, sel, photoMissing) {
-  const strokeColor  = photoMissing ? '#f39c12' : (sel ? '#fff' : 'rgba(0,0,0,0.3)');
-  const strokeWeight = photoMissing ? 3 : (sel ? 2.5 : 1);
+function mkStyle(color, sel, hasPhoto) {
+  const strokeColor  = hasPhoto ? '#c084fc' : (sel ? '#fff' : 'rgba(0,0,0,0.3)');
+  const strokeWeight = hasPhoto ? 2 : (sel ? 2.5 : 1);
   return { radius: markerRadius(sel), fillColor: color, color: strokeColor,
            weight: strokeWeight, fillOpacity: 0.9, opacity: 1 };
 }
@@ -624,9 +625,9 @@ function refreshMarker(phone) {
   const m = state.markers[phone.id];
   if (!m) return;
   const sel          = state.selectedIds.has(phone.id);
-  const photoMissing = state.photoFilter && state.wikiPhotoIds !== null
-                       && !state.wikiPhotoIds.has(phone.id);
-  m.setStyle(mkStyle(STATUS_COLORS[phone.status] || '#888', sel, photoMissing));
+  const hasPhoto = state.photoFilter && state.wikiPhotoIds !== null
+                   && state.wikiPhotoIds.has(Number(phone.id));
+  m.setStyle(mkStyle(STATUS_COLORS[phone.status] || '#888', sel, hasPhoto));
   m.setRadius(markerRadius(sel));
 }
 
@@ -710,18 +711,19 @@ async function togglePhotoFilter() {
     btn.textContent = '📷 Loading…';
     btn.disabled = true;
     try {
-      const res  = await fetch('/api/wiki-photos');
+      const res = await fetch('/api/wiki-photos');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      state.wikiPhotoIds = new Set(data.has_photo);
+      state.wikiPhotoIds = new Set((data.has_photo || []).map(Number));
     } catch (_) {
       state.photoFilter = false;
       btn.classList.remove('active');
       btn.disabled = false;
-      btn.textContent = '📷 Highlight unphotographed';
+      btn.textContent = '📷 Photos';
       return;
     }
     btn.disabled = false;
-    btn.textContent = '📷 Highlight unphotographed';
+    btn.textContent = '📷 Photos';
   }
 
   state.phones.forEach(p => refreshMarker(p));
