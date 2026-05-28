@@ -59,7 +59,7 @@
 
     /* ── Section ────────────────────────────────────────────── */
     .sec-title {
-      font-size: 9px; font-weight: 700; color: #556;
+      font-size: 10px; font-weight: 700; color: #778;
       text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;
     }
 
@@ -80,10 +80,12 @@
       background: rgba(255,255,255,0.05); border: 1px solid rgba(100,110,200,0.2);
       border-radius: 7px; color: #aab; font-size: 11px; cursor: pointer;
       transition: background 0.15s, color 0.15s, border-color 0.15s;
-      min-height: 34px; white-space: nowrap; text-transform: capitalize;
+      min-height: 44px; white-space: nowrap; text-transform: capitalize;
     }
     button:hover  { background: rgba(100,110,200,0.15); color: #dde; }
-    button.active { background: rgba(70,90,220,0.35); border-color: rgba(100,130,255,0.5); color: #c8d0ff; }
+    button.active { background: rgba(70,90,220,0.55); border-color: rgba(130,160,255,0.7); color: #c8d0ff; }
+    #btn-photo-filter.active   { background: rgba(192,132,252,0.2); border-color: rgba(192,132,252,0.55); color: #c084fc; }
+    #btn-capture-filter.active { background: rgba(245,158,11,0.2);  border-color: rgba(245,158,11,0.5);   color: #f59e0b; }
     button.danger { background: rgba(255,255,255,0.04); border-color: rgba(100,110,200,0.2); color: #778; }
     button.danger:hover { background: rgba(180,40,40,0.25); border-color: rgba(220,80,80,0.4); color: #f99; }
     button.go     { background: rgba(30,120,60,0.3); border-color: rgba(50,180,90,0.4); color: #7ee8a2; font-weight: 600; }
@@ -98,15 +100,21 @@
     button.icon-only { flex: none; padding: 7px 10px; }
 
     /* ── Legend dots ─────────────────────────────────────────── */
-    .legend { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 8px; }
+    .legend { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 3px 6px; }
     .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #99a; }
     .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 
+    /* ── Panel section separators ──────────────────────────────── */
+    #panel-body > div + div {
+      border-top: 1px solid rgba(100,110,200,0.08);
+      padding-top: 2px;
+    }
+
     /* ── Misc text ───────────────────────────────────────────── */
-    .sub-text { font-size: 10px; color: #556; margin-top: 4px; }
+    .sub-text { font-size: 10px; color: #778; margin-top: 4px; }
 
     #endpoint-box {
-      font-size: 10px; color: #667;
+      font-size: 10px; color: #889;
       background: rgba(255,255,255,0.03); border: 1px solid rgba(100,110,200,0.1);
       border-radius: 6px; padding: 5px 8px; line-height: 1.8;
     }
@@ -116,7 +124,7 @@
       border-radius: 7px; padding: 8px 10px; display: none;
     }
     #route-stats { font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 3px; }
-    #route-order { font-size: 10px; color: #556; line-height: 1.5; }
+    #route-order { font-size: 10px; color: #778; line-height: 1.5; }
 
     /* ── Waypoint markers ────────────────────────────────────── */
     .wp {
@@ -153,6 +161,13 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* ── Refresh dot stale pulse ─────────────────────────────── */
+    @keyframes dot-stale {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.35; }
+    }
+    #refresh-dot.stale { animation: dot-stale 1.6s ease-in-out infinite; }
+
     /* ── Live location dot ───────────────────────────────────── */
     .loc-dot {
       width: 13px; height: 13px; border-radius: 50%;
@@ -172,7 +187,7 @@
       display: flex; flex-direction: column; align-items: center; gap: 8px;
     }
     #loc-badge {
-      font-size: 9px; color: #556;
+      font-size: 9px; color: #778;
       background: rgba(13,13,30,0.85); border: 1px solid rgba(100,110,200,0.15);
       border-radius: 4px; padding: 2px 5px; white-space: nowrap;
     }
@@ -256,7 +271,7 @@
         <button id="btn-load" onclick="loadPhones()" style="flex:none;padding-left:10px;padding-right:10px;">Load phones</button>
       </div>
       <div style="display:flex;align-items:center;gap:5px;margin-top:4px;">
-        <span id="refresh-dot" style="display:none;width:6px;height:6px;border-radius:50%;flex-shrink:0;transition:background 0.4s;"></span>
+        <span id="refresh-dot" style="display:none;width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:background 0.4s;"></span>
         <div id="load-status" class="sub-text" style="margin-top:0;flex:1;"></div>
       </div>
     </div>
@@ -264,23 +279,29 @@
     <!-- Legend -->
     <div>
       <div class="sec-title">Legend</div>
-      <div style="display:flex;align-items:flex-start;gap:8px;">
-        <div class="legend" style="flex:2;">
-          <div class="legend-item"><span class="dot" style="background:#aaa"></span>Uncaptured</div>
-          <div class="legend-item"><span class="dot" style="background:#2ecc71"></span>Mine</div>
-          <div class="legend-item"><span class="dot" style="background:#3498db"></span>Cellmate</div>
-          <div class="legend-item"><span class="dot" style="background:#e74c3c"></span>Hostile</div>
-        </div>
-        <div style="flex:1;display:flex;flex-direction:column;gap:3px;">
-          <button id="btn-photo-filter" onclick="togglePhotoFilter()"
-                  style="font-size:11px;"
-                  title="Highlight phones that have a wiki photo">
-            📷 Wiki Photos
-          </button>
-          <div id="wiki-photo-status"
-               style="display:none;font-size:9px;color:#c084fc;text-align:center;opacity:0.85;line-height:1.3;"></div>
+      <div class="legend">
+        <div class="legend-item"><span class="dot" style="background:#aaa"></span>Uncaptured</div>
+        <div class="legend-item"><span class="dot" style="background:#2ecc71"></span>Mine</div>
+        <div class="legend-item"><span class="dot" style="background:#3498db"></span>Cellmate</div>
+        <div class="legend-item"><span class="dot" style="background:#e74c3c"></span>Hostile</div>
+        <div class="legend-item">
+          <span class="dot" style="background:#0d0d1a;border:2px solid #c084fc;"></span>Wiki photo
         </div>
       </div>
+    </div>
+
+    <!-- Filters -->
+    <div>
+      <div class="sec-title">Filters</div>
+      <div class="btn-row">
+        <button id="btn-photo-filter" onclick="togglePhotoFilter()"
+                style="font-size:11px;"
+                title="Highlight phones that have a wiki photo">
+          📷 Wiki Photos
+        </button>
+      </div>
+      <div id="wiki-photo-status" class="sub-text"
+           style="display:none;color:#c084fc;"></div>
     </div>
 
     <!-- Selection -->
@@ -290,9 +311,14 @@
         <button id="btn-click" onclick="setMode('click')" class="active" style="grid-column:1;grid-row:1;">Click</button>
         <button id="btn-lasso" onclick="cycleLasso()" style="grid-column:2;grid-row:1;">Lasso</button>
         <button id="btn-exclude-owned" onclick="toggleExcludeOwned()" style="grid-column:1/3;grid-row:2;" title="When active, lasso skips phones you already own">Skip Owned</button>
-        <button onclick="clearSelection()" class="danger icon-only" style="grid-column:3;grid-row:1/3;align-self:stretch;min-height:0;">✕</button>
+        <button onclick="clearSelection()" class="danger icon-only" style="grid-column:3;grid-row:1/3;align-self:stretch;" aria-label="Clear selection">✕</button>
       </div>
-      <div id="sel-count" class="sub-text">0 selected</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;">
+        <div id="sel-count" class="sub-text" style="margin-top:0;">0 selected</div>
+        <button id="btn-zoom-sel" onclick="zoomToSelection()" disabled
+                style="flex:none;font-size:10px;padding:3px 8px;min-height:0;opacity:0.5;"
+                title="Zoom map to selection" aria-label="Zoom to selection">🎯 zoom</button>
+      </div>
     </div>
 
     <!-- Transport -->
@@ -318,7 +344,7 @@
       <div class="sec-title">Route</div>
       <div class="btn-row">
         <button onclick="findRoute()" id="btn-route" class="go">Find optimal route</button>
-        <button onclick="clearRoute()" class="danger icon-only">✕</button>
+        <button onclick="clearRoute()" class="danger icon-only" aria-label="Clear route">✕</button>
       </div>
       <div id="spinner"></div>
       <div id="route-result" style="margin-top:10px;">
@@ -332,7 +358,7 @@
             <div id="stop-indicator" style="display:none;flex-direction:column;align-items:center;
                  justify-content:center;gap:4px;padding:9px 12px;
                  border-right:1px solid rgba(100,110,200,0.15);">
-              <div style="font-size:8px;color:#556;text-transform:uppercase;letter-spacing:0.9px;">targeting</div>
+              <div style="font-size:9px;color:#778;text-transform:uppercase;letter-spacing:0.9px;">targeting</div>
               <div style="display:flex;align-items:center;gap:7px;margin-top:1px;">
                 <div id="stop-badge" class="wp wp-active" style="width:32px;height:32px;font-size:14px;border-width:2.5px;flex-shrink:0;"></div>
                 <span style="font-size:12px;color:#889;">/<span id="stop-total-label" style="color:#bbc;font-weight:700;font-size:13px;margin-left:3px;"></span></span>
@@ -341,7 +367,7 @@
             <!-- RHS: leg switcher (expands to fill when stop-indicator hidden) -->
             <div style="flex:1;display:flex;flex-direction:column;align-items:center;
                  justify-content:center;gap:4px;padding:9px 6px;">
-              <div style="font-size:8px;color:#556;text-transform:uppercase;letter-spacing:0.9px;">leg</div>
+              <div style="font-size:9px;color:#778;text-transform:uppercase;letter-spacing:0.9px;">leg</div>
               <div style="display:flex;align-items:center;width:100%;margin-top:1px;">
                 <span id="leg-prev-hint" onclick="changeLeg(-1)" role="button" tabindex="0"
                       aria-label="Previous leg"
@@ -362,7 +388,7 @@
           </div>
           <!-- UNDO + SKIP -->
           <div id="tag-row" class="btn-row" style="margin-bottom:5px;display:none;">
-            <button id="btn-revert" onclick="revertLeg()" class="danger" style="font-size:11px;flex:0.6;" disabled>↩ UNDO</button>
+            <button id="btn-revert" onclick="revertLeg()" class="danger" style="font-size:11px;" disabled>↩ UNDO</button>
             <button onclick="tagCurrentLeg('skipped')" class="skipped" style="font-size:11px;">✕ SKIP</button>
           </div>
           <button onclick="openCurrentLeg()" class="maps" style="font-size:11px;width:100%;">
@@ -443,6 +469,7 @@ function updateRefreshDot() {
     color = '#2ecc71'; dot.title = 'Data feed healthy';
   }
   dot.style.background = color;
+  dot.classList.toggle('stale', age > 45_000 || _refreshFailCount >= 2);
   return color;
 }
 
@@ -555,6 +582,7 @@ async function loadPhones() {
     state.phones = data.phones;
     renderMarkers();
     setStatus(`${state.phones.length} phones loaded`, '#2ecc71');
+    document.getElementById('btn-load').textContent = 'Reload';
     updatePanelPeek();
     restoreEndpointMarkers();
     const routeData = state.lastRoute;
@@ -610,11 +638,12 @@ function waypointSize() {
 }
 
 function makeWpIcon(label, extraClass) {
-  const sz  = waypointSize();
-  const fs  = Math.max(6, Math.round(sz * 0.44));
-  const cls = ['wp', extraClass].filter(Boolean).join(' ');
+  const sz      = waypointSize();
+  const fs      = Math.max(6, Math.round(sz * 0.44));
+  const cls     = ['wp', extraClass].filter(Boolean).join(' ');
+  const showNum = sz >= 17 || extraClass === 'wp-active';  // always label current stop
   return L.divIcon({
-    html: `<div class="${cls}" style="width:${sz}px;height:${sz}px;font-size:${fs}px">${sz >= 17 ? label : ''}</div>`,
+    html: `<div class="${cls}" style="width:${sz}px;height:${sz}px;font-size:${fs}px">${showNum ? label : ''}</div>`,
     className: '', iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2],
   });
 }
@@ -660,7 +689,15 @@ map.on('zoomend', () => {
 function updateSelCount() {
   document.getElementById('sel-count').textContent =
     `${state.selectedIds.size} phone${state.selectedIds.size !== 1 ? 's' : ''} selected`;
+  const zb = document.getElementById('btn-zoom-sel');
+  if (zb) { zb.disabled = !state.selectedIds.size; zb.style.opacity = state.selectedIds.size ? '1' : '0.35'; }
   updatePanelPeek();
+}
+
+function zoomToSelection() {
+  if (!state.selectedIds.size) return;
+  const pts = state.phones.filter(p => state.selectedIds.has(p.id)).map(p => [p.lat, p.lon]);
+  if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [50, 50] });
 }
 
 // ── Selection mode ────────────────────────────────────────────────
