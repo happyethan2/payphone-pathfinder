@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import httpx
 from fastapi import FastAPI, HTTPException, Query
@@ -18,6 +19,7 @@ OSRM_URLS = {
 }
 VROOM_URL    = os.getenv("VROOM_URL", "http://vroom:3000")
 PAYPHONE_API = "https://payphonetag.com/api/payphones"
+WIKI_API     = "https://wiki.payphonetag.com/api.php"
 
 # Payphone tuple indices — adjust here if the live API changes
 IDX_ID     = 0
@@ -35,6 +37,13 @@ UNREACHABLE = 999_999_999
 _PHONES_CACHE: dict | None = None
 _PHONES_CACHE_AT: float    = 0.0
 _PHONES_CACHE_TTL: float   = 30.0  # seconds
+
+# ---------------------------------------------------------------------------
+# Wiki photo cache — paginate allimages once per TTL, extract phone IDs
+# ---------------------------------------------------------------------------
+_WIKI_CACHE: set | None = None
+_WIKI_CACHE_AT: float   = 0.0
+_WIKI_CACHE_TTL: float  = 300.0  # 5 minutes
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +91,44 @@ async def _fetch_phones_data() -> dict:
     _PHONES_CACHE    = resp.json()
     _PHONES_CACHE_AT = time.monotonic()
     return _PHONES_CACHE
+
+
+async def _fetch_wiki_photo_ids() -> set[int]:
+    """Paginate wiki allimages?aiprefix=Payphone- and return set of phone IDs with photos.
+
+    Filenames follow: Payphone-08826900X2-20260510_014129.jpg
+    Phone ID is extracted via regex, leading zeros stripped by int().
+    """
+    global _WIKI_CACHE, _WIKI_CACHE_AT
+    now = time.monotonic()
+    if _WIKI_CACHE is not None and (now - _WIKI_CACHE_AT) < _WIKI_CACHE_TTL:
+        return _WIKI_CACHE
+
+    has_photo: set[int] = set()
+    params: dict = {
+        "action":    "query",
+        "list":      "allimages",
+        "aiprefix":  "Payphone-",
+        "ailimit":   "500",
+        "format":    "json",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        while True:
+            resp = await client.get(WIKI_API, params=params)
+            resp.raise_for_status()
+            body = resp.json()
+            for img in body.get("query", {}).get("allimages", []):
+                m = re.match(r"^Payphone-(\d+)X\d+", img["name"])
+                if m:
+                    has_photo.add(int(m.group(1)))  # int() strips leading zeros
+            cont = body.get("continue", {}).get("aicontinue")
+            if not cont:
+                break
+            params["aicontinue"] = cont
+
+    _WIKI_CACHE    = has_photo
+    _WIKI_CACHE_AT = time.monotonic()
+    return _WIKI_CACHE
 
 
 def _resolve_player(data: dict, username: str, cell_tag: str | None):
@@ -225,6 +272,13 @@ async def bust_phones_cache():
     global _PHONES_CACHE_AT
     _PHONES_CACHE_AT = 0.0
     return {"ok": True}
+
+
+@app.get("/api/wiki-photos")
+async def get_wiki_photos():
+    """Return IDs of phones that have at least one user photo on the payphonetag wiki."""
+    ids = await _fetch_wiki_photo_ids()
+    return {"has_photo": sorted(ids)}
 
 
 @app.get("/api/phones")

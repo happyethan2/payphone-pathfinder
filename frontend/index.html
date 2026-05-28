@@ -270,6 +270,12 @@
         <div class="legend-item"><span class="dot" style="background:#3498db"></span>Cellmate</div>
         <div class="legend-item"><span class="dot" style="background:#e74c3c"></span>Hostile</div>
       </div>
+      <div style="margin-top:6px;">
+        <button id="btn-photo-filter" onclick="togglePhotoFilter()"
+                style="width:100%;font-size:10px;" title="Highlight phones missing a wiki photo">
+          📷 Highlight unphotographed
+        </button>
+      </div>
     </div>
 
     <!-- Selection -->
@@ -403,6 +409,8 @@ const state = {
   lassoLayer:      null,
   lassoDragging:   false,
   lassoExcludeOwned: false,
+  photoFilter:     false,   // highlight phones missing a wiki photo
+  wikiPhotoIds:    null,    // Set<number> loaded lazily; null = not yet fetched
   lastRoute:       null,
   mapsLegs:        [],
   currentLeg:      0,
@@ -573,9 +581,11 @@ function renderMarkers() {
 }
 
 function makeMarker(phone) {
-  const sel   = state.selectedIds.has(phone.id);
-  const color = STATUS_COLORS[phone.status] || '#888';
-  const m = L.circleMarker([phone.lat, phone.lon], mkStyle(color, sel));
+  const sel         = state.selectedIds.has(phone.id);
+  const color       = STATUS_COLORS[phone.status] || '#888';
+  const photoMissing = state.photoFilter && state.wikiPhotoIds !== null
+                       && !state.wikiPhotoIds.has(phone.id);
+  const m = L.circleMarker([phone.lat, phone.lon], mkStyle(color, sel, photoMissing));
   m.bindTooltip(makeTooltipHtml(phone), { direction: 'top', sticky: true });
   m.on('click', e => { L.DomEvent.stopPropagation(e); onMarkerClick(phone); });
   return m;
@@ -603,16 +613,20 @@ function makeWpIcon(label, extraClass) {
   });
 }
 
-function mkStyle(color, sel) {
-  return { radius: markerRadius(sel), fillColor: color, color: sel ? '#fff' : color,
-           weight: sel ? 2.5 : 1, fillOpacity: 0.9, opacity: 1 };
+function mkStyle(color, sel, photoMissing) {
+  const strokeColor  = photoMissing ? '#f39c12' : (sel ? '#fff' : 'rgba(0,0,0,0.3)');
+  const strokeWeight = photoMissing ? 3 : (sel ? 2.5 : 1);
+  return { radius: markerRadius(sel), fillColor: color, color: strokeColor,
+           weight: strokeWeight, fillOpacity: 0.9, opacity: 1 };
 }
 
 function refreshMarker(phone) {
   const m = state.markers[phone.id];
   if (!m) return;
-  const sel = state.selectedIds.has(phone.id);
-  m.setStyle(mkStyle(STATUS_COLORS[phone.status] || '#888', sel));
+  const sel          = state.selectedIds.has(phone.id);
+  const photoMissing = state.photoFilter && state.wikiPhotoIds !== null
+                       && !state.wikiPhotoIds.has(phone.id);
+  m.setStyle(mkStyle(STATUS_COLORS[phone.status] || '#888', sel, photoMissing));
   m.setRadius(markerRadius(sel));
 }
 
@@ -685,6 +699,32 @@ function clearSelection() {
 function toggleExcludeOwned() {
   state.lassoExcludeOwned = !state.lassoExcludeOwned;
   document.getElementById('btn-exclude-owned').classList.toggle('active', state.lassoExcludeOwned);
+}
+
+async function togglePhotoFilter() {
+  state.photoFilter = !state.photoFilter;
+  const btn = document.getElementById('btn-photo-filter');
+  btn.classList.toggle('active', state.photoFilter);
+
+  if (state.photoFilter && state.wikiPhotoIds === null) {
+    btn.textContent = '📷 Loading…';
+    btn.disabled = true;
+    try {
+      const res  = await fetch('/api/wiki-photos');
+      const data = await res.json();
+      state.wikiPhotoIds = new Set(data.has_photo);
+    } catch (_) {
+      state.photoFilter = false;
+      btn.classList.remove('active');
+      btn.disabled = false;
+      btn.textContent = '📷 Highlight unphotographed';
+      return;
+    }
+    btn.disabled = false;
+    btn.textContent = '📷 Highlight unphotographed';
+  }
+
+  state.phones.forEach(p => refreshMarker(p));
 }
 
 // ── Lasso (mouse) ─────────────────────────────────────────────────
