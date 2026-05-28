@@ -100,6 +100,15 @@
     button:disabled { opacity: 0.35; cursor: not-allowed; }
     button.icon-only { flex: none; padding: 7px 10px; min-width: 44px; }
 
+    /* ── Danger flash (clear buttons) ───────────────────────────── */
+    @keyframes flash-danger {
+      0%   { background: rgba(180,40,40,0.45); border-color: rgba(220,80,80,0.6);
+             color: #f99; box-shadow: 0 0 10px rgba(220,80,80,0.35); }
+      100% { background: rgba(255,255,255,0.04); border-color: rgba(100,110,200,0.2);
+             color: #778; box-shadow: none; }
+    }
+    .flash-danger { animation: flash-danger 0.65s ease-out forwards; }
+
     /* ── Legend dots ─────────────────────────────────────────── */
     .legend { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 3px 6px; }
     .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #99a; }
@@ -312,7 +321,7 @@
         <button id="btn-click" onclick="toggleClickMode()" class="active" style="grid-column:1;grid-row:1;">Click</button>
         <button id="btn-lasso" onclick="cycleLasso()" style="grid-column:2;grid-row:1;">Lasso</button>
         <button id="btn-exclude-owned" onclick="toggleExcludeOwned()" style="grid-column:1/3;grid-row:2;" title="When active, lasso skips phones you already own">Skip Owned</button>
-        <button onclick="clearSelection()" class="danger icon-only" style="grid-column:3;grid-row:1/3;align-self:stretch;" aria-label="Clear selection">✕</button>
+        <button id="btn-clear-sel" onclick="flashDanger('btn-clear-sel');clearSelection()" class="danger icon-only" style="grid-column:3;grid-row:1/3;align-self:stretch;" aria-label="Clear selection">✕</button>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;">
         <div id="sel-count" class="sub-text" style="margin-top:0;">0 selected</div>
@@ -345,7 +354,7 @@
       <div class="sec-title">Route</div>
       <div class="btn-row">
         <button onclick="findRoute()" id="btn-route" class="go">Find optimal route</button>
-        <button onclick="clearRoute()" class="danger icon-only" aria-label="Clear route">✕</button>
+        <button id="btn-clear-route" onclick="flashDanger('btn-clear-route');clearRoute()" class="danger icon-only" aria-label="Clear route">✕</button>
       </div>
       <div id="spinner"></div>
       <div id="route-result" style="margin-top:10px;">
@@ -727,6 +736,14 @@ function setMode(mode) {
     map.off('mousedown', onLassoStart);
     cleanupLasso();
   }
+}
+
+function flashDanger(id) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.classList.remove('flash-danger');
+  void btn.offsetWidth;  // force reflow so animation restarts if tapped again mid-flash
+  btn.classList.add('flash-danger');
 }
 
 function toggleClickMode() {
