@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import httpx
 from fastapi import FastAPI, HTTPException, Query
@@ -18,6 +19,7 @@ OSRM_URLS = {
 }
 VROOM_URL    = os.getenv("VROOM_URL", "http://vroom:3000")
 PAYPHONE_API = "https://payphonetag.com/api/payphones"
+WIKI_API     = "https://wiki.payphonetag.com/api.php"
 
 # Payphone tuple indices — adjust here if the live API changes
 IDX_ID     = 0
@@ -35,6 +37,13 @@ UNREACHABLE = 999_999_999
 _PHONES_CACHE: dict | None = None
 _PHONES_CACHE_AT: float    = 0.0
 _PHONES_CACHE_TTL: float   = 30.0  # seconds
+
+# ---------------------------------------------------------------------------
+# Wiki photo cache — paginate allimages once per TTL, extract phone IDs
+# ---------------------------------------------------------------------------
+_WIKI_CACHE: set | None = None
+_WIKI_CACHE_AT: float   = 0.0
+_WIKI_CACHE_TTL: float  = 300.0  # 5 minutes
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +91,82 @@ async def _fetch_phones_data() -> dict:
     _PHONES_CACHE    = resp.json()
     _PHONES_CACHE_AT = time.monotonic()
     return _PHONES_CACHE
+
+
+async def _fetch_wiki_photo_ids() -> set[int]:
+    """Return the set of sequential payphone API IDs that have at least one wiki photo.
+
+    Two-step process:
+      1. Paginate allimages?aiprefix=Payphone- to collect unique CAB codes
+         (e.g. "08835506X2") from filenames like Payphone-08835506X2-timestamp.jpg
+      2. Batch-fetch the corresponding wiki pages (50 at a time) and parse the
+         `| id = XXXX` template field, which holds the sequential payphone API ID.
+    """
+    global _WIKI_CACHE, _WIKI_CACHE_AT
+    now = time.monotonic()
+    if _WIKI_CACHE is not None and (now - _WIKI_CACHE_AT) < _WIKI_CACHE_TTL:
+        return _WIKI_CACHE
+
+    # ── Step 1: collect unique CAB codes from all uploaded images ──
+    cab_ids: set[str] = set()
+    img_params: dict = {
+        "action":   "query",
+        "list":     "allimages",
+        "aiprefix": "Payphone-",
+        "ailimit":  "500",
+        "format":   "json",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        while True:
+            resp = await client.get(WIKI_API, params=img_params)
+            resp.raise_for_status()
+            body = resp.json()
+            for img in body.get("query", {}).get("allimages", []):
+                m = re.match(r"^Payphone-(\d+X\d+)-", img["name"])
+                if m:
+                    cab_ids.add(m.group(1))
+            cont = body.get("continue", {}).get("aicontinue")
+            if not cont:
+                break
+            img_params["aicontinue"] = cont
+
+    # ── Step 2: batch-fetch wiki pages and extract sequential API id ──
+    has_photo: set[int] = set()
+    cab_list  = sorted(cab_ids)
+    batch_size = 50
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for i in range(0, len(cab_list), batch_size):
+            batch  = cab_list[i : i + batch_size]
+            titles = "|".join(f"Payphone:{cab}" for cab in batch)
+            resp = await client.get(WIKI_API, params={
+                "action":  "query",
+                "titles":  titles,
+                "prop":    "revisions",
+                "rvprop":  "content",
+                "rvslots": "*",
+                "format":  "json",
+            })
+            resp.raise_for_status()
+            body = resp.json()
+            for page in body.get("query", {}).get("pages", {}).values():
+                if "revisions" not in page:
+                    continue
+                rev = page["revisions"][0]
+                # Support both old MediaWiki (rev["*"]) and new (rev["slots"]["main"])
+                content = (
+                    rev.get("*")
+                    or rev.get("content")
+                    or (rev.get("slots") or {}).get("main", {}).get("*", "")
+                    or (rev.get("slots") or {}).get("main", {}).get("content", "")
+                    or ""
+                )
+                id_match = re.search(r"\|\s*id\s*=\s*(\d+)", content)
+                if id_match:
+                    has_photo.add(int(id_match.group(1)))
+
+    _WIKI_CACHE    = has_photo
+    _WIKI_CACHE_AT = time.monotonic()
+    return _WIKI_CACHE
 
 
 def _resolve_player(data: dict, username: str, cell_tag: str | None):
@@ -225,6 +310,13 @@ async def bust_phones_cache():
     global _PHONES_CACHE_AT
     _PHONES_CACHE_AT = 0.0
     return {"ok": True}
+
+
+@app.get("/api/wiki-photos")
+async def get_wiki_photos():
+    """Return IDs of phones that have at least one user photo on the payphonetag wiki."""
+    ids = await _fetch_wiki_photo_ids()
+    return {"has_photo": sorted(ids)}
 
 
 @app.get("/api/phones")
