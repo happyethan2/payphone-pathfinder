@@ -264,18 +264,22 @@
     <!-- Legend -->
     <div>
       <div class="sec-title">Legend</div>
-      <div style="display:flex;align-items:center;gap:8px;">
+      <div style="display:flex;align-items:flex-start;gap:8px;">
         <div class="legend" style="flex:2;">
           <div class="legend-item"><span class="dot" style="background:#aaa"></span>Uncaptured</div>
           <div class="legend-item"><span class="dot" style="background:#2ecc71"></span>Mine</div>
           <div class="legend-item"><span class="dot" style="background:#3498db"></span>Cellmate</div>
           <div class="legend-item"><span class="dot" style="background:#e74c3c"></span>Hostile</div>
         </div>
-        <button id="btn-photo-filter" onclick="togglePhotoFilter()"
-                style="font-size:11px;"
-                title="Highlight phones that have a wiki photo">
-          📷 Photos
-        </button>
+        <div style="flex:1;display:flex;flex-direction:column;gap:3px;">
+          <button id="btn-photo-filter" onclick="togglePhotoFilter()"
+                  style="font-size:11px;"
+                  title="Highlight phones that have a wiki photo">
+            📷 Wiki Photos
+          </button>
+          <div id="wiki-photo-status"
+               style="display:none;font-size:9px;color:#c084fc;text-align:center;opacity:0.85;line-height:1.3;"></div>
+        </div>
       </div>
     </div>
 
@@ -729,11 +733,17 @@ async function togglePhotoFilter() {
       state.photoFilter = false;
       btn.classList.remove('active');
       btn.disabled = false;
-      btn.textContent = '📷 Photos';
+      btn.textContent = '📷 Wiki Photos';
       return;
     }
     btn.disabled = false;
-    btn.textContent = '📷 Photos';
+    btn.textContent = '📷 Wiki Photos';
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    const statusEl = document.getElementById('wiki-photo-status');
+    if (statusEl) {
+      statusEl.textContent = `● updated ${now} · 5m cache`;
+      statusEl.style.display = 'block';
+    }
   }
 
   state.phones.forEach(p => refreshMarker(p));
