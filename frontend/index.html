@@ -424,8 +424,9 @@ const state = {
 };
 
 // ── Refresh health tracking ───────────────────────────────────────
-let _lastRefreshAt   = 0;
+let _lastRefreshAt    = 0;
 let _refreshFailCount = 0;
+let _wikiPhotoFetchedLabel = '';  // HH:MM:SS of last actual wiki fetch
 
 function updateRefreshDot() {
   const dot = document.getElementById('refresh-dot');
@@ -726,6 +727,7 @@ async function togglePhotoFilter() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       state.wikiPhotoIds = new Set((data.has_photo || []).map(Number));
+      _wikiPhotoFetchedLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
     } catch (_) {
       state.photoFilter = false;
       btn.classList.remove('active');
@@ -737,9 +739,8 @@ async function togglePhotoFilter() {
     btn.textContent = '📷 Wiki Photos';
   }
 
-  if (statusEl) {
-    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-    statusEl.textContent = `● updated ${now}`;
+  if (statusEl && _wikiPhotoFetchedLabel) {
+    statusEl.textContent = `● updated ${_wikiPhotoFetchedLabel}`;
     statusEl.style.display = 'block';
   }
 
