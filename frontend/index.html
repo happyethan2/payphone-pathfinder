@@ -413,10 +413,10 @@
 
 <!-- ── Status bar (set-endpoint prompts) ──────────────────────── -->
 <div id="status-bar" style="
-  display:none; position:fixed; bottom:52px; left:0; right:0; z-index:1002;
-  background:rgba(13,13,30,0.95); border-top:1px solid rgba(100,110,200,0.25);
-  padding:12px 20px; text-align:center;
-  font-size:13px; color:#c8d0ff; letter-spacing:0.2px;">
+  display:none; position:fixed; top:0; left:0; right:0; z-index:1002;
+  background:rgba(13,13,30,0.95); border-bottom:1px solid rgba(100,110,200,0.25);
+  padding:12px 20px; padding-top:max(12px, env(safe-area-inset-top));
+  text-align:center; font-size:13px; color:#c8d0ff; letter-spacing:0.2px;">
 </div>
 
 <!-- ── Floating GPS button ─────────────────────────────────────── -->
@@ -918,6 +918,12 @@ function hideStatusBar() {
 }
 
 function startSetEndpoints() {
+  if (state.mode === 'setStart' || state.mode === 'setEnd') {
+    document.getElementById('btn-set-endpoints').classList.remove('active');
+    setMode('click');
+    hideStatusBar();
+    return;
+  }
   document.getElementById('btn-set-endpoints').classList.add('active');
   setMode('setStart');
   showStatusBar('Tap your starting location on the map');
