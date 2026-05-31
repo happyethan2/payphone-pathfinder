@@ -1,3 +1,4 @@
+import math
 import os
 import re
 import time
@@ -61,6 +62,18 @@ class RouteRequest(BaseModel):
     start: StartEnd
     end: StartEnd
     profile: str  # "foot" | "bicycle" | "car"
+
+
+class OrienteerRequest(BaseModel):
+    start: StartEnd
+    profile: str                    # "foot" | "bicycle" | "car"
+    time_budget_s: int              # total time available in seconds
+    radius_km: float                # search radius from start
+    username: str
+    cell: str = ""
+    include_hostile: bool = True
+    include_uncaptured: bool = True
+    max_candidates: int = 120       # cap matrix size
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +269,15 @@ async def _osrm_route(coord_a: tuple[float, float], coord_b: tuple[float, float]
     if body.get("code") != "Ok" or not body.get("routes"):
         raise HTTPException(502, f"OSRM route error: {body.get('message')}")
     return body["routes"][0]
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in kilometres between two lat/lon points."""
+    R = 6_371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    return R * 2 * math.asin(math.sqrt(a))
 
 
 async def _vroom_solve(
@@ -479,6 +501,161 @@ async def solve_route(req: RouteRequest):
 
     return {
         "ordered_ids":      final_order,
+        "total_distance_m": total_distance,
+        "total_duration_s": total_duration,
+        "path": {
+            "type":     "FeatureCollection",
+            "features": features,
+        },
+        "legs": legs_summary,
+    }
+
+
+@app.post("/api/orienteer")
+async def solve_orienteer(req: OrienteerRequest):
+    """Time-budget orienteering: find the most phones capturable within req.time_budget_s seconds.
+
+    Automatically selects candidate phones within req.radius_km of the start point,
+    capped at req.max_candidates nearest phones to keep the OSRM matrix manageable.
+    The route loops back to start (vehicle end = start).
+    """
+    if req.profile not in OSRM_URLS:
+        raise HTTPException(400, f"Unknown profile '{req.profile}'. Use: foot, bicycle, car")
+    if not (req.include_hostile or req.include_uncaptured):
+        raise HTTPException(400, "At least one of include_hostile or include_uncaptured must be true")
+
+    # Resolve start coords
+    data = await _fetch_phones_data()
+    phone_lookup: dict[int, tuple[float, float]] = {}
+    for p in data.get("payphones", []):
+        if len(p) > IDX_LAT:
+            phone_lookup[p[IDX_ID]] = (p[IDX_LAT], p[IDX_LON])
+
+    if req.start.phone_id is not None:
+        if req.start.phone_id not in phone_lookup:
+            raise HTTPException(404, f"Phone {req.start.phone_id} not found")
+        start_lat, start_lon = phone_lookup[req.start.phone_id]
+    elif req.start.lat is not None and req.start.lon is not None:
+        start_lat, start_lon = req.start.lat, req.start.lon
+    else:
+        raise HTTPException(400, "start must have lat+lon or phone_id")
+
+    # Classify phones and filter by desired statuses
+    my_player_id, cellmate_player_ids, _ = _resolve_player(data, req.username, req.cell or None)
+    candidates: list[tuple[int, float, float]] = []  # (phone_id, lat, lon)
+
+    for p in data.get("payphones", []):
+        if len(p) <= IDX_STATUS or p[IDX_STATUS] != "active":
+            continue
+        status = _classify_phone(p, my_player_id, cellmate_player_ids)
+        if status == "mine" or status == "cellmate":
+            continue
+        if status == "hostile" and not req.include_hostile:
+            continue
+        if status == "uncaptured" and not req.include_uncaptured:
+            continue
+        lat, lon = p[IDX_LAT], p[IDX_LON]
+        dist = _haversine_km(start_lat, start_lon, lat, lon)
+        if dist <= req.radius_km:
+            candidates.append((p[IDX_ID], lat, lon))
+
+    if not candidates:
+        raise HTTPException(404, "No candidate phones found within the specified radius and filters")
+
+    # Cap to nearest N candidates by straight-line distance
+    if len(candidates) > req.max_candidates:
+        candidates.sort(key=lambda c: _haversine_km(start_lat, start_lon, c[1], c[2]))
+        candidates = candidates[: req.max_candidates]
+
+    # Build coordinate list: index 0 = start/end (loop), 1..N = candidate phones
+    all_coords: list[tuple[float, float]] = [(start_lat, start_lon)]
+    job_indices: list[tuple[int, int]] = []
+    for phone_id, lat, lon in candidates:
+        coord_idx = len(all_coords)
+        all_coords.append((lat, lon))
+        job_indices.append((phone_id, coord_idx))
+
+    # OSRM matrix
+    durations, distances = await _osrm_table(all_coords, req.profile)
+
+    # VROOM solve with time budget — vehicle loops back to start (end_index = 0)
+    vroom_req = {
+        "vehicles": [{
+            "id":              0,
+            "start_index":     0,
+            "end_index":       0,
+            "profile":         "driving",
+            "max_travel_time": req.time_budget_s,
+        }],
+        "jobs": [
+            {"id": phone_id, "location_index": coord_idx}
+            for phone_id, coord_idx in job_indices
+        ],
+        "matrices": {
+            "driving": {
+                "durations": durations,
+                "distances": distances,
+            }
+        },
+    }
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(VROOM_URL, json=vroom_req)
+        resp.raise_for_status()
+    body = resp.json()
+    if body.get("code", 0) != 0:
+        raise HTTPException(502, f"Vroom error: {body.get('error', 'unknown')}")
+
+    routes = body.get("routes", [])
+    if not routes:
+        raise HTTPException(502, "Vroom returned no routes")
+
+    ordered_ids = [s["id"] for s in routes[0].get("steps", []) if s.get("type") == "job"]
+
+    if not ordered_ids:
+        raise HTTPException(404, "No phones can be reached within the time budget")
+
+    # Build geometry — same as /api/route
+    visit_coords = [(start_lat, start_lon)] + [phone_lookup[pid] for pid in ordered_ids] + [(start_lat, start_lon)]
+    visit_labels = [None] + ordered_ids + [None]
+
+    features = []
+    total_distance = 0.0
+    total_duration = 0.0
+    legs_summary = []
+
+    for i in range(len(visit_coords) - 1):
+        leg = await _osrm_route(visit_coords[i], visit_coords[i + 1], req.profile)
+        features.append({
+            "type": "Feature",
+            "geometry": leg["geometry"],
+            "properties": {
+                "leg_index":  i,
+                "from_id":    visit_labels[i],
+                "to_id":      visit_labels[i + 1],
+                "distance_m": leg["distance"],
+                "duration_s": leg["duration"],
+            },
+        })
+        total_distance += leg["distance"]
+        total_duration += leg["duration"]
+        legs_summary.append({
+            "from_id":    visit_labels[i],
+            "to_id":      visit_labels[i + 1],
+            "distance_m": leg["distance"],
+            "duration_s": leg["duration"],
+            "steps": [
+                {
+                    "instruction": s.get("maneuver", {}).get("type", ""),
+                    "name":        s.get("name", ""),
+                    "distance_m":  s.get("distance", 0),
+                    "duration_s":  s.get("duration", 0),
+                }
+                for s in leg.get("legs", [{}])[0].get("steps", [])
+            ],
+        })
+
+    return {
+        "ordered_ids":      ordered_ids,
         "total_distance_m": total_distance,
         "total_duration_s": total_duration,
         "path": {

@@ -315,7 +315,7 @@
     </div>
 
     <!-- Selection -->
-    <div>
+    <div id="section-selection">
       <div class="sec-title">Selection</div>
       <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:5px;">
         <button id="btn-click" onclick="toggleClickMode()" class="active" style="grid-column:1;grid-row:1;">Click</button>
@@ -352,11 +352,48 @@
     <!-- Route -->
     <div>
       <div class="sec-title">Route</div>
-      <div class="btn-row">
-        <button onclick="findRoute()" id="btn-route" class="go">Find optimal route</button>
-        <button id="btn-clear-route" onclick="flashDanger('btn-clear-route');clearRoute()" class="danger icon-only" aria-label="Clear route">✕</button>
+      <!-- Tab row -->
+      <div class="btn-row" style="margin-bottom:8px;">
+        <button id="btn-tab-optimal"   onclick="setRouteMode('optimal')"   class="active">Optimal</button>
+        <button id="btn-tab-orienteer" onclick="setRouteMode('orienteer')">Orienteer</button>
       </div>
-      <div id="spinner"></div>
+
+      <!-- Optimal pane -->
+      <div id="pane-optimal">
+        <div class="btn-row">
+          <button onclick="findRoute()" id="btn-route" class="go">Find optimal route →</button>
+          <button id="btn-clear-route" onclick="flashDanger('btn-clear-route');clearRoute()" class="danger icon-only" aria-label="Clear route">✕</button>
+        </div>
+        <div id="spinner"></div>
+      </div>
+
+      <!-- Orienteer pane -->
+      <div id="pane-orienteer" style="display:none;">
+        <div class="sec-title" style="margin-bottom:3px;margin-top:2px;">Time budget</div>
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:8px;">
+          <button class="icon-only danger" onclick="adjustBudget(-1800)" style="flex:none;">−</button>
+          <div id="orienteer-budget-display" style="flex:1;text-align:center;font-size:13px;font-weight:700;color:#dde;">2h 0m</div>
+          <button class="icon-only go" onclick="adjustBudget(1800)" style="flex:none;">+</button>
+        </div>
+        <div class="sec-title" style="margin-bottom:3px;">Radius from start</div>
+        <div class="btn-row" style="margin-bottom:8px;">
+          <button id="btn-radius-5"  onclick="setOrienteerRadius(5)">5 km</button>
+          <button id="btn-radius-10" onclick="setOrienteerRadius(10)" class="active">10 km</button>
+          <button id="btn-radius-20" onclick="setOrienteerRadius(20)">20 km</button>
+          <button id="btn-radius-30" onclick="setOrienteerRadius(30)">30 km</button>
+        </div>
+        <div class="sec-title" style="margin-bottom:3px;">Consider</div>
+        <div class="btn-row" style="margin-bottom:8px;">
+          <button id="btn-orienteer-hostile"    onclick="toggleOrienteerFilter('hostile')"    class="active">Hostile</button>
+          <button id="btn-orienteer-uncaptured" onclick="toggleOrienteerFilter('uncaptured')" class="active">Uncaptured</button>
+        </div>
+        <div class="btn-row">
+          <button onclick="findOrienteerRoute()" id="btn-orienteer" class="go">Find best route →</button>
+          <button id="btn-clear-route-orienteer" onclick="flashDanger('btn-clear-route-orienteer');clearRoute()" class="danger icon-only" aria-label="Clear route">✕</button>
+        </div>
+        <div id="spinner-orienteer" style="display:none;width:18px;height:18px;margin:4px auto;border:2px solid rgba(100,110,200,0.2);border-top-color:#6677ff;border-radius:50%;animation:spin 0.7s linear infinite;"></div>
+      </div>
+
       <div id="route-result" style="margin-top:10px;">
         <div id="route-stats"></div>
         <div id="maps-nav" style="display:none;margin-top:8px;">
@@ -457,6 +494,11 @@ const state = {
   currentLeg:      0,
   routeProgress:   0,   // index into routeOrderedIds (current stop being visited)
   routeOrderedIds: [],  // ordered_ids of active route (set at display time, separate from lastRoute)
+  routeMode:           'optimal',   // 'optimal' | 'orienteer'
+  orienteerBudgetS:    7200,        // default 2h
+  orienteerRadiusKm:   10,          // default 10km
+  orienteerHostile:    true,
+  orienteerUncaptured: true,
 };
 
 // ── Refresh health tracking ───────────────────────────────────────
@@ -1016,6 +1058,95 @@ async function findRoute() {
   }
 }
 
+// ── Route mode (Optimal / Orienteer tab) ─────────────────────────
+function setRouteMode(mode) {
+  state.routeMode = mode;
+  document.getElementById('pane-optimal').style.display    = mode === 'optimal'   ? '' : 'none';
+  document.getElementById('pane-orienteer').style.display  = mode === 'orienteer' ? '' : 'none';
+  document.getElementById('section-selection').style.display = mode === 'orienteer' ? 'none' : '';
+  document.getElementById('btn-tab-optimal').classList.toggle('active',   mode === 'optimal');
+  document.getElementById('btn-tab-orienteer').classList.toggle('active', mode === 'orienteer');
+  saveSession();
+}
+
+// ── Orienteer controls ────────────────────────────────────────────
+function formatBudget(s) {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}
+
+function updateBudgetDisplay() {
+  const el = document.getElementById('orienteer-budget-display');
+  if (el) el.textContent = formatBudget(state.orienteerBudgetS);
+}
+
+function adjustBudget(deltaSecs) {
+  state.orienteerBudgetS = Math.max(1800, Math.min(28800, state.orienteerBudgetS + deltaSecs));
+  updateBudgetDisplay();
+  saveSession();
+}
+
+function setOrienteerRadius(km) {
+  state.orienteerRadiusKm = km;
+  [5, 10, 20, 30].forEach(r => {
+    const btn = document.getElementById(`btn-radius-${r}`);
+    if (btn) btn.classList.toggle('active', r === km);
+  });
+  saveSession();
+}
+
+function toggleOrienteerFilter(type) {
+  if (type === 'hostile') {
+    if (state.orienteerHostile && !state.orienteerUncaptured) return; // must keep at least one
+    state.orienteerHostile = !state.orienteerHostile;
+    document.getElementById('btn-orienteer-hostile').classList.toggle('active', state.orienteerHostile);
+  } else {
+    if (!state.orienteerHostile && state.orienteerUncaptured) return;
+    state.orienteerUncaptured = !state.orienteerUncaptured;
+    document.getElementById('btn-orienteer-uncaptured').classList.toggle('active', state.orienteerUncaptured);
+  }
+  saveSession();
+}
+
+async function findOrienteerRoute() {
+  if (!state.start) { alert('Set a start point first.'); return; }
+  const username = document.getElementById('username').value.trim();
+  if (!username) { alert('Enter username first.'); return; }
+
+  document.getElementById('btn-orienteer').disabled = true;
+  document.getElementById('spinner-orienteer').style.display = 'block';
+  document.getElementById('route-result').style.display = 'none';
+
+  try {
+    const res = await fetch('/api/orienteer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        start:              state.start,
+        profile:            state.profile,
+        time_budget_s:      state.orienteerBudgetS,
+        radius_km:          state.orienteerRadiusKm,
+        username:           username,
+        include_hostile:    state.orienteerHostile,
+        include_uncaptured: state.orienteerUncaptured,
+      }),
+    });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || `HTTP ${res.status}`); }
+    const data = await res.json();
+    displayRoute(data);
+    state.lastRoute = data;
+    updatePanelPeek();
+    saveSession();
+  } catch (e) {
+    alert(`Orienteer error: ${e.message}`);
+  } finally {
+    document.getElementById('btn-orienteer').disabled = false;
+    document.getElementById('spinner-orienteer').style.display = 'none';
+  }
+}
+
 // Generate n rainbow colours spread evenly across the visible spectrum (red → violet).
 // Adjacent legs share similar hues so the path reads as a continuous gradient.
 function rainbowColors(n) {
@@ -1064,6 +1195,7 @@ function displayRoute(data) {
   document.getElementById('route-stats').textContent = `${km} km · ${mins} min · ${ordered_ids.length} stops`;
   document.getElementById('route-result').style.display = 'block';
   updateMapsLink(data);
+  startBackgroundRefresh();  // switch to active polling while navigating a route
 }
 
 function clearRoute() {
@@ -1079,6 +1211,7 @@ function clearRoute() {
   document.getElementById('stop-indicator').style.display = 'none';
   updatePanelPeek();
   saveSession();
+  startBackgroundRefresh();  // switch back to idle polling when route is cleared
 }
 
 // ── Google Maps legs ──────────────────────────────────────────────
@@ -1087,7 +1220,8 @@ function clearRoute() {
 const GMAPS_STOPS_PER_LEG = 10; // origin + 8 waypoints + destination
 
 function buildLegs(data) {
-  if (!data || !state.start || !state.end) return [];
+  if (!data || !state.start) return [];
+  const _end = state.end || state.start;  // orienteer mode loops back to start
 
   const phoneLookup = Object.fromEntries(state.phones.map(p => [p.id, p]));
   const mode = { foot: 'walking', bicycle: 'bicycling', car: 'driving' }[state.profile] || 'walking';
@@ -1096,7 +1230,7 @@ function buildLegs(data) {
   const all = [
     [state.start.lat, state.start.lon],
     ...data.ordered_ids.map(id => { const p = phoneLookup[id]; return p ? [p.lat, p.lon] : null; }).filter(Boolean),
-    [state.end.lat, state.end.lon],
+    [_end.lat, _end.lon],
   ];
 
   if (all.length < 2) return [];
@@ -1336,12 +1470,17 @@ const SESSION_KEY = 'payphone_pathfinder_session';
 function saveSession() {
   try {
     localStorage.setItem(SESSION_KEY, JSON.stringify({
-      username:    document.getElementById('username').value.trim(),
-      profile:     state.profile,
-      selectedIds: Array.from(state.selectedIds),
-      start:       state.start,
-      end:         state.end,
-      lastRoute:   state.lastRoute,
+      username:            document.getElementById('username').value.trim(),
+      profile:             state.profile,
+      selectedIds:         Array.from(state.selectedIds),
+      start:               state.start,
+      end:                 state.end,
+      lastRoute:           state.lastRoute,
+      routeMode:           state.routeMode,
+      orienteerBudgetS:    state.orienteerBudgetS,
+      orienteerRadiusKm:   state.orienteerRadiusKm,
+      orienteerHostile:    state.orienteerHostile,
+      orienteerUncaptured: state.orienteerUncaptured,
     }));
   } catch (_) {}
 }
@@ -1357,6 +1496,19 @@ function restoreSession() {
     if (s.start)       state.start     = s.start;
     if (s.end)         state.end       = s.end;
     if (s.lastRoute)   state.lastRoute = s.lastRoute;
+    if (s.routeMode)                     setRouteMode(s.routeMode);
+    if (s.orienteerBudgetS  !== undefined) { state.orienteerBudgetS  = s.orienteerBudgetS;  updateBudgetDisplay(); }
+    if (s.orienteerRadiusKm !== undefined)   setOrienteerRadius(s.orienteerRadiusKm);
+    if (s.orienteerHostile  !== undefined) {
+      state.orienteerHostile  = s.orienteerHostile;
+      const b = document.getElementById('btn-orienteer-hostile');
+      if (b) b.classList.toggle('active', state.orienteerHostile);
+    }
+    if (s.orienteerUncaptured !== undefined) {
+      state.orienteerUncaptured = s.orienteerUncaptured;
+      const b = document.getElementById('btn-orienteer-uncaptured');
+      if (b) b.classList.toggle('active', state.orienteerUncaptured);
+    }
     return !!s.username;
   } catch (_) {
     return false;
@@ -1381,7 +1533,8 @@ function restoreEndpointMarkers() {
 
 // ── Background phone refresh ──────────────────────────────────────
 let refreshTimer = null;
-const REFRESH_INTERVAL_MS = 10 * 1000;  // 10s — safe with 30s server-side cache
+const REFRESH_INTERVAL_ACTIVE_MS = 4_000;   // navigating a route — faster updates
+const REFRESH_INTERVAL_IDLE_MS   = 10_000;  // no active route — relaxed polling
 
 async function refreshPhones() {
   const username = document.getElementById('username').value.trim();
@@ -1396,6 +1549,15 @@ async function refreshPhones() {
       const updated = newMap[phone.id];
       if (!updated) continue;
       if (updated.status !== phone.status || updated.holder_name !== phone.holder_name) {
+        // Optimistic claiming: if the current route target transitions hostile→unclaimed,
+        // treat it as 'mine' immediately so the marker draws green without a grey flicker.
+        const isCurrentTarget =
+          state.routeOrderedIds.length &&
+          state.routeProgress < state.routeOrderedIds.length &&
+          phone.id === state.routeOrderedIds[state.routeProgress];
+        if (isCurrentTarget && phone.status === 'hostile' && updated.status === 'unclaimed') {
+          updated.status = 'mine';
+        }
         phone.status      = updated.status;
         phone.holder_name = updated.holder_name;
         const m = state.markers[phone.id];
@@ -1407,6 +1569,7 @@ async function refreshPhones() {
       }
     }
     // Auto-advance route progress when the current target stop is tagged as ours
+    let _advanced = false;
     while (
       state.routeOrderedIds.length &&
       state.routeProgress < state.routeOrderedIds.length &&
@@ -1421,9 +1584,12 @@ async function refreshPhones() {
       if (m) m.setIcon(makeWpIcon(ordIdx + 1, 'wp-tagged'));
       state.nodeStates[targetId] = 'tagged';
       state.routeProgress++;
+      _advanced = true;
       if (navigator.vibrate) navigator.vibrate([15, 40, 15]);
       renderLeg();
     }
+    // Re-evaluate refresh rate: may switch to idle once all stops are completed
+    if (_advanced) startBackgroundRefresh();
 
     _lastRefreshAt    = Date.now();
     _refreshFailCount = 0;
@@ -1444,7 +1610,9 @@ async function manualRefreshPhones() {
 
 function startBackgroundRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(refreshPhones, REFRESH_INTERVAL_MS);
+  const interval = (state.routeOrderedIds.length && state.routeProgress < state.routeOrderedIds.length)
+    ? REFRESH_INTERVAL_ACTIVE_MS : REFRESH_INTERVAL_IDLE_MS;
+  refreshTimer = setInterval(refreshPhones, interval);
 }
 
 document.addEventListener('visibilitychange', () => {
