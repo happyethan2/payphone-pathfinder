@@ -610,11 +610,11 @@ async def solve_orienteer(req: OrienteerRequest):
     # VROOM solve — A→B with time budget and per-stop service time
     vroom_req = {
         "vehicles": [{
-            "id":              0,
-            "start_index":     0,
-            "end_index":       end_coord_idx,
-            "profile":         "driving",
-            "max_travel_time": req.time_budget_s,
+            "id":          0,
+            "start_index": 0,
+            "end_index":   end_coord_idx,
+            "profile":     "driving",
+            "time_window": [0, req.time_budget_s],
         }],
         "jobs": [
             {"id": phone_id, "location_index": coord_idx, "service": req.service_time_s}

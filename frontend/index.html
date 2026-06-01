@@ -161,10 +161,7 @@
       width: 100%;
       width: -webkit-fill-available;
       min-width: 0; max-width: 100%;
-      /* Explicit height + zero vertical padding: lets the browser vertically
-         centre the native time widget instead of top-aligning it. */
-      height: 38px;
-      padding: 0 9px;
+      padding: 9px 9px;
       background: rgba(255,255,255,0.05); border: 1px solid rgba(100,110,200,0.2);
       border-radius: 7px; color: #dde;
       font-size: 13px; font-weight: 600;
@@ -424,16 +421,11 @@
     <div id="panel-tab-orienteer" style="display:none;">
 
       <div>
-        <div class="sec-title">Orienteer</div>
-        <div class="sec-title" style="margin-bottom:4px;margin-top:6px;">Arrive by</div>
+        <div class="sec-title" style="margin-bottom:4px;">Arrive by</div>
         <div style="display:grid;margin-bottom:8px;">
           <input type="time" id="orienteer-arrive-by">
         </div>
-        <div class="sec-title" style="margin-bottom:3px;">Consider</div>
-        <div class="btn-row" style="margin-bottom:4px;">
-          <button id="btn-orienteer-hostile"    onclick="toggleOrienteerFilter('hostile')"    class="active">Hostile</button>
-          <button id="btn-orienteer-uncaptured" onclick="toggleOrienteerFilter('uncaptured')" class="active">Uncaptured</button>
-        </div>
+        <div class="sec-title" style="margin-bottom:3px;">Route</div>
         <div class="btn-row">
           <button onclick="findOrienteerRoute()" id="btn-orienteer" class="go">Find best route →</button>
           <button id="btn-clear-route-orienteer" onclick="flashDanger('btn-clear-route-orienteer');clearRoute()" class="danger icon-only" aria-label="Clear route">✕</button>
@@ -543,10 +535,8 @@ const state = {
   currentLeg:      0,
   routeProgress:   0,   // index into routeOrderedIds (current stop being visited)
   routeOrderedIds: [],  // ordered_ids of active route (set at display time, separate from lastRoute)
-  routeMode:           'route',      // 'route' | 'orienteer'
-  orienteerArriveBy:   '',           // HH:MM string for orienteer arrive-by time
-  orienteerHostile:    true,
-  orienteerUncaptured: true,
+  routeMode:         'route',   // 'route' | 'orienteer'
+  orienteerArriveBy: '',        // HH:MM string for orienteer arrive-by time
 };
 
 // ── Refresh health tracking ───────────────────────────────────────
@@ -1121,18 +1111,6 @@ function computeOrienteerBudget() {
   return Math.max(60, Math.floor((arrive - now) / 1000) - ORIENTEER_BUFFER_S);
 }
 
-function toggleOrienteerFilter(type) {
-  if (type === 'hostile') {
-    if (state.orienteerHostile && !state.orienteerUncaptured) return; // must keep at least one
-    state.orienteerHostile = !state.orienteerHostile;
-    document.getElementById('btn-orienteer-hostile').classList.toggle('active', state.orienteerHostile);
-  } else {
-    if (!state.orienteerHostile && state.orienteerUncaptured) return;
-    state.orienteerUncaptured = !state.orienteerUncaptured;
-    document.getElementById('btn-orienteer-uncaptured').classList.toggle('active', state.orienteerUncaptured);
-  }
-  saveSession();
-}
 
 async function findOrienteerRoute() {
   if (!state.start) { alert('Set a start point first.'); return; }
@@ -1152,10 +1130,8 @@ async function findOrienteerRoute() {
         end:                state.end,
         profile:            state.profile,
         time_budget_s:      computeOrienteerBudget(),
-        service_time_s:     SERVICE_TIME_S[state.profile] || 60,
-        username:           username,
-        include_hostile:    state.orienteerHostile,
-        include_uncaptured: state.orienteerUncaptured,
+        service_time_s: SERVICE_TIME_S[state.profile] || 60,
+        username:       username,
       }),
     });
     if (!res.ok) {
@@ -1221,9 +1197,11 @@ function displayRoute(data) {
   const allCoords = path.features.flatMap(f => f.geometry.coordinates.map(([lon, lat]) => [lat, lon]));
   if (allCoords.length) map.fitBounds(L.latLngBounds(allCoords), { padding: [50, 50] });
 
-  const km   = (total_distance_m / 1000).toFixed(1);
-  const mins = Math.round(total_duration_s / 60);
-  document.getElementById('route-stats').textContent = `${km} km · ${mins} min · ${ordered_ids.length} stops`;
+  const km      = (total_distance_m / 1000).toFixed(1);
+  const mins    = Math.round(total_duration_s / 60);
+  const arriveAt = new Date(Date.now() + total_duration_s * 1000);
+  const timeStr  = arriveAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+  document.getElementById('route-stats').textContent = `${km} km · ${mins} min · ${timeStr} · ${ordered_ids.length} stops`;
   document.getElementById('route-result').style.display = 'block';
   updateMapsLink(data);
   startBackgroundRefresh();  // switch to active polling while navigating a route
@@ -1508,9 +1486,7 @@ function saveSession() {
       end:                 state.end,
       lastRoute:           state.lastRoute,
       routeMode:           state.routeMode,
-      orienteerArriveBy:   document.getElementById('orienteer-arrive-by')?.value || '',
-      orienteerHostile:    state.orienteerHostile,
-      orienteerUncaptured: state.orienteerUncaptured,
+      orienteerArriveBy: document.getElementById('orienteer-arrive-by')?.value || '',
     }));
   } catch (_) {}
 }
@@ -1531,16 +1507,6 @@ function restoreSession() {
       const el = document.getElementById('orienteer-arrive-by');
       if (el) el.value = s.orienteerArriveBy;
       state.orienteerArriveBy = s.orienteerArriveBy;
-    }
-    if (s.orienteerHostile !== undefined) {
-      state.orienteerHostile = s.orienteerHostile;
-      const b = document.getElementById('btn-orienteer-hostile');
-      if (b) b.classList.toggle('active', state.orienteerHostile);
-    }
-    if (s.orienteerUncaptured !== undefined) {
-      state.orienteerUncaptured = s.orienteerUncaptured;
-      const b = document.getElementById('btn-orienteer-uncaptured');
-      if (b) b.classList.toggle('active', state.orienteerUncaptured);
     }
     // setPanelTab called last so its saveSession() captures all fully-restored values.
     // Map legacy 'optimal' value to 'route'.
