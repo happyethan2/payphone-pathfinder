@@ -1,7 +1,7 @@
 services:
   osrm-foot:
     image: ghcr.io/project-osrm/osrm-backend
-    command: osrm-routed --algorithm mld /data/australia-latest.osrm
+    command: osrm-routed --algorithm mld --max-table-size 200 /data/australia-latest.osrm
     volumes:
       - ./osrm-data/foot:/data:ro
     networks:
@@ -11,7 +11,7 @@ services:
 
   osrm-bicycle:
     image: ghcr.io/project-osrm/osrm-backend
-    command: osrm-routed --algorithm mld /data/australia-latest.osrm
+    command: osrm-routed --algorithm mld --max-table-size 200 /data/australia-latest.osrm
     volumes:
       - ./osrm-data/bicycle:/data:ro
     networks:
@@ -21,7 +21,7 @@ services:
 
   osrm-car:
     image: ghcr.io/project-osrm/osrm-backend
-    command: osrm-routed --algorithm mld /data/australia-latest.osrm
+    command: osrm-routed --algorithm mld --max-table-size 200 /data/australia-latest.osrm
     volumes:
       - ./osrm-data/car:/data:ro
     networks:

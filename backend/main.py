@@ -239,6 +239,12 @@ async def _osrm_table(coords: list[tuple[float, float]], profile: str) -> tuple[
     url = f"{base}/table/v1/driving/{coord_str}"
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.get(url, params={"annotations": "duration,distance"})
+        if resp.status_code == 400:
+            raise HTTPException(
+                502,
+                f"OSRM rejected the table request ({len(coords)} coordinates). "
+                "The --max-table-size limit may be too low — check docker-compose.yml.",
+            )
         resp.raise_for_status()
     body = resp.json()
     if body.get("code") != "Ok":
