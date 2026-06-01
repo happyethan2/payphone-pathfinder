@@ -161,7 +161,10 @@
       width: 100%;
       width: -webkit-fill-available;
       min-width: 0; max-width: 100%;
-      padding: 7px 9px;
+      /* Explicit height + zero vertical padding: lets the browser vertically
+         centre the native time widget instead of top-aligning it. */
+      height: 38px;
+      padding: 0 9px;
       background: rgba(255,255,255,0.05); border: 1px solid rgba(100,110,200,0.2);
       border-radius: 7px; color: #dde;
       font-size: 13px; font-weight: 600;
@@ -1155,7 +1158,13 @@ async function findOrienteerRoute() {
         include_uncaptured: state.orienteerUncaptured,
       }),
     });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || `HTTP ${res.status}`); }
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      const detail = Array.isArray(e.detail)
+        ? e.detail.map(d => `${d.loc?.slice(-1)[0] ?? ''}: ${d.msg ?? JSON.stringify(d)}`).join('; ')
+        : (e.detail || `HTTP ${res.status}`);
+      throw new Error(detail);
+    }
     const data = await res.json();
     displayRoute(data);
     state.lastRoute = data;
