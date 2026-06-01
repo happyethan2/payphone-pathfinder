@@ -27,15 +27,16 @@
       -webkit-backdrop-filter: blur(10px);
       display: flex; flex-direction: column;
       max-height: 78vh;
-      transform: translateY(calc(100% - 52px));
+      transform: translateY(calc(100% - 54px));
       transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
       will-change: transform;
     }
     #panel.open { transform: translateY(0); }
 
     #panel-handle {
-      height: 52px; flex-shrink: 0;
-      display: flex; align-items: center; gap: 8px;
+      flex-shrink: 0;
+      display: flex; flex-direction: column; align-items: center;
+      padding: 10px 0 0;
       user-select: none;
       border-bottom: 1px solid transparent;
     }
@@ -43,13 +44,37 @@
     #panel-handle-pill {
       width: 36px; height: 4px;
       background: rgba(100,110,200,0.4); border-radius: 2px; flex-shrink: 0;
-      margin-left: 12px; cursor: pointer; touch-action: manipulation;
+      cursor: pointer; touch-action: manipulation;
     }
+
+    /* ── Panel tabs ──────────────────────────────────────────────── */
+    #panel-tab-bar {
+      display: flex; width: 100%;
+      margin-top: 6px; flex: 1;
+    }
+    .panel-tab {
+      flex: 1;
+      background: transparent; border: none;
+      border-bottom: 2px solid transparent; border-radius: 0;
+      color: #556; font-size: 11px; font-weight: 700;
+      letter-spacing: 0.7px; text-transform: uppercase;
+      padding: 8px 0 7px; min-height: 0;
+      cursor: pointer; touch-action: manipulation;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .panel-tab.active {
+      color: #c8d0ff;
+      border-bottom-color: rgba(130,160,255,0.75);
+    }
+    .panel-tab:hover { color: #99a; background: transparent; }
 
     #panel-body {
       padding: 8px 14px 20px;
       display: flex; flex-direction: column; gap: 10px;
-      overflow-y: auto; -webkit-overflow-scrolling: touch;
+      overflow-y: auto; overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+      touch-action: pan-y;
       flex: 1;
     }
 
@@ -245,11 +270,12 @@
       }
       #panel.open { transform: none !important; }
       #panel-handle {
-        height: auto; padding: 6px 10px;
+        padding: 6px 0 0;
         border-bottom-color: rgba(100,110,200,0.15) !important;
       }
       #panel-handle-pill { display: none; }
-      #panel-body { max-height: calc(100vh - 110px); }
+      #panel-tab-bar { margin-top: 0; }
+      #panel-body { max-height: calc(100vh - 90px); }
       #fab-stack   { bottom: 20px; }
     }
 
@@ -270,11 +296,9 @@
 <div id="panel">
   <div id="panel-handle">
     <div id="panel-handle-pill" onclick="togglePanel()"></div>
-    <div style="flex:1;display:flex;gap:4px;margin:0 10px;">
-      <button id="btn-panel-tab-route"     onclick="setPanelTab('route')"     class="active"
-              style="font-size:12px;font-weight:600;">Route</button>
-      <button id="btn-panel-tab-orienteer" onclick="setPanelTab('orienteer')"
-              style="font-size:12px;font-weight:600;">Orienteer</button>
+    <div id="panel-tab-bar">
+      <button id="btn-panel-tab-route"     class="panel-tab active" onclick="setPanelTab('route')">Route</button>
+      <button id="btn-panel-tab-orienteer" class="panel-tab"        onclick="setPanelTab('orienteer')">Orienteer</button>
     </div>
   </div>
 
@@ -377,8 +401,7 @@
       <div>
         <div class="sec-title">Orienteer</div>
         <div class="sec-title" style="margin-bottom:4px;margin-top:6px;">Arrive by</div>
-        <input type="time" id="orienteer-arrive-by">
-        <div class="sub-text" style="margin-top:3px;margin-bottom:8px;">incl. 10 min safety buffer</div>
+        <input type="time" id="orienteer-arrive-by" style="margin-bottom:8px;">
         <div class="sec-title" style="margin-bottom:3px;">Consider</div>
         <div class="btn-row" style="margin-bottom:4px;">
           <button id="btn-orienteer-hostile"    onclick="toggleOrienteerFilter('hostile')"    class="active">Hostile</button>
