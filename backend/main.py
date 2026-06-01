@@ -74,7 +74,7 @@ class OrienteerRequest(BaseModel):
     cell: str = ""
     include_hostile: bool = True
     include_uncaptured: bool = True
-    max_candidates: int = 120       # cap matrix size
+    max_candidates: int = 50        # cap VROOM input; quality degrades above ~50 jobs for 1 vehicle
 
 
 # ---------------------------------------------------------------------------
