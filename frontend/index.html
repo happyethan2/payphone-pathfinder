@@ -35,19 +35,15 @@
 
     #panel-handle {
       height: 52px; flex-shrink: 0;
-      display: flex; align-items: center; justify-content: center; gap: 8px;
-      cursor: pointer; user-select: none; touch-action: manipulation;
+      display: flex; align-items: center; gap: 8px;
+      user-select: none;
       border-bottom: 1px solid transparent;
     }
     #panel.open #panel-handle { border-bottom-color: rgba(100,110,200,0.15); }
     #panel-handle-pill {
       width: 36px; height: 4px;
       background: rgba(100,110,200,0.4); border-radius: 2px; flex-shrink: 0;
-    }
-    #panel-peek {
-      font-size: 11px; color: #778; letter-spacing: 0.2px;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      max-width: 220px;
+      margin-left: 12px; cursor: pointer; touch-action: manipulation;
     }
 
     #panel-body {
@@ -115,10 +111,21 @@
     .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 
     /* ── Panel section separators ──────────────────────────────── */
-    #panel-body > div + div {
+    #panel-body > div + div,
+    #panel-tab-route > div + div,
+    #panel-tab-orienteer > div + div {
       border-top: 1px solid rgba(100,110,200,0.08);
       padding-top: 2px;
     }
+
+    /* ── Time input ─────────────────────────────────────────────── */
+    input[type=time] {
+      width: 100%; padding: 7px 9px;
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(100,110,200,0.2);
+      border-radius: 7px; color: #dde; font-size: 14px; font-weight: 700;
+      outline: none; color-scheme: dark; letter-spacing: 0.5px;
+    }
+    input[type=time]:focus { border-color: rgba(100,130,255,0.5); }
 
     /* ── Misc text ───────────────────────────────────────────── */
     .sub-text { font-size: 10px; color: #778; margin-top: 4px; }
@@ -238,15 +245,10 @@
       }
       #panel.open { transform: none !important; }
       #panel-handle {
-        height: auto; padding: 10px 12px 9px;
-        justify-content: space-between;
+        height: auto; padding: 6px 10px;
         border-bottom-color: rgba(100,110,200,0.15) !important;
       }
       #panel-handle-pill { display: none; }
-      #panel-peek {
-        font-size: 13px; font-weight: 600; color: #c8ceff;
-        max-width: none; letter-spacing: 0.3px;
-      }
       #panel-body { max-height: calc(100vh - 110px); }
       #fab-stack   { bottom: 20px; }
     }
@@ -266,14 +268,19 @@
 
 <!-- ── Control panel (bottom sheet) ──────────────────────────── -->
 <div id="panel">
-  <div id="panel-handle" onclick="togglePanel()">
-    <div id="panel-handle-pill"></div>
-    <span id="panel-peek">Payphone Pathfinder</span>
+  <div id="panel-handle">
+    <div id="panel-handle-pill" onclick="togglePanel()"></div>
+    <div style="flex:1;display:flex;gap:4px;margin:0 10px;">
+      <button id="btn-panel-tab-route"     onclick="setPanelTab('route')"     class="active"
+              style="font-size:12px;font-weight:600;">Route</button>
+      <button id="btn-panel-tab-orienteer" onclick="setPanelTab('orienteer')"
+              style="font-size:12px;font-weight:600;">Orienteer</button>
+    </div>
   </div>
 
   <div id="panel-body">
 
-    <!-- Identity -->
+    <!-- Always visible: Identity -->
     <div>
       <div class="sec-title">Identity</div>
       <div class="btn-row">
@@ -286,7 +293,7 @@
       </div>
     </div>
 
-    <!-- Legend -->
+    <!-- Always visible: Legend -->
     <div>
       <div class="sec-title">Legend</div>
       <div class="legend">
@@ -300,7 +307,7 @@
       </div>
     </div>
 
-    <!-- Filters -->
+    <!-- Always visible: Filters -->
     <div>
       <div class="sec-title">Filters</div>
       <div class="btn-row">
@@ -314,24 +321,7 @@
            style="display:none;color:#c084fc;"></div>
     </div>
 
-    <!-- Selection -->
-    <div id="section-selection">
-      <div class="sec-title">Selection</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:5px;">
-        <button id="btn-click" onclick="toggleClickMode()" class="active" style="grid-column:1;grid-row:1;">Click</button>
-        <button id="btn-lasso" onclick="cycleLasso()" style="grid-column:2;grid-row:1;">Lasso</button>
-        <button id="btn-exclude-owned" onclick="toggleExcludeOwned()" style="grid-column:1/3;grid-row:2;" title="When active, lasso skips phones you already own">Skip Owned</button>
-        <button id="btn-clear-sel" onclick="flashDanger('btn-clear-sel');clearSelection()" class="danger icon-only" style="grid-column:3;grid-row:1/3;align-self:stretch;" aria-label="Clear selection">✕</button>
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;">
-        <div id="sel-count" class="sub-text" style="margin-top:0;">0 selected</div>
-        <button id="btn-zoom-sel" onclick="zoomToSelection()" disabled
-                style="flex:none;font-size:10px;padding:3px 8px;min-height:0;opacity:0.5;"
-                title="Zoom map to selection" aria-label="Zoom to selection">🎯 zoom</button>
-      </div>
-    </div>
-
-    <!-- Transport -->
+    <!-- Always visible: Transport -->
     <div>
       <div class="sec-title">Transport</div>
       <div class="btn-row">
@@ -341,7 +331,7 @@
       </div>
     </div>
 
-    <!-- Endpoints -->
+    <!-- Always visible: Start & End -->
     <div>
       <div class="sec-title">Start &amp; End</div>
       <div class="btn-row">
@@ -349,17 +339,29 @@
       </div>
     </div>
 
-    <!-- Route -->
-    <div>
-      <div class="sec-title">Route</div>
-      <!-- Tab row -->
-      <div class="btn-row" style="margin-bottom:8px;">
-        <button id="btn-tab-optimal"   onclick="setRouteMode('optimal')"   class="active">Optimal</button>
-        <button id="btn-tab-orienteer" onclick="setRouteMode('orienteer')">Orienteer</button>
+    <!-- Route tab -->
+    <div id="panel-tab-route">
+
+      <!-- Selection -->
+      <div id="section-selection">
+        <div class="sec-title">Selection</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:5px;">
+          <button id="btn-click" onclick="toggleClickMode()" class="active" style="grid-column:1;grid-row:1;">Click</button>
+          <button id="btn-lasso" onclick="cycleLasso()" style="grid-column:2;grid-row:1;">Lasso</button>
+          <button id="btn-exclude-owned" onclick="toggleExcludeOwned()" style="grid-column:1/3;grid-row:2;" title="When active, lasso skips phones you already own">Skip Owned</button>
+          <button id="btn-clear-sel" onclick="flashDanger('btn-clear-sel');clearSelection()" class="danger icon-only" style="grid-column:3;grid-row:1/3;align-self:stretch;" aria-label="Clear selection">✕</button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;">
+          <div id="sel-count" class="sub-text" style="margin-top:0;">0 selected</div>
+          <button id="btn-zoom-sel" onclick="zoomToSelection()" disabled
+                  style="flex:none;font-size:10px;padding:3px 8px;min-height:0;opacity:0.5;"
+                  title="Zoom map to selection" aria-label="Zoom to selection">🎯 zoom</button>
+        </div>
       </div>
 
-      <!-- Optimal pane -->
-      <div id="pane-optimal">
+      <!-- Optimal route -->
+      <div>
+        <div class="sec-title">Route</div>
         <div class="btn-row">
           <button onclick="findRoute()" id="btn-route" class="go">Find optimal route →</button>
           <button id="btn-clear-route" onclick="flashDanger('btn-clear-route');clearRoute()" class="danger icon-only" aria-label="Clear route">✕</button>
@@ -367,23 +369,18 @@
         <div id="spinner"></div>
       </div>
 
-      <!-- Orienteer pane -->
-      <div id="pane-orienteer" style="display:none;">
-        <div class="sec-title" style="margin-bottom:3px;margin-top:2px;">Time budget</div>
-        <div style="display:flex;align-items:center;gap:5px;margin-bottom:8px;">
-          <button class="icon-only danger" onclick="adjustBudget(-1800)" style="flex:none;">−</button>
-          <div id="orienteer-budget-display" style="flex:1;text-align:center;font-size:13px;font-weight:700;color:#dde;">2h 0m</div>
-          <button class="icon-only go" onclick="adjustBudget(1800)" style="flex:none;">+</button>
-        </div>
-        <div class="sec-title" style="margin-bottom:3px;">Radius from start</div>
-        <div class="btn-row" style="margin-bottom:8px;">
-          <button id="btn-radius-5"  onclick="setOrienteerRadius(5)">5 km</button>
-          <button id="btn-radius-10" onclick="setOrienteerRadius(10)" class="active">10 km</button>
-          <button id="btn-radius-20" onclick="setOrienteerRadius(20)">20 km</button>
-          <button id="btn-radius-30" onclick="setOrienteerRadius(30)">30 km</button>
-        </div>
+    </div><!-- /#panel-tab-route -->
+
+    <!-- Orienteer tab -->
+    <div id="panel-tab-orienteer" style="display:none;">
+
+      <div>
+        <div class="sec-title">Orienteer</div>
+        <div class="sec-title" style="margin-bottom:4px;margin-top:6px;">Arrive by</div>
+        <input type="time" id="orienteer-arrive-by">
+        <div class="sub-text" style="margin-top:3px;margin-bottom:8px;">incl. 10 min safety buffer</div>
         <div class="sec-title" style="margin-bottom:3px;">Consider</div>
-        <div class="btn-row" style="margin-bottom:8px;">
+        <div class="btn-row" style="margin-bottom:4px;">
           <button id="btn-orienteer-hostile"    onclick="toggleOrienteerFilter('hostile')"    class="active">Hostile</button>
           <button id="btn-orienteer-uncaptured" onclick="toggleOrienteerFilter('uncaptured')" class="active">Uncaptured</button>
         </div>
@@ -394,54 +391,56 @@
         <div id="spinner-orienteer" style="display:none;width:18px;height:18px;margin:4px auto;border:2px solid rgba(100,110,200,0.2);border-top-color:#6677ff;border-radius:50%;animation:spin 0.7s linear infinite;"></div>
       </div>
 
-      <div id="route-result" style="margin-top:10px;">
-        <div id="route-stats"></div>
-        <div id="maps-nav" style="display:none;margin-top:8px;">
-          <!-- Stop indicator (LHS) + leg switcher (RHS) — card header -->
-          <div style="display:flex;align-items:stretch;margin-bottom:8px;
-                      background:rgba(255,255,255,0.05);
-                      border:1px solid rgba(100,110,200,0.2);border-radius:9px;overflow:hidden;">
-            <!-- LHS: stop indicator (shown when route active) -->
-            <div id="stop-indicator" style="display:none;flex-direction:column;align-items:center;
-                 justify-content:center;gap:4px;padding:9px 12px;
-                 border-right:1px solid rgba(100,110,200,0.15);">
-              <div style="font-size:9px;color:#778;text-transform:uppercase;letter-spacing:0.9px;">targeting</div>
-              <div style="display:flex;align-items:center;gap:7px;margin-top:1px;">
-                <div id="stop-badge" class="wp wp-active" style="width:32px;height:32px;font-size:14px;border-width:2.5px;flex-shrink:0;"></div>
-                <span style="font-size:12px;color:#889;">/<span id="stop-total-label" style="color:#bbc;font-weight:700;font-size:13px;margin-left:3px;"></span></span>
-              </div>
-            </div>
-            <!-- RHS: leg switcher (expands to fill when stop-indicator hidden) -->
-            <div style="flex:1;display:flex;flex-direction:column;align-items:center;
-                 justify-content:center;gap:4px;padding:9px 6px;">
-              <div style="font-size:9px;color:#778;text-transform:uppercase;letter-spacing:0.9px;">leg</div>
-              <div style="display:flex;align-items:center;width:100%;margin-top:1px;">
-                <span id="leg-prev-hint" onclick="changeLeg(-1)" role="button" tabindex="0"
-                      aria-label="Previous leg"
-                      onkeydown="if(event.key==='Enter'||event.key===' '){changeLeg(-1);event.preventDefault();}"
-                      style="flex:1;display:flex;justify-content:flex-end;align-items:center;
-                             padding:6px 8px;cursor:pointer;user-select:none;touch-action:manipulation;
-                             font-size:18px;color:#889;line-height:1;transition:opacity 0.2s;">‹</span>
-                <span id="leg-label" style="flex:2;text-align:center;font-size:12px;color:#ccd;
-                                            white-space:nowrap;font-weight:600;pointer-events:none;"></span>
-                <span id="leg-next-hint" onclick="changeLeg(1)" role="button" tabindex="0"
-                      aria-label="Next leg"
-                      onkeydown="if(event.key==='Enter'||event.key===' '){changeLeg(1);event.preventDefault();}"
-                      style="flex:1;display:flex;justify-content:flex-start;align-items:center;
-                             padding:6px 8px;cursor:pointer;user-select:none;touch-action:manipulation;
-                             font-size:18px;color:#889;line-height:1;transition:opacity 0.2s;">›</span>
-              </div>
+    </div><!-- /#panel-tab-orienteer -->
+
+    <!-- Shared route result (always visible once solved) -->
+    <div id="route-result" style="display:none;">
+      <div id="route-stats"></div>
+      <div id="maps-nav" style="display:none;margin-top:8px;">
+        <!-- Stop indicator (LHS) + leg switcher (RHS) — card header -->
+        <div style="display:flex;align-items:stretch;margin-bottom:8px;
+                    background:rgba(255,255,255,0.05);
+                    border:1px solid rgba(100,110,200,0.2);border-radius:9px;overflow:hidden;">
+          <!-- LHS: stop indicator (shown when route active) -->
+          <div id="stop-indicator" style="display:none;flex-direction:column;align-items:center;
+               justify-content:center;gap:4px;padding:9px 12px;
+               border-right:1px solid rgba(100,110,200,0.15);">
+            <div style="font-size:9px;color:#778;text-transform:uppercase;letter-spacing:0.9px;">targeting</div>
+            <div style="display:flex;align-items:center;gap:7px;margin-top:1px;">
+              <div id="stop-badge" class="wp wp-active" style="width:32px;height:32px;font-size:14px;border-width:2.5px;flex-shrink:0;"></div>
+              <span style="font-size:12px;color:#889;">/<span id="stop-total-label" style="color:#bbc;font-weight:700;font-size:13px;margin-left:3px;"></span></span>
             </div>
           </div>
-          <!-- UNDO + SKIP -->
-          <div id="tag-row" class="btn-row" style="margin-bottom:5px;display:none;">
-            <button id="btn-revert" onclick="revertLeg()" class="danger" style="font-size:11px;" disabled>↩ UNDO</button>
-            <button onclick="tagCurrentLeg('skipped')" class="skipped" style="font-size:11px;">✕ SKIP</button>
+          <!-- RHS: leg switcher (expands to fill when stop-indicator hidden) -->
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;
+               justify-content:center;gap:4px;padding:9px 6px;">
+            <div style="font-size:9px;color:#778;text-transform:uppercase;letter-spacing:0.9px;">leg</div>
+            <div style="display:flex;align-items:center;width:100%;margin-top:1px;">
+              <span id="leg-prev-hint" onclick="changeLeg(-1)" role="button" tabindex="0"
+                    aria-label="Previous leg"
+                    onkeydown="if(event.key==='Enter'||event.key===' '){changeLeg(-1);event.preventDefault();}"
+                    style="flex:1;display:flex;justify-content:flex-end;align-items:center;
+                           padding:6px 8px;cursor:pointer;user-select:none;touch-action:manipulation;
+                           font-size:18px;color:#889;line-height:1;transition:opacity 0.2s;">‹</span>
+              <span id="leg-label" style="flex:2;text-align:center;font-size:12px;color:#ccd;
+                                          white-space:nowrap;font-weight:600;pointer-events:none;"></span>
+              <span id="leg-next-hint" onclick="changeLeg(1)" role="button" tabindex="0"
+                    aria-label="Next leg"
+                    onkeydown="if(event.key==='Enter'||event.key===' '){changeLeg(1);event.preventDefault();}"
+                    style="flex:1;display:flex;justify-content:flex-start;align-items:center;
+                           padding:6px 8px;cursor:pointer;user-select:none;touch-action:manipulation;
+                           font-size:18px;color:#889;line-height:1;transition:opacity 0.2s;">›</span>
+            </div>
           </div>
-          <button onclick="openCurrentLeg()" class="maps" style="font-size:11px;width:100%;">
-            Open in Google Maps ↗
-          </button>
         </div>
+        <!-- UNDO + SKIP -->
+        <div id="tag-row" class="btn-row" style="margin-bottom:5px;display:none;">
+          <button id="btn-revert" onclick="revertLeg()" class="danger" style="font-size:11px;" disabled>↩ UNDO</button>
+          <button onclick="tagCurrentLeg('skipped')" class="skipped" style="font-size:11px;">✕ SKIP</button>
+        </div>
+        <button onclick="openCurrentLeg()" class="maps" style="font-size:11px;width:100%;">
+          Open in Google Maps ↗
+        </button>
       </div>
     </div>
 
@@ -494,9 +493,8 @@ const state = {
   currentLeg:      0,
   routeProgress:   0,   // index into routeOrderedIds (current stop being visited)
   routeOrderedIds: [],  // ordered_ids of active route (set at display time, separate from lastRoute)
-  routeMode:           'optimal',   // 'optimal' | 'orienteer'
-  orienteerBudgetS:    7200,        // default 2h
-  orienteerRadiusKm:   10,          // default 10km
+  routeMode:           'route',      // 'route' | 'orienteer'
+  orienteerArriveBy:   '',           // HH:MM string for orienteer arrive-by time
   orienteerHostile:    true,
   orienteerUncaptured: true,
 };
@@ -608,18 +606,7 @@ function togglePanel() {
   }, { passive: true });
 }
 
-function updatePanelPeek() {
-  const el = document.getElementById('panel-peek');
-  if (!el) return;
-  const parts = [];
-  if (state.phones.length)    parts.push(`${state.phones.length} phones`);
-  if (state.selectedIds.size) parts.push(`${state.selectedIds.size} selected`);
-  if (state.lastRoute) {
-    const km = (state.lastRoute.total_distance_m / 1000).toFixed(1);
-    parts.push(`${km} km route`);
-  }
-  el.textContent = parts.length ? parts.join(' · ') : 'Payphone Pathfinder';
-}
+function updatePanelPeek() { /* panel-peek removed; handle bar now shows tabs */ }
 
 // ── Load phones ───────────────────────────────────────────────────
 async function loadPhones() {
@@ -1058,44 +1045,30 @@ async function findRoute() {
   }
 }
 
-// ── Route mode (Optimal / Orienteer tab) ─────────────────────────
-function setRouteMode(mode) {
-  state.routeMode = mode;
-  document.getElementById('pane-optimal').style.display    = mode === 'optimal'   ? '' : 'none';
-  document.getElementById('pane-orienteer').style.display  = mode === 'orienteer' ? '' : 'none';
-  document.getElementById('section-selection').style.display = mode === 'orienteer' ? 'none' : '';
-  document.getElementById('btn-tab-optimal').classList.toggle('active',   mode === 'optimal');
-  document.getElementById('btn-tab-orienteer').classList.toggle('active', mode === 'orienteer');
+// ── Panel tab switching (Route / Orienteer) ───────────────────────
+function setPanelTab(tab) {
+  state.routeMode = tab;
+  document.getElementById('panel-tab-route').style.display     = tab === 'route'     ? '' : 'none';
+  document.getElementById('panel-tab-orienteer').style.display = tab === 'orienteer' ? '' : 'none';
+  document.getElementById('btn-panel-tab-route').classList.toggle('active',     tab === 'route');
+  document.getElementById('btn-panel-tab-orienteer').classList.toggle('active', tab === 'orienteer');
+  if (!panelOpen) { panelOpen = true; document.getElementById('panel').classList.add('open'); }
   saveSession();
 }
 
 // ── Orienteer controls ────────────────────────────────────────────
-function formatBudget(s) {
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  if (h > 0 && m > 0) return `${h}h ${m}m`;
-  if (h > 0) return `${h}h`;
-  return `${m}m`;
-}
+const ORIENTEER_BUFFER_S = 600;   // 10 min safety buffer, subtracted client-side
+const SERVICE_TIME_S = { foot: 60, bicycle: 30, car: 75 };  // per-stop tagging time
 
-function updateBudgetDisplay() {
-  const el = document.getElementById('orienteer-budget-display');
-  if (el) el.textContent = formatBudget(state.orienteerBudgetS);
-}
-
-function adjustBudget(deltaSecs) {
-  state.orienteerBudgetS = Math.max(1800, Math.min(28800, state.orienteerBudgetS + deltaSecs));
-  updateBudgetDisplay();
-  saveSession();
-}
-
-function setOrienteerRadius(km) {
-  state.orienteerRadiusKm = km;
-  [5, 10, 20, 30].forEach(r => {
-    const btn = document.getElementById(`btn-radius-${r}`);
-    if (btn) btn.classList.toggle('active', r === km);
-  });
-  saveSession();
+function computeOrienteerBudget() {
+  const val = document.getElementById('orienteer-arrive-by').value;
+  if (!val) return 3600;
+  const [h, m] = val.split(':').map(Number);
+  const now = new Date();
+  const arrive = new Date(now);
+  arrive.setHours(h, m, 0, 0);
+  if (arrive <= now) arrive.setDate(arrive.getDate() + 1);  // past time = next day
+  return Math.max(60, Math.floor((arrive - now) / 1000) - ORIENTEER_BUFFER_S);
 }
 
 function toggleOrienteerFilter(type) {
@@ -1113,6 +1086,7 @@ function toggleOrienteerFilter(type) {
 
 async function findOrienteerRoute() {
   if (!state.start) { alert('Set a start point first.'); return; }
+  if (!state.end)   { alert('Set an end point first.'); return; }
   const username = document.getElementById('username').value.trim();
   if (!username) { alert('Enter username first.'); return; }
 
@@ -1125,9 +1099,10 @@ async function findOrienteerRoute() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         start:              state.start,
+        end:                state.end,
         profile:            state.profile,
-        time_budget_s:      state.orienteerBudgetS,
-        radius_km:          state.orienteerRadiusKm,
+        time_budget_s:      computeOrienteerBudget(),
+        service_time_s:     SERVICE_TIME_S[state.profile] || 60,
         username:           username,
         include_hostile:    state.orienteerHostile,
         include_uncaptured: state.orienteerUncaptured,
@@ -1477,8 +1452,7 @@ function saveSession() {
       end:                 state.end,
       lastRoute:           state.lastRoute,
       routeMode:           state.routeMode,
-      orienteerBudgetS:    state.orienteerBudgetS,
-      orienteerRadiusKm:   state.orienteerRadiusKm,
+      orienteerArriveBy:   document.getElementById('orienteer-arrive-by')?.value || '',
       orienteerHostile:    state.orienteerHostile,
       orienteerUncaptured: state.orienteerUncaptured,
     }));
@@ -1496,11 +1470,14 @@ function restoreSession() {
     if (s.start)       state.start     = s.start;
     if (s.end)         state.end       = s.end;
     if (s.lastRoute)   state.lastRoute = s.lastRoute;
-    if (s.routeMode)                     setRouteMode(s.routeMode);
-    if (s.orienteerBudgetS  !== undefined) { state.orienteerBudgetS  = s.orienteerBudgetS;  updateBudgetDisplay(); }
-    if (s.orienteerRadiusKm !== undefined)   setOrienteerRadius(s.orienteerRadiusKm);
-    if (s.orienteerHostile  !== undefined) {
-      state.orienteerHostile  = s.orienteerHostile;
+    // Restore arrive-by time (or let IIFE set default if absent)
+    if (s.orienteerArriveBy) {
+      const el = document.getElementById('orienteer-arrive-by');
+      if (el) el.value = s.orienteerArriveBy;
+      state.orienteerArriveBy = s.orienteerArriveBy;
+    }
+    if (s.orienteerHostile !== undefined) {
+      state.orienteerHostile = s.orienteerHostile;
       const b = document.getElementById('btn-orienteer-hostile');
       if (b) b.classList.toggle('active', state.orienteerHostile);
     }
@@ -1509,6 +1486,10 @@ function restoreSession() {
       const b = document.getElementById('btn-orienteer-uncaptured');
       if (b) b.classList.toggle('active', state.orienteerUncaptured);
     }
+    // setPanelTab called last so its saveSession() captures all fully-restored values.
+    // Map legacy 'optimal' value to 'route'.
+    const savedTab = s.routeMode === 'orienteer' ? 'orienteer' : 'route';
+    setPanelTab(savedTab);
     return !!s.username;
   } catch (_) {
     return false;
@@ -1629,6 +1610,17 @@ document.addEventListener('visibilitychange', () => {
     panelOpen = true;
     document.getElementById('panel').classList.add('open');
     loadPhones();
+  }
+  // Set default arrive-by to now+2h rounded up to the nearest 15 min,
+  // but only if the session restore didn't already set a value.
+  const arriveEl = document.getElementById('orienteer-arrive-by');
+  if (arriveEl && !arriveEl.value) {
+    const def  = new Date(Date.now() + 2 * 3600_000);
+    const mins = def.getMinutes();
+    const rounded = Math.ceil(mins / 15) * 15;
+    def.setMinutes(rounded % 60, 0, 0);
+    if (rounded >= 60) def.setHours(def.getHours() + 1);
+    arriveEl.value = def.toTimeString().slice(0, 5);
   }
 })();
 </script>
