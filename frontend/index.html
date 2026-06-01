@@ -40,7 +40,7 @@
       user-select: none;
       border-bottom: 1px solid transparent;
     }
-    #panel.open #panel-handle { border-bottom-color: rgba(100,110,200,0.15); }
+    #panel.open #panel-handle { padding-bottom: 4px; border-bottom-color: rgba(100,110,200,0.15); }
     #panel-handle-pill {
       width: 36px; height: 4px;
       background: rgba(100,110,200,0.4); border-radius: 2px; flex-shrink: 0;
@@ -56,7 +56,7 @@
       transition: max-height 0.25s ease, margin-top 0.25s ease, opacity 0.2s ease;
     }
     #panel.open #panel-tab-bar {
-      max-height: 40px; margin-top: 6px;
+      max-height: 50px; margin-top: 10px;
       opacity: 1; pointer-events: auto;
     }
     .panel-tab {
@@ -65,7 +65,7 @@
       border-bottom: 2px solid transparent; border-radius: 0;
       color: #556; font-size: 11px; font-weight: 700;
       letter-spacing: 0.7px; text-transform: uppercase;
-      padding: 8px 0 7px; min-height: 0;
+      padding: 10px 0 8px; min-height: 0;
       cursor: pointer; touch-action: manipulation;
       transition: color 0.2s, border-color 0.2s;
       -webkit-tap-highlight-color: transparent; outline: none;
@@ -291,13 +291,13 @@
       }
       #panel.open { transform: none !important; }
       #panel-handle {
-        padding: 6px 0 0;
+        padding: 6px 0 4px;
         border-bottom-color: rgba(100,110,200,0.15) !important;
       }
       #panel-handle-pill { display: none; }
       /* On desktop the panel is always visible — override the mobile peek-hidden state */
       #panel-tab-bar {
-        max-height: 40px !important; margin-top: 0 !important;
+        max-height: 50px !important; margin-top: 10px !important;
         opacity: 1 !important; pointer-events: auto !important;
         overflow: visible !important; transition: none !important;
       }
