@@ -79,7 +79,7 @@
 
     #panel-body {
       padding: 8px 14px 20px;
-      display: flex; flex-direction: column; gap: 10px;
+      display: flex; flex-direction: column; gap: 14px;
       overflow-y: auto; overflow-x: hidden;
       -webkit-overflow-scrolling: touch;
       overscroll-behavior-y: contain;
@@ -149,25 +149,29 @@
     #panel-tab-route > div + div,
     #panel-tab-orienteer > div + div {
       border-top: 1px solid rgba(100,110,200,0.08);
-      padding-top: 2px;
+      margin-top: 4px;
+      padding-top: 12px;
     }
 
 
     /* ── Time input ─────────────────────────────────────────────── */
+    /* Outer wrapper supplies the visual box + flex centering so the
+       native time widget is always vertically centered on iOS/Android. */
+    .time-field {
+      display: flex; align-items: center;
+      min-height: 44px; padding: 0 9px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(100,110,200,0.2);
+      border-radius: 7px; box-sizing: border-box;
+      cursor: text;
+    }
+    .time-field:focus-within { border-color: rgba(100,130,255,0.5); }
     input[type=time] {
-      /* width: 100% alone is ignored by iOS/Android native time picker chrome;
-         -webkit-fill-available fills the actual available container space. */
-      display: block;
-      width: 100%;
-      width: -webkit-fill-available;
-      min-width: 0; max-width: 100%;
-      padding: 9px 9px;
-      background: rgba(255,255,255,0.05); border: 1px solid rgba(100,110,200,0.2);
-      border-radius: 7px; color: #dde;
-      font-size: 13px; font-weight: 600;
+      flex: 1; min-width: 0; width: 100%;
+      background: transparent; border: none; padding: 0;
+      color: #dde; font-size: 13px; font-weight: 600;
       outline: none; color-scheme: dark;
     }
-    input[type=time]:focus { border-color: rgba(100,130,255,0.5); }
 
     /* ── Misc text ───────────────────────────────────────────── */
     .sub-text { font-size: 10px; color: #778; margin-top: 4px; }
@@ -397,12 +401,7 @@
           <button id="btn-exclude-owned" onclick="toggleExcludeOwned()" style="grid-column:1/3;grid-row:2;" title="When active, lasso skips phones you already own">Skip Owned</button>
           <button id="btn-clear-sel" onclick="flashDanger('btn-clear-sel');clearSelection()" class="danger icon-only" style="grid-column:3;grid-row:1/3;align-self:stretch;" aria-label="Clear selection">✕</button>
         </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;">
-          <div id="sel-count" class="sub-text" style="margin-top:0;">0 selected</div>
-          <button id="btn-zoom-sel" onclick="zoomToSelection()" disabled
-                  style="flex:none;font-size:10px;padding:3px 8px;min-height:0;opacity:0.5;"
-                  title="Zoom map to selection" aria-label="Zoom to selection">🎯 zoom</button>
-        </div>
+        <div id="sel-count" class="sub-text" style="margin-top:4px;">0 selected</div>
       </div>
 
       <!-- Optimal route -->
@@ -422,7 +421,7 @@
 
       <div>
         <div class="sec-title" style="margin-bottom:4px;">Arrive by</div>
-        <div style="display:grid;margin-bottom:8px;">
+        <div class="time-field" style="margin-bottom:8px;">
           <input type="time" id="orienteer-arrive-by">
         </div>
         <div class="sec-title" style="margin-bottom:3px;">Route</div>
@@ -535,8 +534,9 @@ const state = {
   currentLeg:      0,
   routeProgress:   0,   // index into routeOrderedIds (current stop being visited)
   routeOrderedIds: [],  // ordered_ids of active route (set at display time, separate from lastRoute)
-  routeMode:         'route',   // 'route' | 'orienteer'
-  orienteerArriveBy: '',        // HH:MM string for orienteer arrive-by time
+  routeMode:              'route',  // 'route' | 'orienteer'
+  orienteerArriveBy:      '',       // HH:MM string for orienteer arrive-by time
+  lastOrienteerBufferS:   0,        // buffer used for the last orienteer solve
 };
 
 // ── Refresh health tracking ───────────────────────────────────────
@@ -768,15 +768,7 @@ map.on('zoomend', () => {
 function updateSelCount() {
   document.getElementById('sel-count').textContent =
     `${state.selectedIds.size} phone${state.selectedIds.size !== 1 ? 's' : ''} selected`;
-  const zb = document.getElementById('btn-zoom-sel');
-  if (zb) { zb.disabled = !state.selectedIds.size; zb.style.opacity = state.selectedIds.size ? '1' : '0.35'; }
   updatePanelPeek();
-}
-
-function zoomToSelection() {
-  if (!state.selectedIds.size) return;
-  const pts = state.phones.filter(p => state.selectedIds.has(p.id)).map(p => [p.lat, p.lon]);
-  if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [50, 50] });
 }
 
 // ── Selection mode ────────────────────────────────────────────────
@@ -1097,18 +1089,29 @@ function setPanelTab(tab) {
 }
 
 // ── Orienteer controls ────────────────────────────────────────────
-const ORIENTEER_BUFFER_S = 600;   // 10 min safety buffer, subtracted client-side
 const SERVICE_TIME_S = { foot: 60, bicycle: 30, car: 75 };  // per-stop tagging time
 
-function computeOrienteerBudget() {
+// Returns total seconds between now and the arrive-by time
+function _orienteerWindowS() {
   const val = document.getElementById('orienteer-arrive-by').value;
   if (!val) return 3600;
   const [h, m] = val.split(':').map(Number);
   const now = new Date();
   const arrive = new Date(now);
   arrive.setHours(h, m, 0, 0);
-  if (arrive <= now) arrive.setDate(arrive.getDate() + 1);  // past time = next day
-  return Math.max(60, Math.floor((arrive - now) / 1000) - ORIENTEER_BUFFER_S);
+  if (arrive <= now) arrive.setDate(arrive.getDate() + 1);
+  return Math.floor((arrive - now) / 1000);
+}
+
+// Safety buffer = 10 % of available window, at least 60 s
+function computeOrienteerBuffer() {
+  return Math.max(60, Math.round(_orienteerWindowS() * 0.10));
+}
+
+// Budget passed to VROOM = window − buffer
+function computeOrienteerBudget() {
+  const windowS = _orienteerWindowS();
+  return Math.max(60, windowS - Math.max(60, Math.round(windowS * 0.10)));
 }
 
 
@@ -1122,14 +1125,17 @@ async function findOrienteerRoute() {
   document.getElementById('spinner-orienteer').style.display = 'block';
   document.getElementById('route-result').style.display = 'none';
 
+  const bufferS = computeOrienteerBuffer();
+  state.lastOrienteerBufferS = bufferS;
+
   try {
     const res = await fetch('/api/orienteer', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        start:              state.start,
-        end:                state.end,
-        profile:            state.profile,
-        time_budget_s:      computeOrienteerBudget(),
+        start:          state.start,
+        end:            state.end,
+        profile:        state.profile,
+        time_budget_s:  computeOrienteerBudget(),
         service_time_s: SERVICE_TIME_S[state.profile] || 60,
         username:       username,
       }),
@@ -1142,7 +1148,7 @@ async function findOrienteerRoute() {
       throw new Error(detail);
     }
     const data = await res.json();
-    displayRoute(data);
+    displayRoute(data, bufferS);
     state.lastRoute = data;
     updatePanelPeek();
     saveSession();
@@ -1165,7 +1171,7 @@ function rainbowColors(n) {
   });
 }
 
-function displayRoute(data) {
+function displayRoute(data, extraS = 0) {
   clearRoute();
   const { ordered_ids, path, total_distance_m, total_duration_s } = data;
   state.routeOrderedIds = ordered_ids;   // available before state.lastRoute is set
@@ -1197,9 +1203,10 @@ function displayRoute(data) {
   const allCoords = path.features.flatMap(f => f.geometry.coordinates.map(([lon, lat]) => [lat, lon]));
   if (allCoords.length) map.fitBounds(L.latLngBounds(allCoords), { padding: [50, 50] });
 
-  const km      = (total_distance_m / 1000).toFixed(1);
-  const mins    = Math.round(total_duration_s / 60);
-  const arriveAt = new Date(Date.now() + total_duration_s * 1000);
+  const km       = (total_distance_m / 1000).toFixed(1);
+  const totalS   = total_duration_s + extraS;
+  const mins     = Math.round(totalS / 60);
+  const arriveAt = new Date(Date.now() + totalS * 1000);
   const timeStr  = arriveAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
   document.getElementById('route-stats').textContent = `${km} km · ${mins} min · ${timeStr} · ${ordered_ids.length} stops`;
   document.getElementById('route-result').style.display = 'block';

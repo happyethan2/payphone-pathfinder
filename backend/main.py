@@ -643,13 +643,17 @@ async def solve_orienteer(req: OrienteerRequest):
     if not ordered_ids:
         raise HTTPException(404, "No phones can be reached within the time budget")
 
+    # Use VROOM's own duration accounting (includes travel + per-stop service time)
+    vroom_travel_s  = routes[0].get("duration", 0)
+    vroom_service_s = routes[0].get("service", 0)
+    total_duration_vroom = vroom_travel_s + vroom_service_s
+
     # Build geometry: start → phones → end
     visit_coords = [(start_lat, start_lon)] + [phone_lookup[pid] for pid in ordered_ids] + [(end_lat, end_lon)]
     visit_labels = [None] + ordered_ids + [None]
 
     features = []
     total_distance = 0.0
-    total_duration = 0.0
     legs_summary = []
 
     for i in range(len(visit_coords) - 1):
@@ -666,7 +670,6 @@ async def solve_orienteer(req: OrienteerRequest):
             },
         })
         total_distance += leg["distance"]
-        total_duration += leg["duration"]
         legs_summary.append({
             "from_id":    visit_labels[i],
             "to_id":      visit_labels[i + 1],
@@ -686,7 +689,7 @@ async def solve_orienteer(req: OrienteerRequest):
     return {
         "ordered_ids":      ordered_ids,
         "total_distance_m": total_distance,
-        "total_duration_s": total_duration,
+        "total_duration_s": total_duration_vroom,
         "path": {
             "type":     "FeatureCollection",
             "features": features,
