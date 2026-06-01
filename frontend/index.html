@@ -27,7 +27,7 @@
       -webkit-backdrop-filter: blur(10px);
       display: flex; flex-direction: column;
       max-height: 78vh;
-      transform: translateY(calc(100% - 54px));
+      transform: translateY(calc(100% - 32px));
       transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
       will-change: transform;
     }
@@ -36,7 +36,7 @@
     #panel-handle {
       flex-shrink: 0;
       display: flex; flex-direction: column; align-items: center;
-      padding: 10px 0 0;
+      padding: 14px 0;
       user-select: none;
       border-bottom: 1px solid transparent;
     }
@@ -50,7 +50,14 @@
     /* ── Panel tabs ──────────────────────────────────────────────── */
     #panel-tab-bar {
       display: flex; width: 100%;
-      margin-top: 6px; flex: 1;
+      flex: 1; overflow: hidden;
+      /* Hidden in peek state; revealed when panel opens */
+      max-height: 0; margin-top: 0; opacity: 0; pointer-events: none;
+      transition: max-height 0.25s ease, margin-top 0.25s ease, opacity 0.2s ease;
+    }
+    #panel.open #panel-tab-bar {
+      max-height: 40px; margin-top: 6px;
+      opacity: 1; pointer-events: auto;
     }
     .panel-tab {
       flex: 1;
@@ -61,10 +68,12 @@
       padding: 8px 0 7px; min-height: 0;
       cursor: pointer; touch-action: manipulation;
       transition: color 0.2s, border-color 0.2s;
+      -webkit-tap-highlight-color: transparent; outline: none;
     }
     .panel-tab.active {
       color: #c8d0ff;
       border-bottom-color: rgba(130,160,255,0.75);
+      background: transparent;  /* prevent button.active blue bleed */
     }
     .panel-tab:hover { color: #99a; background: transparent; }
 
@@ -145,10 +154,11 @@
 
     /* ── Time input ─────────────────────────────────────────────── */
     input[type=time] {
-      width: 100%; padding: 7px 9px;
+      width: 100%; max-width: 100%; min-width: 0;
+      padding: 7px 9px;
       background: rgba(255,255,255,0.05); border: 1px solid rgba(100,110,200,0.2);
       border-radius: 7px; color: #dde; font-size: 14px; font-weight: 700;
-      outline: none; color-scheme: dark; letter-spacing: 0.5px;
+      outline: none; color-scheme: dark;
     }
     input[type=time]:focus { border-color: rgba(100,130,255,0.5); }
 
@@ -274,7 +284,12 @@
         border-bottom-color: rgba(100,110,200,0.15) !important;
       }
       #panel-handle-pill { display: none; }
-      #panel-tab-bar { margin-top: 0; }
+      /* On desktop the panel is always visible — override the mobile peek-hidden state */
+      #panel-tab-bar {
+        max-height: 40px !important; margin-top: 0 !important;
+        opacity: 1 !important; pointer-events: auto !important;
+        overflow: visible !important; transition: none !important;
+      }
       #panel-body { max-height: calc(100vh - 90px); }
       #fab-stack   { bottom: 20px; }
     }
