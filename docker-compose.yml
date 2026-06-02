@@ -43,6 +43,7 @@ services:
       - "8000:8000"
     volumes:
       - ./frontend:/app/frontend:ro
+      - ./backend/certs:/app/certs:ro
     env_file:
       - .env
     environment:
