@@ -1,6 +1,6 @@
 services:
   osrm-foot:
-    image: ghcr.io/project-osrm/osrm-backend:v26.5.0
+    image: ghcr.io/project-osrm/osrm-backend:v26.5.0-amd64-alpine
     command: osrm-routed --algorithm mld --max-table-size 200 /data/australia-latest.osrm
     volumes:
       - ./osrm-data/foot:/data:ro
@@ -10,7 +10,7 @@ services:
     # Uncomment to expose for debugging: ports: ["5001:5000"]
 
   osrm-bicycle:
-    image: ghcr.io/project-osrm/osrm-backend:v26.5.0
+    image: ghcr.io/project-osrm/osrm-backend:v26.5.0-amd64-alpine
     command: osrm-routed --algorithm mld --max-table-size 200 /data/australia-latest.osrm
     volumes:
       - ./osrm-data/bicycle:/data:ro
@@ -20,7 +20,7 @@ services:
     # Uncomment to expose for debugging: ports: ["5002:5000"]
 
   osrm-car:
-    image: ghcr.io/project-osrm/osrm-backend:v26.5.0
+    image: ghcr.io/project-osrm/osrm-backend:v26.5.0-amd64-alpine
     command: osrm-routed --algorithm mld --max-table-size 200 /data/australia-latest.osrm
     volumes:
       - ./osrm-data/car:/data:ro
