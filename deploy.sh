@@ -11,6 +11,19 @@ for arg in "$@"; do
   esac
 done
 
+# --- Check for local changes that would block git pull ---
+DIRTY=$(git status --porcelain -- $(git ls-files) 2>/dev/null | head -1)
+if [ -n "$DIRTY" ]; then
+  echo ""
+  echo "ERROR: You have local changes to tracked files. git pull will fail."
+  echo ""
+  git status --short -- $(git ls-files)
+  echo ""
+  echo "Commit or stash your changes before running deploy.sh."
+  echo "Note: osrm-data/, backend/certs/, and .env are gitignored and safe to leave as-is."
+  exit 1
+fi
+
 # --- Pull latest code ---
 echo ">>> git pull"
 git pull
