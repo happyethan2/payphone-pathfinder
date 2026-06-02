@@ -13,7 +13,10 @@ done
 
 # --- Pull latest code ---
 echo ">>> git pull"
+git add .
+git stash
 git pull
+git stash apply
 
 # --- Pull new images (must happen before digest comparison) ---
 echo ">>> docker compose pull"
