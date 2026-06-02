@@ -50,9 +50,9 @@ wget -O australia-latest.osm.pbf \
 ```bash
 # Foot
 cp australia-latest.osm.pbf osrm-data/foot/
-docker run --rm -v "$(pwd)/osrm-data/foot:/data" ghcr.io/project-osrm/osrm-backend osrm-extract -p /opt/foot.lua /data/australia-latest.osm.pbf
-docker run --rm -v "$(pwd)/osrm-data/foot:/data" ghcr.io/project-osrm/osrm-backend osrm-partition /data/australia-latest.osrm
-docker run --rm -v "$(pwd)/osrm-data/foot:/data" ghcr.io/project-osrm/osrm-backend osrm-customize /data/australia-latest.osrm
+docker run --rm -v "$(pwd)/osrm-data/foot:/data" ghcr.io/project-osrm/osrm-backend:v26.5.0-amd64-alpine osrm-extract -p /opt/foot.lua /data/australia-latest.osm.pbf
+docker run --rm -v "$(pwd)/osrm-data/foot:/data" ghcr.io/project-osrm/osrm-backend:v26.5.0-amd64-alpine osrm-partition /data/australia-latest.osrm
+docker run --rm -v "$(pwd)/osrm-data/foot:/data" ghcr.io/project-osrm/osrm-backend:v26.5.0-amd64-alpine osrm-customize /data/australia-latest.osrm
 rm osrm-data/foot/australia-latest.osm.pbf
 ```
 
@@ -65,6 +65,24 @@ docker compose up -d
 ```
 
 Open **http://localhost:8000**. Give the OSRM containers a couple of minutes on first start to load the dataset.
+
+---
+
+## Deploying updates
+
+Use the deploy script instead of running Docker commands manually. It pulls the latest code, rebuilds the backend, pulls new images, and does a health check afterward.
+
+```bash
+./deploy.sh
+```
+
+If the OSRM image version has changed since the last deploy, the script will detect it and ask whether to reprocess. Say yes — skipping it will cause OSRM to crash-loop on startup. Reprocessing takes 15–30 min but only happens when the image actually changes, not on every deploy.
+
+If you ever need to force a reprocess manually:
+
+```bash
+./deploy.sh --reprocess-osrm
+```
 
 ---
 
@@ -108,6 +126,8 @@ Step 2 is the one people miss.
 **OSRM slow to respond after startup** — it needs a minute or two to load the Australia dataset into memory.
 
 **Vroom returns no routes** — usually means the selected phones aren't reachable under the chosen transport mode. Try switching profiles or selecting a different area.
+
+**OSRM fingerprint mismatch on startup** — the preprocessed data doesn't match the running image version. Re-run `./deploy.sh --reprocess-osrm`. Make sure you used the same image tag listed in `docker-compose.yml` when you first preprocessed.
 
 **Can't reach the app via Tailscale on Linux** — Docker's iptables can block traffic from the Tailscale interface:
 ```bash
