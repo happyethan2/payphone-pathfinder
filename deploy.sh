@@ -21,13 +21,31 @@ RUNNING_IMAGE=$(docker inspect "$(docker compose ps -q osrm-foot 2>/dev/null)" -
 
 if [ -n "$RUNNING_IMAGE" ] && [ "$RUNNING_IMAGE" != "$COMPOSE_IMAGE" ]; then
   echo ""
-  echo "WARNING: OSRM image changed"
+  echo "WARNING: OSRM image version changed"
   echo "  was: $RUNNING_IMAGE"
   echo "  now: $COMPOSE_IMAGE"
   echo ""
+  echo "The routing data must be reprocessed against the new image or the OSRM"
+  echo "containers will crash-loop with a fingerprint mismatch error on startup."
+  echo "Reprocessing takes ~15-30 min depending on hardware."
+  echo ""
+
   if [ "$REPROCESS" = false ]; then
-    echo "If the app crashes (Fingerprint mismatch), re-run with --reprocess-osrm"
-    echo ""
+    # Only prompt if we have an interactive terminal
+    if [ -t 0 ]; then
+      read -r -p "Reprocess OSRM data now? Skipping will break routing until you do. [Y/n]: " REPLY
+      REPLY="${REPLY:-Y}"
+      if [[ "$REPLY" =~ ^[Yy] ]]; then
+        REPROCESS=true
+      else
+        echo ""
+        echo "Skipping reprocess. If routing is broken, re-run: ./deploy.sh --reprocess-osrm"
+        echo ""
+      fi
+    else
+      echo "Non-interactive mode — skipping reprocess. Run ./deploy.sh --reprocess-osrm manually."
+      echo ""
+    fi
   fi
 fi
 
