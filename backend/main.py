@@ -46,6 +46,14 @@ _WIKI_CACHE: set | None = None
 _WIKI_CACHE_AT: float   = 0.0
 _WIKI_CACHE_TTL: float  = 300.0  # 5 minutes
 
+# ---------------------------------------------------------------------------
+# Past-captures cache — per-user, invalidated on username change
+# ---------------------------------------------------------------------------
+_CAPTURES_CACHE:      set[int] | None = None
+_CAPTURES_CACHE_AT:   float           = 0.0
+_CAPTURES_CACHE_USER: str             = ""
+_CAPTURES_CACHE_TTL:  float           = 300.0  # 5 minutes
+
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -346,6 +354,41 @@ async def get_wiki_photos():
     """Return IDs of phones that have at least one user photo on the payphonetag wiki."""
     ids = await _fetch_wiki_photo_ids()
     return {"has_photo": sorted(ids)}
+
+
+async def _fetch_past_capture_ids(username: str, cell: str) -> set[int]:
+    global _CAPTURES_CACHE, _CAPTURES_CACHE_AT, _CAPTURES_CACHE_USER
+    now = time.monotonic()
+    if (_CAPTURES_CACHE is not None
+            and _CAPTURES_CACHE_USER == username
+            and (now - _CAPTURES_CACHE_AT) < _CAPTURES_CACHE_TTL):
+        return _CAPTURES_CACHE
+
+    data = await _fetch_phones_data()
+    player_id, _, _ = _resolve_player(data, username, cell or None)
+    if not player_id:
+        return set()
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            f"https://payphonetag.com/api/player/{player_id}/past-captures"
+        )
+        resp.raise_for_status()
+
+    ids: set[int] = set(int(i) for i in resp.json().get("payphoneIds", []))
+    _CAPTURES_CACHE      = ids
+    _CAPTURES_CACHE_AT   = time.monotonic()
+    _CAPTURES_CACHE_USER = username
+    return ids
+
+
+@app.get("/api/past-captures")
+async def get_past_captures(
+    username: str = Query(...),
+    cell:     str = Query(default=""),
+):
+    ids = await _fetch_past_capture_ids(username, cell)
+    return {"captured": sorted(ids)}
 
 
 @app.get("/api/phones")

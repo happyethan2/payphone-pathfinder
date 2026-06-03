@@ -354,6 +354,9 @@
         <div class="legend-item">
           <span class="dot" style="background:#0d0d1a;border:2px solid #c084fc;"></span>Wiki photo
         </div>
+        <div class="legend-item">
+          <span class="dot" style="background:#0d0d1a;border:2px solid #fbbf24;"></span>Never captured
+        </div>
       </div>
     </div>
 
@@ -366,9 +369,16 @@
                 title="Highlight phones that have a wiki photo">
           📷 Wiki Photos
         </button>
+        <button id="btn-new-filter" onclick="toggleNewPhoneFilter()"
+                style="font-size:11px;"
+                title="Highlight phones you have never captured">
+          ✨ New Phones
+        </button>
       </div>
       <div id="wiki-photo-status" class="sub-text"
            style="display:none;color:#c084fc;"></div>
+      <div id="new-phone-status" class="sub-text"
+           style="display:none;color:#fbbf24;"></div>
     </div>
 
     <!-- Always visible: Transport -->
@@ -531,6 +541,8 @@ const state = {
   lassoExcludeCellmates: false,
   photoFilter:     false,   // highlight phones missing a wiki photo
   wikiPhotoIds:    null,    // Set<number> loaded lazily; null = not yet fetched
+  newPhoneFilter:  false,
+  pastCaptureIds:  null,    // Set<number> loaded lazily; null = not yet fetched
   lastRoute:       null,
   mapsLegs:        [],
   currentLeg:      0,
@@ -544,7 +556,8 @@ const state = {
 // ── Refresh health tracking ───────────────────────────────────────
 let _lastRefreshAt    = 0;
 let _refreshFailCount = 0;
-let _wikiPhotoFetchedLabel = '';  // HH:MM:SS of last actual wiki fetch
+let _wikiPhotoFetchedLabel   = '';  // HH:MM:SS of last actual wiki fetch
+let _pastCaptureFetchedLabel = '';
 
 function updateRefreshDot() {
   const dot = document.getElementById('refresh-dot');
@@ -729,9 +742,9 @@ function makeWpIcon(label, extraClass) {
   });
 }
 
-function mkStyle(color, sel, hasPhoto) {
-  const strokeColor  = hasPhoto ? '#c084fc' : (sel ? '#fff' : 'rgba(0,0,0,0.3)');
-  const strokeWeight = hasPhoto ? 2 : (sel ? 2.5 : 1);
+function mkStyle(color, sel, hasPhoto, isNew) {
+  const strokeColor  = isNew ? '#fbbf24' : hasPhoto ? '#c084fc' : (sel ? '#fff' : 'rgba(0,0,0,0.3)');
+  const strokeWeight = (isNew || hasPhoto) ? 2 : (sel ? 2.5 : 1);
   return { radius: markerRadius(sel), fillColor: color, color: strokeColor,
            weight: strokeWeight, fillOpacity: 0.9, opacity: 1 };
 }
@@ -739,10 +752,12 @@ function mkStyle(color, sel, hasPhoto) {
 function refreshMarker(phone) {
   const m = state.markers[phone.id];
   if (!m) return;
-  const sel          = state.selectedIds.has(phone.id);
+  const sel      = state.selectedIds.has(phone.id);
   const hasPhoto = state.photoFilter && state.wikiPhotoIds !== null
                    && state.wikiPhotoIds.has(Number(phone.id));
-  m.setStyle(mkStyle(STATUS_COLORS[phone.status] || '#888', sel, hasPhoto));
+  const isNew    = state.newPhoneFilter && state.pastCaptureIds !== null
+                   && !state.pastCaptureIds.has(Number(phone.id));
+  m.setStyle(mkStyle(STATUS_COLORS[phone.status] || '#888', sel, hasPhoto, isNew));
   m.setRadius(markerRadius(sel));
 }
 
@@ -869,6 +884,54 @@ async function togglePhotoFilter() {
 
   if (statusEl && _wikiPhotoFetchedLabel) {
     statusEl.textContent = `● updated ${_wikiPhotoFetchedLabel}`;
+    statusEl.style.display = 'block';
+  }
+
+  state.phones.forEach(p => refreshMarker(p));
+}
+
+async function toggleNewPhoneFilter() {
+  state.newPhoneFilter = !state.newPhoneFilter;
+  const btn      = document.getElementById('btn-new-filter');
+  const statusEl = document.getElementById('new-phone-status');
+  btn.classList.toggle('active', state.newPhoneFilter);
+
+  if (!state.newPhoneFilter) {
+    if (statusEl) statusEl.style.display = 'none';
+    state.phones.forEach(p => refreshMarker(p));
+    return;
+  }
+
+  const username = document.getElementById('username').value.trim();
+  if (!username) {
+    alert('Enter your username first so we can look up your capture history.');
+    state.newPhoneFilter = false;
+    btn.classList.remove('active');
+    return;
+  }
+
+  if (state.pastCaptureIds === null) {
+    btn.textContent = '✨ Loading…';
+    btn.disabled = true;
+    try {
+      const res  = await fetch(`/api/past-captures?username=${encodeURIComponent(username)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      state.pastCaptureIds = new Set((data.captured || []).map(Number));
+      _pastCaptureFetchedLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    } catch (_) {
+      state.newPhoneFilter = false;
+      btn.classList.remove('active');
+      btn.disabled = false;
+      btn.textContent = '✨ New Phones';
+      return;
+    }
+    btn.disabled = false;
+    btn.textContent = '✨ New Phones';
+  }
+
+  if (statusEl && _pastCaptureFetchedLabel) {
+    statusEl.textContent = `● updated ${_pastCaptureFetchedLabel}`;
     statusEl.style.display = 'block';
   }
 
