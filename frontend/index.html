@@ -398,7 +398,8 @@
         <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:5px;">
           <button id="btn-click" onclick="toggleClickMode()" class="active" style="grid-column:1;grid-row:1;">Click</button>
           <button id="btn-lasso" onclick="cycleLasso()" style="grid-column:2;grid-row:1;">Lasso</button>
-          <button id="btn-exclude-owned" onclick="toggleExcludeOwned()" style="grid-column:1/3;grid-row:2;" title="When active, lasso skips phones you already own">Skip Owned</button>
+          <button id="btn-exclude-owned" onclick="toggleExcludeOwned()" style="grid-column:1;grid-row:2;" title="When active, lasso skips phones you already own">Skip Owned</button>
+          <button id="btn-exclude-cellmates" onclick="toggleExcludeCellmates()" style="grid-column:2;grid-row:2;" title="When active, lasso skips phones held by your cellmates">Skip Cellmates</button>
           <button id="btn-clear-sel" onclick="flashDanger('btn-clear-sel');clearSelection()" class="danger icon-only" style="grid-column:3;grid-row:1/3;align-self:stretch;" aria-label="Clear selection">✕</button>
         </div>
         <div id="sel-count" class="sub-text" style="margin-top:4px;">0 selected</div>
@@ -527,6 +528,7 @@ const state = {
   lassoLayer:      null,
   lassoDragging:   false,
   lassoExcludeOwned: false,
+  lassoExcludeCellmates: false,
   photoFilter:     false,   // highlight phones missing a wiki photo
   wikiPhotoIds:    null,    // Set<number> loaded lazily; null = not yet fetched
   lastRoute:       null,
@@ -828,6 +830,11 @@ function toggleExcludeOwned() {
   document.getElementById('btn-exclude-owned').classList.toggle('active', state.lassoExcludeOwned);
 }
 
+function toggleExcludeCellmates() {
+  state.lassoExcludeCellmates = !state.lassoExcludeCellmates;
+  document.getElementById('btn-exclude-cellmates').classList.toggle('active', state.lassoExcludeCellmates);
+}
+
 async function togglePhotoFilter() {
   state.photoFilter = !state.photoFilter;
   const btn       = document.getElementById('btn-photo-filter');
@@ -928,6 +935,7 @@ function finishLasso() {
   const deselecting = state.mode === 'lasso-deselect';
   state.phones.forEach(phone => {
     if (!deselecting && state.lassoExcludeOwned && phone.status === 'mine') return;
+    if (!deselecting && state.lassoExcludeCellmates && phone.status === 'cellmate') return;
     if (pointInPolygon([phone.lat, phone.lon], poly)) {
       deselecting ? state.selectedIds.delete(phone.id) : state.selectedIds.add(phone.id);
       refreshMarker(phone);
