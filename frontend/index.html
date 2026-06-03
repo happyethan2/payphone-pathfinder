@@ -355,7 +355,7 @@
           <span class="dot" style="background:#0d0d1a;border:2px solid #c084fc;"></span>Wiki photo
         </div>
         <div class="legend-item">
-          <span class="dot" style="background:#0d0d1a;border:2px solid #fbbf24;"></span>Never captured
+          <span class="dot" style="background:#0d0d1a;border:2px solid #fbbf24;"></span>New
         </div>
       </div>
     </div>
@@ -369,7 +369,7 @@
                 title="Highlight phones that have a wiki photo">
           📷 Wiki Photos
         </button>
-        <button id="btn-new-filter" onclick="toggleNewPhoneFilter()"
+        <button id="btn-capture-filter" onclick="toggleNewPhoneFilter()"
                 style="font-size:11px;"
                 title="Highlight phones you have never captured">
           ✨ New Phones
@@ -709,11 +709,13 @@ function renderMarkers() {
 }
 
 function makeMarker(phone) {
-  const sel         = state.selectedIds.has(phone.id);
-  const color       = STATUS_COLORS[phone.status] || '#888';
+  const sel      = state.selectedIds.has(phone.id);
+  const color    = STATUS_COLORS[phone.status] || '#888';
   const hasPhoto = state.photoFilter && state.wikiPhotoIds !== null
                    && state.wikiPhotoIds.has(Number(phone.id));
-  const m = L.circleMarker([phone.lat, phone.lon], mkStyle(color, sel, hasPhoto));
+  const isNew    = state.newPhoneFilter && state.pastCaptureIds !== null
+                   && !state.pastCaptureIds.has(Number(phone.id));
+  const m = L.circleMarker([phone.lat, phone.lon], mkStyle(color, sel, hasPhoto, isNew));
   m.bindTooltip(makeTooltipHtml(phone), { direction: 'top', sticky: true });
   m.on('click', e => { L.DomEvent.stopPropagation(e); onMarkerClick(phone); });
   return m;
@@ -892,7 +894,7 @@ async function togglePhotoFilter() {
 
 async function toggleNewPhoneFilter() {
   state.newPhoneFilter = !state.newPhoneFilter;
-  const btn      = document.getElementById('btn-new-filter');
+  const btn      = document.getElementById('btn-capture-filter');
   const statusEl = document.getElementById('new-phone-status');
   btn.classList.toggle('active', state.newPhoneFilter);
 
