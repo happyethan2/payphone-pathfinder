@@ -557,7 +557,6 @@ const state = {
 let _lastRefreshAt    = 0;
 let _refreshFailCount = 0;
 let _wikiPhotoFetchedLabel   = '';  // HH:MM:SS of last actual wiki fetch
-let _pastCaptureFetchedLabel = '';
 
 function updateRefreshDot() {
   const dot = document.getElementById('refresh-dot');
@@ -934,7 +933,6 @@ async function toggleNewPhoneFilter() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       state.pastCaptureIds = new Set((data.captured || []).map(Number));
-      _pastCaptureFetchedLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
     } catch (_) {
       state.newPhoneFilter = false;
       btn.classList.remove('active');
@@ -946,8 +944,9 @@ async function toggleNewPhoneFilter() {
     btn.textContent = '✨ New Phones';
   }
 
-  if (statusEl && _pastCaptureFetchedLabel) {
-    statusEl.textContent = `● updated ${_pastCaptureFetchedLabel}`;
+  if (statusEl && _lastRefreshAt) {
+    const t = new Date(_lastRefreshAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    statusEl.textContent = `● updated ${t}`;
     statusEl.style.display = 'block';
   }
 
@@ -1699,6 +1698,10 @@ async function refreshPhones() {
     const healthColor = updateRefreshDot();
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
     setStatus(`updated ${now}${changed ? ` · ${changed} changed` : ''}`, healthColor + 'b3');
+    if (state.newPhoneFilter) {
+      const el = document.getElementById('new-phone-status');
+      if (el) { el.textContent = `● updated ${now}`; el.style.display = 'block'; }
+    }
   } catch (_) {
     _refreshFailCount++;
     updateRefreshDot();
