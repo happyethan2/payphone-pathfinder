@@ -858,6 +858,13 @@ async function togglePhotoFilter() {
   const statusEl  = document.getElementById('wiki-photo-status');
   btn.classList.toggle('active', state.photoFilter);
 
+  if (state.photoFilter && state.newPhoneFilter) {
+    state.newPhoneFilter = false;
+    document.getElementById('btn-capture-filter').classList.remove('active');
+    const ns = document.getElementById('new-phone-status');
+    if (ns) ns.style.display = 'none';
+  }
+
   if (!state.photoFilter) {
     if (statusEl) statusEl.style.display = 'none';
     state.phones.forEach(p => refreshMarker(p));
@@ -897,6 +904,13 @@ async function toggleNewPhoneFilter() {
   const btn      = document.getElementById('btn-capture-filter');
   const statusEl = document.getElementById('new-phone-status');
   btn.classList.toggle('active', state.newPhoneFilter);
+
+  if (state.newPhoneFilter && state.photoFilter) {
+    state.photoFilter = false;
+    document.getElementById('btn-photo-filter').classList.remove('active');
+    const ps = document.getElementById('wiki-photo-status');
+    if (ps) ps.style.display = 'none';
+  }
 
   if (!state.newPhoneFilter) {
     if (statusEl) statusEl.style.display = 'none';
