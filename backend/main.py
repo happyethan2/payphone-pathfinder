@@ -52,7 +52,7 @@ _WIKI_CACHE_TTL: float  = 300.0  # 5 minutes
 _CAPTURES_CACHE:      set[int] | None = None
 _CAPTURES_CACHE_AT:   float           = 0.0
 _CAPTURES_CACHE_USER: str             = ""
-_CAPTURES_CACHE_TTL:  float           = 300.0  # 5 minutes
+_CAPTURES_CACHE_TTL:  float           = 30.0   # match phone state cache TTL
 
 
 # ---------------------------------------------------------------------------

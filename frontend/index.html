@@ -1657,6 +1657,12 @@ async function refreshPhones() {
         }
         phone.status      = updated.status;
         phone.holder_name = updated.holder_name;
+        // If new-phones filter is active and this phone just became mine, remove it
+        // from the "never captured" set immediately — no extra API call needed.
+        if (state.newPhoneFilter && state.pastCaptureIds !== null
+            && updated.status === 'mine') {
+          state.pastCaptureIds.add(Number(phone.id));
+        }
         const m = state.markers[phone.id];
         if (m) {
           m.setTooltipContent(makeTooltipHtml(phone));
