@@ -1301,10 +1301,13 @@ function displayRoute(data, extraS = 0) {
 
   const km       = (total_distance_m / 1000).toFixed(1);
   const totalS   = total_duration_s + extraS;
-  const mins     = Math.round(totalS / 60);
+  const totalMins = Math.round(totalS / 60);
+  const durStr   = totalMins >= 60
+    ? `${Math.floor(totalMins / 60)}h ${String(totalMins % 60).padStart(2, '0')}m`
+    : `${totalMins}m`;
   const arriveAt = new Date(Date.now() + totalS * 1000);
   const timeStr  = arriveAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
-  document.getElementById('route-stats').textContent = `${km} km · ${mins} min · ${timeStr} · ${ordered_ids.length} stops`;
+  document.getElementById('route-stats').textContent = `${km} km · ${durStr} · ${timeStr} · ${ordered_ids.length} stops`;
   document.getElementById('route-result').style.display = 'block';
   updateMapsLink(data);
   startBackgroundRefresh();  // switch to active polling while navigating a route
