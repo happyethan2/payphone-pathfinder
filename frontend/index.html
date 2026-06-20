@@ -148,7 +148,8 @@
     /* ── Panel section separators ──────────────────────────────── */
     #panel-body > div + div,
     #panel-tab-route > div + div,
-    #panel-tab-orienteer > div + div {
+    #panel-tab-orienteer > div + div,
+    #panel-tab-settings > div + div {
       border-top: 1px solid rgba(100,110,200,0.08);
       margin-top: 4px;
       padding-top: 12px;
@@ -279,6 +280,7 @@
       flex: none; transition: background 0.15s;
     }
     #fab-centre:hover { background: rgba(40,40,80,0.95); }
+    #fab-centre.heading-locked { background: rgba(74,158,255,0.25); border-color: rgba(74,158,255,0.55); }
 
     /* ── Desktop: revert to side panel ──────────────────────── */
     @media (min-width: 640px) {
@@ -326,6 +328,7 @@
     <div id="panel-tab-bar">
       <button id="btn-panel-tab-route"     class="panel-tab active" onclick="setPanelTab('route')">Route</button>
       <button id="btn-panel-tab-orienteer" class="panel-tab"        onclick="setPanelTab('orienteer')">Orienteer</button>
+      <button id="btn-panel-tab-settings"  class="panel-tab"        onclick="setPanelTab('settings')">Settings</button>
     </div>
   </div>
 
@@ -446,6 +449,19 @@
 
     </div><!-- /#panel-tab-orienteer -->
 
+    <!-- Settings tab -->
+    <div id="panel-tab-settings" style="display:none;">
+
+      <div>
+        <div class="sec-title">Map Theme</div>
+        <div class="btn-row">
+          <button id="btn-theme-dark"  onclick="setMapTheme('dark')"  class="active">Dark</button>
+          <button id="btn-theme-light" onclick="setMapTheme('light')">Light</button>
+        </div>
+      </div>
+
+    </div><!-- /#panel-tab-settings -->
+
     <!-- Shared route result (always visible once solved) -->
     <div id="route-result" style="display:none;">
       <div id="route-stats"></div>
@@ -512,12 +528,18 @@
 <div id="fab-stack">
   <div id="loc-badge">no GPS</div>
   <button id="btn-minimap" onclick="toggleMiniMap()" title="Toggle mini-map">🗺</button>
-  <button id="fab-centre" onclick="centreOnMe()" title="Centre on my location">📡</button>
+  <button id="fab-centre" onclick="handleCompassTap()" title="Tap: centre + lock heading  ·  Tap again: reset north">
+    <svg id="compass-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" style="transition:transform 0.15s;">
+      <path d="M12 4 L14.5 13 L12 11.5 L9.5 13 Z" fill="#e74c3c"/>
+      <path d="M12 20 L9.5 13 L12 14.5 L14.5 13 Z" fill="#778"/>
+    </svg>
+  </button>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.min.js"></script>
+<script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
 <script>
 // ── State ─────────────────────────────────────────────────────────
 const state = {
@@ -550,9 +572,11 @@ const state = {
   currentLeg:      0,
   routeProgress:   0,   // index into routeOrderedIds (current stop being visited)
   routeOrderedIds: [],  // ordered_ids of active route (set at display time, separate from lastRoute)
-  routeMode:              'route',  // 'route' | 'orienteer'
+  routeMode:              'route',  // 'route' | 'orienteer' | 'settings'
   orienteerArriveBy:      '',       // HH:MM string for orienteer arrive-by time
   lastOrienteerBufferS:   0,        // buffer used for the last orienteer solve
+  mapTheme:               'dark',   // 'dark' | 'light'
+  headingLocked:          false,    // compass FAB: locked to device heading
 };
 
 // ── Refresh health tracking ───────────────────────────────────────
@@ -602,13 +626,19 @@ const STATUS_COLORS = {
 };
 
 // ── Map init ──────────────────────────────────────────────────────
+const TILE_URLS = {
+  dark:  'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+};
+
 const map = L.map('map', {
   center: [-25.0, 134.0], zoom: 5,
   zoomControl: false,        // we'll add it at bottom-left
   preferCanvas: true,
+  rotate: true, bearing: 0,
 });
 
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+let tileLayer = L.tileLayer(TILE_URLS.dark, {
   attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19,
 }).addTo(map);
 
@@ -626,7 +656,7 @@ function toggleMiniMap() {
     miniMap = null;
     document.getElementById('btn-minimap').classList.remove('active');
   } else {
-    const tiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    const tiles = L.tileLayer(TILE_URLS[state.mapTheme] || TILE_URLS.dark,
       { attribution: '', maxZoom: 19 });
     miniMap = new L.Control.MiniMap(tiles, {
       position: 'bottomleft', width: 130, height: 100,
@@ -1101,16 +1131,22 @@ function snapPoint(latlng) {
     : { lat: latlng.lat, lon: latlng.lng };
 }
 
+function makeBracketIcon(which) {
+  const color = which === 'start' ? '#2ecc71' : '#e74c3c';
+  const borderStyle = which === 'start'
+    ? `border-top:3px solid ${color};border-bottom:3px solid ${color};border-left:3px solid ${color};border-right:none;border-radius:3px 0 0 3px;`
+    : `border-top:3px solid ${color};border-bottom:3px solid ${color};border-right:3px solid ${color};border-left:none;border-radius:0 3px 3px 0;`;
+  return L.divIcon({
+    html: `<div style="width:10px;height:18px;${borderStyle}box-sizing:border-box;"></div>`,
+    className: '', iconSize: [10, 18], iconAnchor: [5, 9],
+  });
+}
+
 function setEndpoint(which, point) {
   state[which] = point;
   const oldKey = `${which}Marker`;
   if (state[oldKey]) map.removeLayer(state[oldKey]);
-  const icon = L.divIcon({
-    html: `<div style="width:12px;height:12px;border-radius:50%;
-      background:${which === 'start' ? '#2ecc71' : '#e74c3c'};
-      border:2px solid #fff;box-shadow:0 0 0 3px ${which === 'start' ? '#2ecc714d' : '#e74c3c4d'}"></div>`,
-    className: '', iconSize: [12, 12], iconAnchor: [6, 6],
-  });
+  const icon = makeBracketIcon(which);
   state[oldKey] = L.marker([point.lat, point.lon], { icon, zIndexOffset: 500 }).addTo(map);
 
   // Sequential flow: after start is set, automatically prompt for end
@@ -1173,13 +1209,15 @@ async function findRoute() {
   }
 }
 
-// ── Panel tab switching (Route / Orienteer) ───────────────────────
+// ── Panel tab switching (Route / Orienteer / Settings) ───────────
 function setPanelTab(tab) {
   state.routeMode = tab;
   document.getElementById('panel-tab-route').style.display     = tab === 'route'     ? '' : 'none';
   document.getElementById('panel-tab-orienteer').style.display = tab === 'orienteer' ? '' : 'none';
+  document.getElementById('panel-tab-settings').style.display  = tab === 'settings'  ? '' : 'none';
   document.getElementById('btn-panel-tab-route').classList.toggle('active',     tab === 'route');
   document.getElementById('btn-panel-tab-orienteer').classList.toggle('active', tab === 'orienteer');
+  document.getElementById('btn-panel-tab-settings').classList.toggle('active',  tab === 'settings');
   if (!panelOpen) { panelOpen = true; document.getElementById('panel').classList.add('open'); }
   saveSession();
 }
@@ -1577,6 +1615,88 @@ function centreOnMe() {
   );
 }
 
+// ── Map theme ─────────────────────────────────────────────────────
+function setMapTheme(theme) {
+  state.mapTheme = theme;
+  map.removeLayer(tileLayer);
+  tileLayer = L.tileLayer(TILE_URLS[theme], {
+    attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19,
+  }).addTo(map);
+  tileLayer.bringToBack();
+  if (miniMap) {
+    miniMap.remove(); miniMap = null;
+    document.getElementById('btn-minimap').classList.remove('active');
+    toggleMiniMap();
+  }
+  document.getElementById('btn-theme-dark').classList.toggle('active', theme === 'dark');
+  document.getElementById('btn-theme-light').classList.toggle('active', theme === 'light');
+}
+
+// ── Compass / heading lock ────────────────────────────────────────
+let _compassHeading  = 0;
+let _orientationBound = false;
+
+function updateCompassArrow() {
+  const svg = document.getElementById('compass-svg');
+  if (!svg) return;
+  const bearing = (typeof map.getBearing === 'function') ? map.getBearing() : 0;
+  svg.style.transform = `rotate(${bearing}deg)`;
+}
+
+map.on('move', updateCompassArrow);
+
+function handleCompassTap() {
+  if (!state.headingLocked) {
+    state.headingLocked = true;
+    document.getElementById('fab-centre').classList.add('heading-locked');
+    centreOnMe();
+    if (typeof map.setBearing === 'function') map.setBearing(_compassHeading);
+    updateCompassArrow();
+    _startDeviceOrientation();
+  } else {
+    state.headingLocked = false;
+    document.getElementById('fab-centre').classList.remove('heading-locked');
+    if (typeof map.setBearing === 'function') map.setBearing(0);
+    updateCompassArrow();
+  }
+}
+
+function _startDeviceOrientation() {
+  if (_orientationBound) return;
+
+  function onOrientation(e) {
+    if (!state.headingLocked) return;
+    let heading = null;
+    if (e.webkitCompassHeading != null) {
+      heading = e.webkitCompassHeading;            // iOS — already absolute
+    } else if (e.alpha != null) {
+      heading = (360 - e.alpha) % 360;             // convert to compass bearing
+    }
+    if (heading == null) return;
+    _compassHeading = heading;
+    if (typeof map.setBearing === 'function') map.setBearing(heading);
+    updateCompassArrow();
+  }
+
+  // iOS 13+ requires a permission prompt on user gesture
+  if (typeof DeviceOrientationEvent !== 'undefined'
+      && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission()
+      .then(result => {
+        if (result === 'granted') {
+          window.addEventListener('deviceorientation', onOrientation, true);
+          _orientationBound = true;
+        }
+      })
+      .catch(() => {});
+  } else {
+    // Android / desktop
+    window.addEventListener('deviceorientationabsolute', onOrientation, true);
+    window.addEventListener('deviceorientation',         onOrientation, true);
+    _orientationBound = true;
+  }
+}
+
 startGeolocation();
 
 // ── Session persistence ───────────────────────────────────────────
@@ -1616,7 +1736,7 @@ function restoreSession() {
     }
     // setPanelTab called last so its saveSession() captures all fully-restored values.
     // Map legacy 'optimal' value to 'route'.
-    const savedTab = s.routeMode === 'orienteer' ? 'orienteer' : 'route';
+    const savedTab = s.routeMode === 'orienteer' ? 'orienteer' : s.routeMode === 'settings' ? 'settings' : 'route';
     setPanelTab(savedTab);
     return !!s.username;
   } catch (_) {
@@ -1630,13 +1750,7 @@ function restoreEndpointMarkers() {
     if (!point) return;
     const markerKey = `${which}Marker`;
     if (state[markerKey]) map.removeLayer(state[markerKey]);
-    const icon = L.divIcon({
-      html: `<div style="width:12px;height:12px;border-radius:50%;
-        background:${which === 'start' ? '#2ecc71' : '#e74c3c'};
-        border:2px solid #fff;box-shadow:0 0 0 3px ${which === 'start' ? '#2ecc714d' : '#e74c3c4d'}"></div>`,
-      className: '', iconSize: [12, 12], iconAnchor: [6, 6],
-    });
-    state[markerKey] = L.marker([point.lat, point.lon], { icon, zIndexOffset: 500 }).addTo(map);
+    state[markerKey] = L.marker([point.lat, point.lon], { icon: makeBracketIcon(which), zIndexOffset: 500 }).addTo(map);
   });
 }
 
