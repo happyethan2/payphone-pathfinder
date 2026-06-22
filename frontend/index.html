@@ -347,7 +347,10 @@
       </div>
     </div>
 
-    <!-- Always visible: Legend -->
+    <!-- Hidden on Settings tab -->
+    <div id="section-route-common">
+
+    <!-- Legend -->
     <div>
       <div class="sec-title">Legend</div>
       <div class="legend">
@@ -364,7 +367,7 @@
       </div>
     </div>
 
-    <!-- Always visible: Filters -->
+    <!-- Filters -->
     <div>
       <div class="sec-title">Filters</div>
       <div class="btn-row">
@@ -385,7 +388,7 @@
            style="display:none;color:#fbbf24;"></div>
     </div>
 
-    <!-- Always visible: Transport -->
+    <!-- Transport -->
     <div>
       <div class="sec-title">Transport</div>
       <div class="btn-row">
@@ -395,13 +398,15 @@
       </div>
     </div>
 
-    <!-- Always visible: Start & End -->
+    <!-- Start & End -->
     <div>
       <div class="sec-title">Start &amp; End</div>
       <div class="btn-row">
         <button id="btn-set-endpoints" onclick="startSetEndpoints()">📍 Set Start &amp; End</button>
       </div>
     </div>
+
+    </div><!-- /#section-route-common -->
 
     <!-- Route tab -->
     <div id="panel-tab-route">
@@ -1212,9 +1217,13 @@ async function findRoute() {
 // ── Panel tab switching (Route / Orienteer / Settings) ───────────
 function setPanelTab(tab) {
   state.routeMode = tab;
-  document.getElementById('panel-tab-route').style.display     = tab === 'route'     ? '' : 'none';
-  document.getElementById('panel-tab-orienteer').style.display = tab === 'orienteer' ? '' : 'none';
-  document.getElementById('panel-tab-settings').style.display  = tab === 'settings'  ? '' : 'none';
+  const isSettings = tab === 'settings';
+  document.getElementById('panel-tab-route').style.display      = tab === 'route'     ? '' : 'none';
+  document.getElementById('panel-tab-orienteer').style.display  = tab === 'orienteer' ? '' : 'none';
+  document.getElementById('panel-tab-settings').style.display   = isSettings          ? '' : 'none';
+  document.getElementById('section-route-common').style.display = isSettings ? 'none' : '';
+  const routeResult = document.getElementById('route-result');
+  if (routeResult && isSettings) routeResult.style.display = 'none';
   document.getElementById('btn-panel-tab-route').classList.toggle('active',     tab === 'route');
   document.getElementById('btn-panel-tab-orienteer').classList.toggle('active', tab === 'orienteer');
   document.getElementById('btn-panel-tab-settings').classList.toggle('active',  tab === 'settings');
