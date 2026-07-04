@@ -641,6 +641,8 @@ const map = L.map('map', {
   zoomControl: false,        // we'll add it at bottom-left
   preferCanvas: true,
   rotate: true, bearing: 0,
+  rotateControl: false,      // the compass FAB owns rotation UX
+  touchRotate: true,         // two-finger rotate on mobile
 });
 
 let tileLayer = L.tileLayer(TILE_URLS.dark, {
@@ -1639,11 +1641,19 @@ function setMapTheme(theme) {
   }
   document.getElementById('btn-theme-dark').classList.toggle('active', theme === 'dark');
   document.getElementById('btn-theme-light').classList.toggle('active', theme === 'light');
+  saveSession();
 }
 
 // ── Compass / heading lock ────────────────────────────────────────
-let _compassHeading  = 0;
+let _compassHeading  = 0;   // device compass heading, degrees clockwise from north
 let _orientationBound = false;
+
+// leaflet-rotate's setBearing(θ) rotates the map content clockwise by θ,
+// so to put compass heading H at the top of the screen, north must swing
+// H degrees counter-clockwise.
+function bearingForHeading(heading) {
+  return (360 - heading) % 360;
+}
 
 function updateCompassArrow() {
   const svg = document.getElementById('compass-svg');
@@ -1653,13 +1663,14 @@ function updateCompassArrow() {
 }
 
 map.on('move', updateCompassArrow);
+map.on('rotate', updateCompassArrow);  // fired by setBearing / touch rotate
 
 function handleCompassTap() {
   if (!state.headingLocked) {
     state.headingLocked = true;
     document.getElementById('fab-centre').classList.add('heading-locked');
     centreOnMe();
-    if (typeof map.setBearing === 'function') map.setBearing(_compassHeading);
+    if (typeof map.setBearing === 'function') map.setBearing(bearingForHeading(_compassHeading));
     updateCompassArrow();
     _startDeviceOrientation();
   } else {
@@ -1683,7 +1694,7 @@ function _startDeviceOrientation() {
     }
     if (heading == null) return;
     _compassHeading = heading;
-    if (typeof map.setBearing === 'function') map.setBearing(heading);
+    if (typeof map.setBearing === 'function') map.setBearing(bearingForHeading(heading));
     updateCompassArrow();
   }
 
@@ -1698,10 +1709,13 @@ function _startDeviceOrientation() {
         }
       })
       .catch(() => {});
-  } else {
-    // Android / desktop
+  } else if ('ondeviceorientationabsolute' in window) {
+    // Android: bind only the absolute event — the plain deviceorientation
+    // event's alpha has an arbitrary zero point and would corrupt the heading
     window.addEventListener('deviceorientationabsolute', onOrientation, true);
-    window.addEventListener('deviceorientation',         onOrientation, true);
+    _orientationBound = true;
+  } else {
+    window.addEventListener('deviceorientation', onOrientation, true);
     _orientationBound = true;
   }
 }
@@ -1721,6 +1735,7 @@ function saveSession() {
       end:                 state.end,
       lastRoute:           state.lastRoute,
       routeMode:           state.routeMode,
+      mapTheme:            state.mapTheme,
       orienteerArriveBy: document.getElementById('orienteer-arrive-by')?.value || '',
     }));
   } catch (_) {}
@@ -1737,6 +1752,7 @@ function restoreSession() {
     if (s.start)       state.start     = s.start;
     if (s.end)         state.end       = s.end;
     if (s.lastRoute)   state.lastRoute = s.lastRoute;
+    if (s.mapTheme && TILE_URLS[s.mapTheme]) setMapTheme(s.mapTheme);
     // Restore arrive-by time (or let IIFE set default if absent)
     if (s.orienteerArriveBy) {
       const el = document.getElementById('orienteer-arrive-by');
