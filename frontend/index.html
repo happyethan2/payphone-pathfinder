@@ -558,6 +558,7 @@ const state = {
 // ── Refresh health tracking ───────────────────────────────────────
 let _lastRefreshAt    = 0;
 let _refreshFailCount = 0;
+let _dataStale        = false;  // backend reported it is serving cached data (game API down)
 let _wikiPhotoFetchedLabel   = '';  // HH:MM:SS of last actual wiki fetch
 
 function updateRefreshDot() {
@@ -569,18 +570,40 @@ function updateRefreshDot() {
   let color;
   if (_refreshFailCount >= 2 || age > 120_000) {
     color = '#e74c3c'; dot.title = 'Data feed down';
-  } else if (age > 45_000) {
-    color = '#e67e22'; dot.title = 'Data feed degraded';
+  } else if (_dataStale || age > 45_000) {
+    color = '#e67e22'; dot.title = 'Game API degraded — showing cached data';
   } else {
     color = '#2ecc71'; dot.title = 'Data feed healthy';
   }
   dot.style.background = color;
-  dot.classList.toggle('stale', age > 45_000 || _refreshFailCount >= 2);
+  dot.classList.toggle('stale', _dataStale || age > 45_000 || _refreshFailCount >= 2);
   return color;
+}
+
+// Record a successful /api/phones response. The backend reports whether it is
+// serving stale cached data (game API down) and how old that data is —
+// anchor the freshness dot to the actual data age, not the poll time.
+function noteRefreshResult(data) {
+  _lastRefreshAt    = Date.now() - (data.data_age_s ? data.data_age_s * 1000 : 0);
+  _dataStale        = !!data.stale;
+  _refreshFailCount = 0;
+  return updateRefreshDot();
+}
+
+function dataTimeLabel() {
+  return new Date(_lastRefreshAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 }
 
 // ── Tooltip HTML builder ──────────────────────────────────────────
 const STATUS_LABELS = { uncaptured: 'Uncaptured', mine: 'Mine', cellmate: 'Cellmate', hostile: 'Hostile' };
+
+// Player names come from the game API and are player-controlled — escape them
+// before interpolating into tooltip HTML.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 function makeTooltipHtml(phone) {
   const color = STATUS_COLORS[phone.status] || '#888';
   const label = STATUS_LABELS[phone.status] || phone.status;
@@ -590,7 +613,7 @@ function makeTooltipHtml(phone) {
       <span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;display:inline-block;"></span>
       <span style="font-size:11px;color:${color};font-weight:600;">${label}</span>
     </div>
-    ${phone.holder_name ? `<div style="font-size:10px;color:#778;margin-top:4px;">held by ${phone.holder_name}</div>` : ''}
+    ${phone.holder_name ? `<div style="font-size:10px;color:#778;margin-top:4px;">held by ${escapeHtml(phone.holder_name)}</div>` : ''}
   </div>`;
 }
 
@@ -672,11 +695,19 @@ async function loadPhones() {
   document.getElementById('btn-load').disabled = true;
   try {
     const res  = await fetch(`/api/phones?${new URLSearchParams({ username })}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${res.status}`);
+    }
     const data = await res.json();
     state.phones = data.phones;
     renderMarkers();
-    setStatus(`${state.phones.length} phones loaded`, '#2ecc71');
+    noteRefreshResult(data);
+    if (data.stale) {
+      setStatus(`${state.phones.length} phones loaded — game API down, data from ${dataTimeLabel()}`, '#e67e22');
+    } else {
+      setStatus(`${state.phones.length} phones loaded`, '#2ecc71');
+    }
     document.getElementById('btn-load').textContent = 'Reload';
     updatePanelPeek();
     restoreEndpointMarkers();
@@ -1650,7 +1681,13 @@ async function refreshPhones() {
   if (!username || !state.phones.length) return;
   try {
     const res = await fetch(`/api/phones?${new URLSearchParams({ username })}`);
-    if (!res.ok) return;
+    if (!res.ok) {
+      // Backend errors (e.g. game API down with no cache yet) count as
+      // failed refreshes too — previously only network errors did.
+      _refreshFailCount++;
+      updateRefreshDot();
+      return;
+    }
     const data   = await res.json();
     const newMap = Object.fromEntries(data.phones.map(p => [p.id, p]));
     let changed  = 0;
@@ -1658,13 +1695,13 @@ async function refreshPhones() {
       const updated = newMap[phone.id];
       if (!updated) continue;
       if (updated.status !== phone.status || updated.holder_name !== phone.holder_name) {
-        // Optimistic claiming: if the current route target transitions hostile→unclaimed,
+        // Optimistic claiming: if the current route target transitions hostile→uncaptured,
         // treat it as 'mine' immediately so the marker draws green without a grey flicker.
         const isCurrentTarget =
           state.routeOrderedIds.length &&
           state.routeProgress < state.routeOrderedIds.length &&
           phone.id === state.routeOrderedIds[state.routeProgress];
-        if (isCurrentTarget && phone.status === 'hostile' && updated.status === 'unclaimed') {
+        if (isCurrentTarget && phone.status === 'hostile' && updated.status === 'uncaptured') {
           updated.status = 'mine';
         }
         phone.status      = updated.status;
@@ -1706,11 +1743,13 @@ async function refreshPhones() {
     // Re-evaluate refresh rate: may switch to idle once all stops are completed
     if (_advanced) startBackgroundRefresh();
 
-    _lastRefreshAt    = Date.now();
-    _refreshFailCount = 0;
-    const healthColor = updateRefreshDot();
+    const healthColor = noteRefreshResult(data);
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-    setStatus(`updated ${now}${changed ? ` · ${changed} changed` : ''}`, healthColor + 'b3');
+    if (data.stale) {
+      setStatus(`game API down — data from ${dataTimeLabel()}`, healthColor);
+    } else {
+      setStatus(`updated ${now}${changed ? ` · ${changed} changed` : ''}`, healthColor + 'b3');
+    }
     if (state.newPhoneFilter) {
       const el = document.getElementById('new-phone-status');
       if (el) { el.textContent = `● updated ${now}`; el.style.display = 'block'; }
@@ -1728,14 +1767,26 @@ async function manualRefreshPhones() {
 }
 
 function startBackgroundRefresh() {
-  if (refreshTimer) clearInterval(refreshTimer);
+  stopBackgroundRefresh();
   const interval = (state.routeOrderedIds.length && state.routeProgress < state.routeOrderedIds.length)
     ? REFRESH_INTERVAL_ACTIVE_MS : REFRESH_INTERVAL_IDLE_MS;
   refreshTimer = setInterval(refreshPhones, interval);
 }
 
+function stopBackgroundRefresh() {
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+}
+
+// Pause polling while the tab is hidden — no point refreshing a map nobody is
+// looking at, and it keeps idle tabs from adding load during game API outages.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') saveSession();
+  if (document.visibilityState === 'hidden') {
+    saveSession();
+    stopBackgroundRefresh();
+  } else if (state.phones.length) {
+    startBackgroundRefresh();
+    refreshPhones();
+  }
 });
 
 // ── URL prefill ───────────────────────────────────────────────────

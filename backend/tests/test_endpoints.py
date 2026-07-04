@@ -1,0 +1,421 @@
+"""Endpoint contract tests with all upstreams (game API, OSRM, Vroom, wiki) mocked."""
+import json
+import time
+
+import httpx
+import pytest
+
+import main
+from conftest import SAMPLE_PHONES, mock_phones_ok
+
+
+def _host(url: str) -> str:
+    return httpx.URL(url).host
+
+
+OSRM_HOSTS  = {profile: _host(url) for profile, url in main.OSRM_URLS.items()}
+VROOM_HOST  = _host(main.VROOM_URL)
+UNREACH     = main.UNREACHABLE
+
+
+def _matrix(n: int, value: int = 100) -> list[list[int]]:
+    return [[0 if i == j else value for j in range(n)] for i in range(n)]
+
+
+def mock_osrm_table(router, profile: str, durations, distances=None):
+    return router.get(host=OSRM_HOSTS[profile], path__regex=r"/table/.*").mock(
+        return_value=httpx.Response(200, json={
+            "code": "Ok",
+            "durations": durations,
+            "distances": distances or durations,
+        })
+    )
+
+
+def mock_osrm_routes(router, profile: str):
+    leg = {
+        "geometry": {"type": "LineString", "coordinates": [[138.60, -34.92], [138.61, -34.93]]},
+        "distance": 1000.0,
+        "duration": 120.0,
+        "legs": [{"steps": [{"maneuver": {"type": "turn"}, "name": "Main St",
+                             "distance": 500, "duration": 60}]}],
+    }
+    return router.get(host=OSRM_HOSTS[profile], path__regex=r"/route/.*").mock(
+        return_value=httpx.Response(200, json={"code": "Ok", "routes": [leg]})
+    )
+
+
+def mock_vroom(router, job_order, duration=240, service=0):
+    steps = [{"type": "start"}] + [{"type": "job", "id": i} for i in job_order] + [{"type": "end"}]
+    return router.post(host=VROOM_HOST).mock(
+        return_value=httpx.Response(200, json={
+            "code": 0,
+            "routes": [{"steps": steps, "duration": duration, "service": service}],
+        })
+    )
+
+
+# ── /api/phones ─────────────────────────────────────────────────────
+
+async def test_phones_shaping(client, mock_api):
+    mock_phones_ok(mock_api)
+
+    r = await client.get("/api/phones", params={"username": "GhostScout"})
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["stale"] is False
+    phones = {p["id"]: p for p in body["phones"]}
+    # Inactive phone 5 filtered out
+    assert set(phones) == {1, 2, 3, 4, 6}
+    assert phones[1]["status"] == "uncaptured"
+    assert phones[2]["status"] == "mine"
+    assert phones[3]["status"] == "cellmate"
+    assert phones[4]["status"] == "hostile"
+    assert phones[6]["status"] == "uncaptured"
+    # holder_name resolved from the players map (escaping is the frontend's job)
+    assert phones[4]["holder_name"] == "<b>Rival</b>"
+    assert phones[1]["holder_name"] is None
+
+
+async def test_phones_username_case_insensitive(client, mock_api):
+    mock_phones_ok(mock_api)
+
+    r = await client.get("/api/phones", params={"username": "ghostscout"})
+
+    phones = {p["id"]: p for p in r.json()["phones"]}
+    assert phones[2]["status"] == "mine"
+
+
+# ── /api/past-captures ──────────────────────────────────────────────
+
+async def test_past_captures_happy_path(client, mock_api):
+    mock_phones_ok(mock_api)
+    captures = mock_api.get(f"{main.PAYPHONE_API_BASE}/player/7/past-captures").mock(
+        return_value=httpx.Response(200, json={"payphoneIds": [10, 2, "11"]})
+    )
+
+    r = await client.get("/api/past-captures", params={"username": "GhostScout"})
+
+    assert r.status_code == 200
+    assert r.json()["captured"] == [2, 10, 11]
+    assert captures.call_count == 1
+
+    # Cached per-user: a second request stays off the game API
+    await client.get("/api/past-captures", params={"username": "GhostScout"})
+    assert captures.call_count == 1
+
+
+async def test_past_captures_separate_users(client, mock_api):
+    mock_phones_ok(mock_api)
+    mine = mock_api.get(f"{main.PAYPHONE_API_BASE}/player/7/past-captures").mock(
+        return_value=httpx.Response(200, json={"payphoneIds": [1]})
+    )
+    mates = mock_api.get(f"{main.PAYPHONE_API_BASE}/player/8/past-captures").mock(
+        return_value=httpx.Response(200, json={"payphoneIds": [2]})
+    )
+
+    r1 = await client.get("/api/past-captures", params={"username": "GhostScout"})
+    r2 = await client.get("/api/past-captures", params={"username": "Mate"})
+
+    assert r1.json()["captured"] == [1]
+    assert r2.json()["captured"] == [2]
+    assert mine.call_count == 1 and mates.call_count == 1
+
+
+async def test_past_captures_unknown_user_is_empty(client, mock_api):
+    mock_phones_ok(mock_api)
+
+    r = await client.get("/api/past-captures", params={"username": "NoSuchPlayer"})
+
+    assert r.status_code == 200
+    assert r.json()["captured"] == []
+
+
+async def test_past_captures_stale_fallback(client, mock_api):
+    mock_phones_ok(mock_api)
+    captures = mock_api.get(f"{main.PAYPHONE_API_BASE}/player/7/past-captures").mock(
+        return_value=httpx.Response(200, json={"payphoneIds": [10]})
+    )
+    await client.get("/api/past-captures", params={"username": "GhostScout"})
+
+    # Entry expires, then the captures endpoint starts failing
+    ids, _ = main._CAPTURES_CACHE["ghostscout"]
+    main._CAPTURES_CACHE["ghostscout"] = (ids, time.monotonic() - main._CAPTURES_CACHE_TTL - 1)
+    captures.mock(return_value=httpx.Response(500))
+
+    r = await client.get("/api/past-captures", params={"username": "GhostScout"})
+
+    assert r.status_code == 200
+    assert r.json()["captured"] == [10]
+
+
+# ── /api/route ──────────────────────────────────────────────────────
+
+ROUTE_START_END = {
+    "start": {"lat": -34.91, "lon": 138.59},
+    "end":   {"lat": -34.98, "lon": 138.66},
+}
+
+
+async def test_route_unknown_profile(client):
+    r = await client.post("/api/route", json={
+        "phone_ids": [1], "profile": "helicopter", **ROUTE_START_END,
+    })
+    assert r.status_code == 400
+    assert "Unknown profile" in r.json()["detail"]
+
+
+async def test_route_empty_ids(client):
+    r = await client.post("/api/route", json={
+        "phone_ids": [], "profile": "car", **ROUTE_START_END,
+    })
+    assert r.status_code == 400
+
+
+async def test_route_too_many_phones(client, mock_api):
+    mock_phones_ok(mock_api)
+    r = await client.post("/api/route", json={
+        "phone_ids": list(range(1, main.MAX_TABLE_COORDS + 1)),  # 200 jobs + 2 endpoints
+        "profile": "car", **ROUTE_START_END,
+    })
+    assert r.status_code == 400
+    assert "Too many phones" in r.json()["detail"]
+
+
+async def test_route_happy_path(client, mock_api):
+    mock_phones_ok(mock_api)
+    mock_osrm_table(mock_api, "car", _matrix(4))
+    mock_osrm_routes(mock_api, "car")
+    mock_vroom(mock_api, job_order=[4, 1])
+
+    r = await client.post("/api/route", json={
+        "phone_ids": [1, 4], "profile": "car", **ROUTE_START_END,
+    })
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ordered_ids"] == [4, 1]
+    # start→4, 4→1, 1→end
+    assert len(body["path"]["features"]) == 3
+    assert len(body["legs"]) == 3
+    assert body["total_distance_m"] == pytest.approx(3000.0)
+    assert body["total_duration_s"] == pytest.approx(360.0)
+    assert body["legs"][0]["steps"][0]["name"] == "Main St"
+    # Leg endpoints line up with the visit order
+    assert [l["to_id"] for l in body["legs"]] == [4, 1, None]
+
+
+async def test_route_dedupes_phone_ids(client, mock_api):
+    mock_phones_ok(mock_api)
+    mock_osrm_table(mock_api, "car", _matrix(4))
+    mock_osrm_routes(mock_api, "car")
+    vroom = mock_vroom(mock_api, job_order=[1, 4])
+
+    r = await client.post("/api/route", json={
+        "phone_ids": [1, 1, 4, 4, 1], "profile": "car", **ROUTE_START_END,
+    })
+
+    assert r.status_code == 200
+    vroom_req = json.loads(vroom.calls.last.request.content)
+    assert [j["id"] for j in vroom_req["jobs"]] == [1, 4]
+
+
+async def test_route_unreachable_phone_clear_error(client, mock_api):
+    mock_phones_ok(mock_api)
+    durations = _matrix(4)
+    durations[0][1] = UNREACH  # start → phone 1 impossible
+    mock_osrm_table(mock_api, "foot", durations)
+
+    r = await client.post("/api/route", json={
+        "phone_ids": [1, 4], "profile": "foot", **ROUTE_START_END,
+    })
+
+    assert r.status_code == 400
+    assert "#1" in r.json()["detail"]
+    assert "foot" in r.json()["detail"]
+
+
+async def test_route_disconnected_endpoints_clear_error(client, mock_api):
+    mock_phones_ok(mock_api)
+    durations = _matrix(4)
+    durations[0][3] = UNREACH  # start → end impossible
+    mock_osrm_table(mock_api, "foot", durations)
+
+    r = await client.post("/api/route", json={
+        "phone_ids": [1, 4], "profile": "foot", **ROUTE_START_END,
+    })
+
+    assert r.status_code == 400
+    assert "Start and end are not connected" in r.json()["detail"]
+
+
+async def test_route_unknown_phone_404(client, mock_api):
+    mock_phones_ok(mock_api)
+    r = await client.post("/api/route", json={
+        "phone_ids": [999], "profile": "car", **ROUTE_START_END,
+    })
+    assert r.status_code == 404
+
+
+async def test_route_snapped_endpoints_cover_captures(client, mock_api):
+    mock_phones_ok(mock_api)
+    # Start snapped to phone 1, end snapped to phone 4 → only phone 6 remains a job
+    mock_osrm_table(mock_api, "car", _matrix(3))
+    mock_osrm_routes(mock_api, "car")
+    vroom = mock_vroom(mock_api, job_order=[6])
+
+    r = await client.post("/api/route", json={
+        "phone_ids": [1, 4, 6],
+        "start": {"phone_id": 1}, "end": {"phone_id": 4},
+        "profile": "car",
+    })
+
+    assert r.status_code == 200
+    assert r.json()["ordered_ids"] == [1, 6, 4]
+    vroom_req = json.loads(vroom.calls.last.request.content)
+    assert [j["id"] for j in vroom_req["jobs"]] == [6]
+
+
+# ── /api/orienteer ──────────────────────────────────────────────────
+
+async def test_orienteer_happy_path(client, mock_api):
+    mock_phones_ok(mock_api)
+    # Candidates: 1 + 6 (uncaptured) and 4 (hostile); mine/cellmate excluded → 5 coords
+    mock_osrm_table(mock_api, "car", _matrix(5))
+    mock_osrm_routes(mock_api, "car")
+    mock_vroom(mock_api, job_order=[1, 4], duration=500, service=120)
+
+    r = await client.post("/api/orienteer", json={
+        "start": {"lat": -34.92, "lon": 138.60},
+        "end":   {"lat": -34.97, "lon": 138.65},
+        "profile": "car",
+        "time_budget_s": 3600,
+        "service_time_s": 60,
+        "username": "GhostScout",
+    })
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ordered_ids"] == [1, 4]
+    assert body["total_duration_s"] == 620  # vroom travel + service accounting
+    assert len(body["path"]["features"]) == 3
+
+
+async def test_orienteer_excludes_own_and_cellmate_phones(client, mock_api):
+    mock_phones_ok(mock_api)
+    table = mock_osrm_table(mock_api, "car", _matrix(5))
+    mock_osrm_routes(mock_api, "car")
+    mock_vroom(mock_api, job_order=[1])
+
+    r = await client.post("/api/orienteer", json={
+        "start": {"lat": -34.92, "lon": 138.60},
+        "end":   {"lat": -34.97, "lon": 138.65},
+        "profile": "car",
+        "time_budget_s": 3600,
+        "service_time_s": 60,
+        "username": "GhostScout",
+    })
+
+    assert r.status_code == 200
+    # Table request: start + candidates {1, 4, 6} + end = 5 coordinates
+    coord_str = str(table.calls.last.request.url.path).split("/")[-1]
+    assert coord_str.count(";") == 4
+
+
+# ── /api/wiki-photos ────────────────────────────────────────────────
+
+def _wiki_handler(request):
+    params = request.url.params
+    if params.get("list") == "allimages":
+        return httpx.Response(200, json={"query": {"allimages": [
+            {"name": "Payphone-08835506X2-20240101120000.jpg"},
+            {"name": "SomethingElse.jpg"},
+        ]}})
+    return httpx.Response(200, json={"query": {"pages": {
+        "1": {"revisions": [{"slots": {"main": {"*": "{{Payphone\n| id = 42\n}}"}}}]},
+    }}})
+
+
+async def test_wiki_photos_crawl(client, mock_api):
+    mock_api.get(main.WIKI_API).mock(side_effect=_wiki_handler)
+
+    r = await client.get("/api/wiki-photos")
+
+    assert r.status_code == 200
+    assert r.json()["has_photo"] == [42]
+
+
+async def test_wiki_photos_cold_failure_503(client, mock_api):
+    mock_api.get(main.WIKI_API).mock(return_value=httpx.Response(500))
+
+    r = await client.get("/api/wiki-photos")
+
+    assert r.status_code == 503
+
+
+async def test_wiki_photos_stale_fallback(client, mock_api):
+    main._WIKI_CACHE    = {42}
+    main._WIKI_CACHE_AT = time.monotonic() - main._WIKI_CACHE_TTL - 1
+    mock_api.get(main.WIKI_API).mock(return_value=httpx.Response(500))
+
+    r = await client.get("/api/wiki-photos")
+
+    assert r.status_code == 200
+    assert r.json()["has_photo"] == [42]
+
+
+# ── /api/health ─────────────────────────────────────────────────────
+
+def _mock_services(router, vroom_up=True):
+    for host in OSRM_HOSTS.values():
+        router.get(host=host, path__regex=r"/nearest/.*").mock(
+            return_value=httpx.Response(200, json={"code": "Ok"})
+        )
+    vroom_route = router.get(host=VROOM_HOST, path="/health")
+    if vroom_up:
+        vroom_route.mock(return_value=httpx.Response(200, text="OK"))
+    else:
+        vroom_route.mock(side_effect=httpx.ConnectError("refused"))
+
+
+async def test_health_ok(client, mock_api):
+    mock_phones_ok(mock_api)
+    _mock_services(mock_api)
+    await client.get("/api/phones", params={"username": "GhostScout"})
+
+    r = await client.get("/api/health")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["upstream"]["consecutive_failures"] == 0
+    assert body["upstream"]["serving_stale"] is False
+    assert body["upstream"]["last_success_age_s"] == 0
+    assert all(body["services"].values())
+
+
+async def test_health_degraded_when_service_down(client, mock_api):
+    _mock_services(mock_api, vroom_up=False)
+
+    r = await client.get("/api/health")
+
+    body = r.json()
+    assert body["status"] == "degraded"
+    assert body["services"]["vroom"] is False
+    assert body["services"]["osrm_foot"] is True
+
+
+async def test_health_degraded_when_upstream_failing(client, mock_api):
+    _mock_services(mock_api)
+    main._PHONES_CACHE = SAMPLE_PHONES
+    main._PHONES_CACHE_AT = time.monotonic()
+    main._PHONES_FETCHED_AT = time.monotonic()
+    main._PHONES_FAILS = 3
+
+    r = await client.get("/api/health")
+
+    body = r.json()
+    assert body["status"] == "degraded"
+    assert body["upstream"]["consecutive_failures"] == 3
+    assert body["upstream"]["serving_stale"] is True
