@@ -8,5 +8,7 @@ backend/certs/
 __pycache__/
 *.pyc
 *.pyo
+.venv/
+.pytest_cache/
 .DS_Store
 vroom-config/access.log

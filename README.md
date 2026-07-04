@@ -86,6 +86,23 @@ If you ever need to force a reprocess manually:
 
 ---
 
+## Running tests
+
+The backend has a pytest suite covering the API endpoints and the game-API
+failure handling (stale-cache fallback, retry/cooldown behaviour, request
+coalescing). All upstream services are mocked — no Docker or network needed.
+
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest tests -v
+```
+
+The same suite runs in GitHub Actions on every push and pull request.
+
+---
+
 ## Mobile + GPS
 
 GPS needs HTTPS. Two options:
