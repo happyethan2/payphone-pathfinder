@@ -147,9 +147,17 @@
 
     /* ── Panel section separators ──────────────────────────────── */
     #panel-body > div + div,
+    #section-route-common > div + div,
     #panel-tab-route > div + div,
     #panel-tab-orienteer > div + div,
     #panel-tab-settings > div + div {
+      border-top: 1px solid rgba(100,110,200,0.08);
+      margin-top: 4px;
+      padding-top: 12px;
+    }
+    /* First section inside the shared wrapper still needs its separator
+       against the Identity block above it */
+    #section-route-common > div:first-child {
       border-top: 1px solid rgba(100,110,200,0.08);
       margin-top: 4px;
       padding-top: 12px;
@@ -334,8 +342,8 @@
 
   <div id="panel-body">
 
-    <!-- Always visible: Identity -->
-    <div>
+    <!-- Identity — visible on Route/Orienteer, hidden on Settings -->
+    <div id="section-identity">
       <div class="sec-title">Identity</div>
       <div class="btn-row">
         <input type="text" id="username" placeholder="Username" autocomplete="off" autocorrect="off" autocapitalize="off" style="flex:1;min-width:0;">
@@ -359,7 +367,7 @@
         <div class="legend-item"><span class="dot" style="background:#3498db"></span>Cellmate</div>
         <div class="legend-item"><span class="dot" style="background:#e74c3c"></span>Hostile</div>
         <div class="legend-item">
-          <span class="dot" style="background:#0d0d1a;border:2px solid #c084fc;"></span>Wiki photo
+          <span class="dot" style="background:#0d0d1a;border:2px solid #c084fc;"></span>Wiki Photo
         </div>
         <div class="legend-item">
           <span class="dot" style="background:#0d0d1a;border:2px solid #fbbf24;"></span>New
@@ -665,7 +673,8 @@ const map = L.map('map', {
   preferCanvas: true,
   rotate: true, bearing: 0,
   rotateControl: false,      // the compass FAB owns rotation UX
-  touchRotate: true,         // two-finger rotate on mobile
+  // touchRotate stays off: continuous gestures let the CSS rotation run ahead
+  // of the canvas repaint (~14k phone dots), so mid-gesture frames misalign.
 });
 
 let tileLayer = L.tileLayer(TILE_URLS.dark, {
@@ -1255,6 +1264,7 @@ function setPanelTab(tab) {
   document.getElementById('panel-tab-orienteer').style.display  = tab === 'orienteer' ? '' : 'none';
   document.getElementById('panel-tab-settings').style.display   = isSettings          ? '' : 'none';
   document.getElementById('section-route-common').style.display = isSettings ? 'none' : '';
+  document.getElementById('section-identity').style.display     = isSettings ? 'none' : '';
   const routeResult = document.getElementById('route-result');
   if (routeResult && isSettings) routeResult.style.display = 'none';
   document.getElementById('btn-panel-tab-route').classList.toggle('active',     tab === 'route');
@@ -1679,11 +1689,49 @@ function setMapTheme(theme) {
 let _compassHeading  = 0;   // device compass heading, degrees clockwise from north
 let _orientationBound = false;
 
+// Rotation is applied in discrete steps rather than tracking the sensor
+// stream: every setBearing repaints all ~14k canvas phone dots, and during
+// continuous rotation the CSS transform runs ahead of that repaint, so dots
+// and the GPS accuracy circle visibly detach from the tiles. Stepping keeps
+// every rendered frame fully aligned.
+const HEADING_STEP_MIN_DEG = 4;    // ignore smaller heading changes (sensor noise)
+const HEADING_STEP_MIN_MS  = 250;  // at most ~4 rotation steps per second
+let _appliedHeading = null;        // heading currently applied to the map
+let _lastHeadingAt  = 0;
+let _headingSettle  = null;        // trailing timer to settle on the final heading
+
 // leaflet-rotate's setBearing(θ) rotates the map content clockwise by θ,
 // so to put compass heading H at the top of the screen, north must swing
 // H degrees counter-clockwise.
 function bearingForHeading(heading) {
   return (360 - heading) % 360;
+}
+
+function _applyHeading(heading) {
+  _appliedHeading = heading;
+  _lastHeadingAt  = Date.now();
+  if (typeof map.setBearing === 'function') map.setBearing(bearingForHeading(heading));
+  updateCompassArrow();
+}
+
+function _onHeadingChange(heading) {
+  _compassHeading = heading;
+  if (!state.headingLocked) return;
+  const delta = _appliedHeading === null
+    ? Infinity
+    : Math.abs(((heading - _appliedHeading + 540) % 360) - 180);
+  if (delta < HEADING_STEP_MIN_DEG) return;
+  const elapsed = Date.now() - _lastHeadingAt;
+  clearTimeout(_headingSettle);
+  if (elapsed >= HEADING_STEP_MIN_MS) {
+    _applyHeading(heading);
+  } else {
+    // Too soon after the last step — settle on the latest heading once the
+    // step window elapses, so the map always ends on the true heading.
+    _headingSettle = setTimeout(() => {
+      if (state.headingLocked) _applyHeading(_compassHeading);
+    }, HEADING_STEP_MIN_MS - elapsed);
+  }
 }
 
 function updateCompassArrow() {
@@ -1694,19 +1742,20 @@ function updateCompassArrow() {
 }
 
 map.on('move', updateCompassArrow);
-map.on('rotate', updateCompassArrow);  // fired by setBearing / touch rotate
+map.on('rotate', updateCompassArrow);  // fired by setBearing
 
 function handleCompassTap() {
   if (!state.headingLocked) {
     state.headingLocked = true;
     document.getElementById('fab-centre').classList.add('heading-locked');
     centreOnMe();
-    if (typeof map.setBearing === 'function') map.setBearing(bearingForHeading(_compassHeading));
-    updateCompassArrow();
+    _applyHeading(_compassHeading);
     _startDeviceOrientation();
   } else {
     state.headingLocked = false;
     document.getElementById('fab-centre').classList.remove('heading-locked');
+    clearTimeout(_headingSettle);
+    _appliedHeading = null;
     if (typeof map.setBearing === 'function') map.setBearing(0);
     updateCompassArrow();
   }
@@ -1724,9 +1773,7 @@ function _startDeviceOrientation() {
       heading = (360 - e.alpha) % 360;             // convert to compass bearing
     }
     if (heading == null) return;
-    _compassHeading = heading;
-    if (typeof map.setBearing === 'function') map.setBearing(bearingForHeading(heading));
-    updateCompassArrow();
+    _onHeadingChange(heading);
   }
 
   // iOS 13+ requires a permission prompt on user gesture
