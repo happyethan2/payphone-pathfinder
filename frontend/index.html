@@ -128,11 +128,22 @@
     button.skipped:hover { background: rgba(80,80,80,0.5); }
     button:disabled { opacity: 0.35; cursor: not-allowed; }
 
-    /* ── Status bar (set-endpoint prompt) actions ────────────── */
-    #status-bar-actions { display: inline-flex; gap: 8px; margin-left: 12px; vertical-align: middle; }
-    #status-bar button {
-      flex: none; min-height: 0; padding: 5px 16px;
-      border-radius: 14px; font-size: 12px; font-weight: 600;
+    /* ── Endpoint selection actions (bottom-centre, thumb range) ── */
+    #endpoint-actions {
+      display: none; position: fixed; left: 50%; transform: translateX(-50%);
+      bottom: calc(66px + env(safe-area-inset-bottom, 0px));
+      z-index: 1001; gap: 10px;
+    }
+    #endpoint-actions button {
+      flex: none; min-height: 0; padding: 11px 26px;
+      border-radius: 22px; font-size: 13px; font-weight: 600;
+      background: rgba(13,13,30,0.92);
+      border: 1px solid rgba(100,110,200,0.35);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.6);
+    }
+    #endpoint-actions button.danger { color: #f99; border-color: rgba(220,80,80,0.35); }
+    @media (min-width: 640px) {
+      #endpoint-actions { bottom: 20px; }
     }
     button.icon-only { flex: none; padding: 7px 10px; min-width: 44px; }
 
@@ -554,12 +565,14 @@
   padding:10px 16px; padding-top:max(10px, env(safe-area-inset-top));
   text-align:center; font-size:13px; color:#c8d0ff; letter-spacing:0.2px;">
   <span id="status-bar-msg"></span>
-  <span id="status-bar-actions">
-    <button onclick="skipEndpointStep()"
-            title="Keep the current point and move to the next step">Skip</button>
-    <button class="danger" onclick="cancelSetEndpoints()"
-            title="Exit and restore the previous start/end">Cancel</button>
-  </span>
+</div>
+
+<!-- Endpoint selection actions — bottom of screen, in thumb range -->
+<div id="endpoint-actions">
+  <button onclick="skipEndpointStep()"
+          title="Keep the current point and move to the next step">Skip</button>
+  <button class="danger" onclick="cancelSetEndpoints()"
+          title="Exit and restore the previous start/end">Cancel</button>
 </div>
 
 <!-- ── Floating GPS button ─────────────────────────────────────── -->
@@ -1190,11 +1203,13 @@ function showStatusBar(msg) {
   const bar = document.getElementById('status-bar');
   document.getElementById('status-bar-msg').textContent = msg;
   bar.style.display = 'block';
+  document.getElementById('endpoint-actions').style.display = 'flex';
   // Nudge the filter buttons below the banner so it doesn't cover them
   document.getElementById('filter-stack').style.top = (bar.offsetHeight + 8) + 'px';
 }
 function hideStatusBar() {
   document.getElementById('status-bar').style.display = 'none';
+  document.getElementById('endpoint-actions').style.display = 'none';
   document.getElementById('filter-stack').style.top = '';
 }
 
