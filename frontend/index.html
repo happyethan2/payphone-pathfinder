@@ -127,6 +127,13 @@
     button.skipped { background: rgba(60,60,60,0.35); border-color: rgba(120,120,120,0.3); color: #999; font-weight: 700; }
     button.skipped:hover { background: rgba(80,80,80,0.5); }
     button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* ── Status bar (set-endpoint prompt) actions ────────────── */
+    #status-bar-actions { display: inline-flex; gap: 8px; margin-left: 12px; vertical-align: middle; }
+    #status-bar button {
+      flex: none; min-height: 0; padding: 5px 16px;
+      border-radius: 14px; font-size: 12px; font-weight: 600;
+    }
     button.icon-only { flex: none; padding: 7px 10px; min-width: 44px; }
 
     /* ── Danger flash (clear buttons) ───────────────────────────── */
@@ -291,8 +298,10 @@
     /* ── Filter buttons (top-right of map) ────────────────────── */
     #filter-stack {
       position: fixed; top: max(14px, env(safe-area-inset-top)); right: 14px;
-      z-index: 1001;
+      /* Below the panel (1000): if the open menu reaches these, it covers them */
+      z-index: 999;
       display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+      transition: top 0.25s;
     }
     #filter-stack button {
       height: 40px; min-height: 40px; border-radius: 20px;
@@ -334,13 +343,12 @@
       #fab-stack   { bottom: 20px; }
     }
 
-    /* ── Mobile: FABs at bottom when panel closed, top when panel open ── */
+    /* ── Mobile: fade the FABs out under the open panel ────────── */
     @media (max-width: 639px) {
-      #fab-stack { bottom: 66px; top: auto;
-                   transition: top 0.35s cubic-bezier(0.32,0.72,0,1),
-                               bottom 0.35s cubic-bezier(0.32,0.72,0,1); }
-      /* Sit below the filter stack (2 × 40px buttons + gaps) at the top */
-      #panel.open ~ #fab-stack { top: calc(max(14px, env(safe-area-inset-top)) + 112px); bottom: auto; }
+      #fab-stack { bottom: 66px; top: auto; transition: opacity 0.25s; }
+      /* The open panel covers most of the screen — these are map controls,
+         so they have no job while the menu is up */
+      #panel.open ~ #fab-stack { opacity: 0; pointer-events: none; }
     }
   </style>
 </head>
@@ -543,8 +551,15 @@
 <div id="status-bar" style="
   display:none; position:fixed; top:0; left:0; right:0; z-index:1002;
   background:rgba(13,13,30,0.95); border-bottom:1px solid rgba(100,110,200,0.25);
-  padding:12px 20px; padding-top:max(12px, env(safe-area-inset-top));
+  padding:10px 16px; padding-top:max(10px, env(safe-area-inset-top));
   text-align:center; font-size:13px; color:#c8d0ff; letter-spacing:0.2px;">
+  <span id="status-bar-msg"></span>
+  <span id="status-bar-actions">
+    <button onclick="skipEndpointStep()"
+            title="Keep the current point and move to the next step">Skip</button>
+    <button class="danger" onclick="cancelSetEndpoints()"
+            title="Exit and restore the previous start/end">Cancel</button>
+  </span>
 </div>
 
 <!-- ── Floating GPS button ─────────────────────────────────────── -->
@@ -949,10 +964,14 @@ function flashDanger(id) {
 }
 
 function toggleClickMode() {
+  // Leaving endpoint selection via a mode button = cancel, so the banner
+  // and Set Start & End highlight don't linger
+  if (state.mode === 'setStart' || state.mode === 'setEnd') cancelSetEndpoints();
   setMode(state.mode === 'click' ? 'navigate' : 'click');
 }
 
 function cycleLasso() {
+  if (state.mode === 'setStart' || state.mode === 'setEnd') cancelSetEndpoints();
   if      (state.mode === 'lasso')         setMode('lasso-deselect');
   else if (state.mode === 'lasso-deselect') setMode('navigate');
   else                                      setMode('lasso');
@@ -1169,23 +1188,57 @@ function onMarkerClick(phone) {
 // ── Endpoints ─────────────────────────────────────────────────────
 function showStatusBar(msg) {
   const bar = document.getElementById('status-bar');
-  bar.textContent = msg;
+  document.getElementById('status-bar-msg').textContent = msg;
   bar.style.display = 'block';
+  // Nudge the filter buttons below the banner so it doesn't cover them
+  document.getElementById('filter-stack').style.top = (bar.offsetHeight + 8) + 'px';
 }
 function hideStatusBar() {
   document.getElementById('status-bar').style.display = 'none';
+  document.getElementById('filter-stack').style.top = '';
 }
+
+let _endpointBackup = null;  // start/end as they were when selection began
 
 function startSetEndpoints() {
   if (state.mode === 'setStart' || state.mode === 'setEnd') {
-    document.getElementById('btn-set-endpoints').classList.remove('active');
-    setMode('click');
-    hideStatusBar();
+    cancelSetEndpoints();
     return;
   }
+  _endpointBackup = { start: state.start, end: state.end };
   document.getElementById('btn-set-endpoints').classList.add('active');
   setMode('setStart');
   showStatusBar('Tap your starting location on the map');
+}
+
+// Keep the current point untouched and move to the next step
+function skipEndpointStep() {
+  if (state.mode === 'setStart') {
+    setMode('setEnd');
+    showStatusBar('Now tap your ending location on the map');
+  } else {
+    finishSetEndpoints();
+  }
+}
+
+// Exit selection and put back whatever start/end existed before it began
+function cancelSetEndpoints() {
+  if (_endpointBackup) {
+    state.start = _endpointBackup.start;
+    state.end   = _endpointBackup.end;
+    ['start', 'end'].forEach(which => {
+      const key = `${which}Marker`;
+      if (!state[which] && state[key]) { map.removeLayer(state[key]); state[key] = null; }
+    });
+    restoreEndpointMarkers();
+  }
+  finishSetEndpoints();
+}
+
+function finishSetEndpoints() {
+  setMode('click');
+  hideStatusBar();
+  document.getElementById('btn-set-endpoints').classList.remove('active');
 }
 
 // Snap to nearest phone within SNAP_PX pixels, otherwise raw coords
@@ -1226,9 +1279,7 @@ function setEndpoint(which, point) {
     setMode('setEnd');
     showStatusBar('Now tap your ending location on the map');
   } else {
-    setMode('click');
-    hideStatusBar();
-    document.getElementById('btn-set-endpoints').classList.remove('active');
+    finishSetEndpoints();
   }
 }
 
