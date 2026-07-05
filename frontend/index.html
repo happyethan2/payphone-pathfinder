@@ -292,20 +292,21 @@
     #filter-stack {
       position: fixed; top: max(14px, env(safe-area-inset-top)); right: 14px;
       z-index: 1001;
-      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
     }
     #filter-stack button {
-      width: 44px; height: 44px; min-height: 44px; border-radius: 50%;
+      height: 40px; min-height: 40px; border-radius: 20px;
       background: rgba(13,13,30,0.92);
       border: 1px solid rgba(100,110,200,0.25);
-      font-size: 19px; cursor: pointer; padding: 0;
+      font-size: 12px; font-weight: 600; color: #ccd;
+      cursor: pointer; padding: 0 14px; white-space: nowrap;
       box-shadow: 0 2px 12px rgba(0,0,0,0.6);
-      display: flex; align-items: center; justify-content: center;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
       flex: none; transition: background 0.15s;
     }
     #filter-stack button:hover { background: rgba(40,40,80,0.95); }
-    #btn-photo-filter.active   { background: rgba(192,132,252,0.3); border-color: rgba(192,132,252,0.65); }
-    #btn-capture-filter.active { background: rgba(245,158,11,0.28); border-color: rgba(245,158,11,0.6); }
+    #btn-photo-filter.active   { background: rgba(192,132,252,0.3); border-color: rgba(192,132,252,0.65); color: #e9d5ff; }
+    #btn-capture-filter.active { background: rgba(245,158,11,0.28); border-color: rgba(245,158,11,0.6); color: #fde68a; }
 
     /* ── Desktop: revert to side panel ──────────────────────── */
     @media (min-width: 640px) {
@@ -338,7 +339,7 @@
       #fab-stack { bottom: 66px; top: auto;
                    transition: top 0.35s cubic-bezier(0.32,0.72,0,1),
                                bottom 0.35s cubic-bezier(0.32,0.72,0,1); }
-      /* Sit below the filter stack (2 × 44px buttons + gaps) at the top */
+      /* Sit below the filter stack (2 × 40px buttons + gaps) at the top */
       #panel.open ~ #fab-stack { top: calc(max(14px, env(safe-area-inset-top)) + 112px); bottom: auto; }
     }
   </style>
@@ -550,9 +551,9 @@
 <!-- Filter buttons (top-right of map) -->
 <div id="filter-stack">
   <button id="btn-photo-filter" onclick="togglePhotoFilter()"
-          title="Highlight phones that have a wiki photo">📷</button>
+          title="Highlight phones that have a wiki photo">📷 Wiki Photos</button>
   <button id="btn-capture-filter" onclick="toggleNewPhoneFilter()"
-          title="Highlight phones you have never captured">✨</button>
+          title="Highlight phones you have never captured">✨ New Phones</button>
 </div>
 
 <div id="fab-stack">
@@ -696,6 +697,29 @@ const map = L.map('map', {
   rotateControl: false,      // the compass FAB owns the rotation reset UX
   touchRotate: true,         // two-finger twist — works without a compass
   shiftKeyRotate: true,      // desktop: shift+drag to rotate
+});
+
+// leaflet-rotate registers a `rotate → _update` listener on every renderer,
+// forcing a full reposition + redraw of all ~14k phone dots per rotation
+// step; mid-gesture that redraw bakes in half-updated pinch state, so the
+// dots visibly detach from the tiles. It's also unnecessary: the canvas sits
+// inside the rotate pane, so the pane's CSS transform already carries it —
+// exactly like the tiles and the GPS marker. Strip the listener and redraw
+// once after rotation settles, to re-cover the viewport corners exposed by
+// the new bearing (the renderer's 0.5 padding hides the gap meanwhile).
+const _phoneRenderer = map.options.renderer;
+const _rendererGetEvents = _phoneRenderer.getEvents.bind(_phoneRenderer);
+_phoneRenderer.getEvents = function() {
+  const events = _rendererGetEvents();
+  delete events.rotate;
+  return events;
+};
+let _rotateRedrawTimer = null;
+map.on('rotate', () => {
+  clearTimeout(_rotateRedrawTimer);
+  _rotateRedrawTimer = setTimeout(() => {
+    if (_phoneRenderer._map) _phoneRenderer._update();
+  }, 150);
 });
 
 let tileLayer = L.tileLayer(TILE_URLS.dark, {
@@ -971,7 +995,7 @@ async function togglePhotoFilter() {
   }
 
   if (state.wikiPhotoIds === null) {
-    btn.textContent = '⏳';
+    btn.textContent = '⏳ Loading…';
     btn.disabled = true;
     try {
       const res  = await fetch('/api/wiki-photos');
@@ -982,11 +1006,11 @@ async function togglePhotoFilter() {
       state.photoFilter = false;
       btn.classList.remove('active');
       btn.disabled = false;
-      btn.textContent = '📷';
+      btn.textContent = '📷 Wiki Photos';
       return;
     }
     btn.disabled = false;
-    btn.textContent = '📷';
+    btn.textContent = '📷 Wiki Photos';
   }
 
   state.phones.forEach(p => refreshMarker(p));
@@ -1016,7 +1040,7 @@ async function toggleNewPhoneFilter() {
   }
 
   if (state.pastCaptureIds === null) {
-    btn.textContent = '⏳';
+    btn.textContent = '⏳ Loading…';
     btn.disabled = true;
     try {
       const res  = await fetch(`/api/past-captures?username=${encodeURIComponent(username)}`);
@@ -1027,11 +1051,11 @@ async function toggleNewPhoneFilter() {
       state.newPhoneFilter = false;
       btn.classList.remove('active');
       btn.disabled = false;
-      btn.textContent = '✨';
+      btn.textContent = '✨ New Phones';
       return;
     }
     btn.disabled = false;
-    btn.textContent = '✨';
+    btn.textContent = '✨ New Phones';
   }
 
   state.phones.forEach(p => refreshMarker(p));
