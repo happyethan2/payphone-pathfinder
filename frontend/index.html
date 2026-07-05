@@ -115,8 +115,6 @@
     }
     button:hover  { background: rgba(100,110,200,0.15); color: #dde; }
     button.active { background: rgba(70,90,220,0.55); border-color: rgba(130,160,255,0.7); color: #c8d0ff; }
-    #btn-photo-filter.active   { background: rgba(192,132,252,0.2); border-color: rgba(192,132,252,0.55); color: #c084fc; }
-    #btn-capture-filter.active { background: rgba(245,158,11,0.2);  border-color: rgba(245,158,11,0.5);   color: #f59e0b; }
     #btn-lasso.active          { background: rgba(46,204,113,0.25); border-color: rgba(46,204,113,0.6);   color: #2ecc71; }
     button.danger { background: rgba(255,255,255,0.04); border-color: rgba(100,110,200,0.2); color: #778; }
     button.danger:hover { background: rgba(180,40,40,0.25); border-color: rgba(220,80,80,0.4); color: #f99; }
@@ -290,6 +288,25 @@
     #fab-centre:hover { background: rgba(40,40,80,0.95); }
     #fab-centre.heading-locked { background: rgba(74,158,255,0.25); border-color: rgba(74,158,255,0.55); }
 
+    /* ── Filter buttons (top-right of map) ────────────────────── */
+    #filter-stack {
+      position: fixed; top: max(14px, env(safe-area-inset-top)); right: 14px;
+      z-index: 1001;
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+    }
+    #filter-stack button {
+      width: 44px; height: 44px; min-height: 44px; border-radius: 50%;
+      background: rgba(13,13,30,0.92);
+      border: 1px solid rgba(100,110,200,0.25);
+      font-size: 19px; cursor: pointer; padding: 0;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.6);
+      display: flex; align-items: center; justify-content: center;
+      flex: none; transition: background 0.15s;
+    }
+    #filter-stack button:hover { background: rgba(40,40,80,0.95); }
+    #btn-photo-filter.active   { background: rgba(192,132,252,0.3); border-color: rgba(192,132,252,0.65); }
+    #btn-capture-filter.active { background: rgba(245,158,11,0.28); border-color: rgba(245,158,11,0.6); }
+
     /* ── Desktop: revert to side panel ──────────────────────── */
     @media (min-width: 640px) {
       #panel {
@@ -321,7 +338,8 @@
       #fab-stack { bottom: 66px; top: auto;
                    transition: top 0.35s cubic-bezier(0.32,0.72,0,1),
                                bottom 0.35s cubic-bezier(0.32,0.72,0,1); }
-      #panel.open ~ #fab-stack { top: 14px; bottom: auto; }
+      /* Sit below the filter stack (2 × 44px buttons + gaps) at the top */
+      #panel.open ~ #fab-stack { top: calc(max(14px, env(safe-area-inset-top)) + 112px); bottom: auto; }
     }
   </style>
 </head>
@@ -373,27 +391,6 @@
           <span class="dot" style="background:#0d0d1a;border:2px solid #fbbf24;"></span>New
         </div>
       </div>
-    </div>
-
-    <!-- Filters -->
-    <div>
-      <div class="sec-title">Filters</div>
-      <div class="btn-row">
-        <button id="btn-photo-filter" onclick="togglePhotoFilter()"
-                style="font-size:11px;"
-                title="Highlight phones that have a wiki photo">
-          📷 Wiki Photos
-        </button>
-        <button id="btn-capture-filter" onclick="toggleNewPhoneFilter()"
-                style="font-size:11px;"
-                title="Highlight phones you have never captured">
-          ✨ New Phones
-        </button>
-      </div>
-      <div id="wiki-photo-status" class="sub-text"
-           style="display:none;color:#c084fc;"></div>
-      <div id="new-phone-status" class="sub-text"
-           style="display:none;color:#fbbf24;"></div>
     </div>
 
     <!-- Transport -->
@@ -473,6 +470,18 @@
         </div>
       </div>
 
+      <div>
+        <div class="sec-title">Auto-Rotate Map</div>
+        <div class="btn-row">
+          <button id="btn-autorotate-on"  onclick="setAutoRotate(true)" class="active">On</button>
+          <button id="btn-autorotate-off" onclick="setAutoRotate(false)">Off</button>
+        </div>
+        <div id="autorotate-note" class="sub-text">
+          Compass button locks the map to your facing direction (needs a device
+          compass). A two-finger twist rotates the map manually any time.
+        </div>
+      </div>
+
     </div><!-- /#panel-tab-settings -->
 
     <!-- Shared route result (always visible once solved) -->
@@ -538,6 +547,14 @@
 </div>
 
 <!-- ── Floating GPS button ─────────────────────────────────────── -->
+<!-- Filter buttons (top-right of map) -->
+<div id="filter-stack">
+  <button id="btn-photo-filter" onclick="togglePhotoFilter()"
+          title="Highlight phones that have a wiki photo">📷</button>
+  <button id="btn-capture-filter" onclick="toggleNewPhoneFilter()"
+          title="Highlight phones you have never captured">✨</button>
+</div>
+
 <div id="fab-stack">
   <div id="loc-badge">no GPS</div>
   <button id="btn-minimap" onclick="toggleMiniMap()" title="Toggle mini-map">🗺</button>
@@ -589,6 +606,7 @@ const state = {
   orienteerArriveBy:      '',       // HH:MM string for orienteer arrive-by time
   lastOrienteerBufferS:   0,        // buffer used for the last orienteer solve
   mapTheme:               'dark',   // 'dark' | 'light'
+  autoRotate:             true,     // settings: compass FAB may rotate the map
   headingLocked:          false,    // compass FAB: locked to device heading
 };
 
@@ -596,7 +614,6 @@ const state = {
 let _lastRefreshAt    = 0;
 let _refreshFailCount = 0;
 let _dataStale        = false;  // backend reported it is serving cached data (game API down)
-let _wikiPhotoFetchedLabel   = '';  // HH:MM:SS of last actual wiki fetch
 
 function updateRefreshDot() {
   const dot = document.getElementById('refresh-dot');
@@ -671,10 +688,14 @@ const map = L.map('map', {
   center: [-25.0, 134.0], zoom: 5,
   zoomControl: false,        // we'll add it at bottom-left
   preferCanvas: true,
+  // Extra canvas padding keeps phone dots drawn well past the viewport edge,
+  // so during rotation the CSS transform doesn't expose undrawn regions
+  // while the ~14k-dot repaint catches up.
+  renderer: L.canvas({ padding: 0.5 }),
   rotate: true, bearing: 0,
-  rotateControl: false,      // the compass FAB owns rotation UX
-  // touchRotate stays off: continuous gestures let the CSS rotation run ahead
-  // of the canvas repaint (~14k phone dots), so mid-gesture frames misalign.
+  rotateControl: false,      // the compass FAB owns the rotation reset UX
+  touchRotate: true,         // two-finger twist — works without a compass
+  shiftKeyRotate: true,      // desktop: shift+drag to rotate
 });
 
 let tileLayer = L.tileLayer(TILE_URLS.dark, {
@@ -936,46 +957,36 @@ function toggleOnlyNew() {
 
 async function togglePhotoFilter() {
   state.photoFilter = !state.photoFilter;
-  const btn       = document.getElementById('btn-photo-filter');
-  const statusEl  = document.getElementById('wiki-photo-status');
+  const btn = document.getElementById('btn-photo-filter');
   btn.classList.toggle('active', state.photoFilter);
 
   if (state.photoFilter && state.newPhoneFilter) {
     state.newPhoneFilter = false;
     document.getElementById('btn-capture-filter').classList.remove('active');
-    const ns = document.getElementById('new-phone-status');
-    if (ns) ns.style.display = 'none';
   }
 
   if (!state.photoFilter) {
-    if (statusEl) statusEl.style.display = 'none';
     state.phones.forEach(p => refreshMarker(p));
     return;
   }
 
   if (state.wikiPhotoIds === null) {
-    btn.textContent = '📷 Loading…';
+    btn.textContent = '⏳';
     btn.disabled = true;
     try {
       const res  = await fetch('/api/wiki-photos');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       state.wikiPhotoIds = new Set((data.has_photo || []).map(Number));
-      _wikiPhotoFetchedLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
     } catch (_) {
       state.photoFilter = false;
       btn.classList.remove('active');
       btn.disabled = false;
-      btn.textContent = '📷 Wiki Photos';
+      btn.textContent = '📷';
       return;
     }
     btn.disabled = false;
-    btn.textContent = '📷 Wiki Photos';
-  }
-
-  if (statusEl && _wikiPhotoFetchedLabel) {
-    statusEl.textContent = `● updated ${_wikiPhotoFetchedLabel}`;
-    statusEl.style.display = 'block';
+    btn.textContent = '📷';
   }
 
   state.phones.forEach(p => refreshMarker(p));
@@ -983,19 +994,15 @@ async function togglePhotoFilter() {
 
 async function toggleNewPhoneFilter() {
   state.newPhoneFilter = !state.newPhoneFilter;
-  const btn      = document.getElementById('btn-capture-filter');
-  const statusEl = document.getElementById('new-phone-status');
+  const btn = document.getElementById('btn-capture-filter');
   btn.classList.toggle('active', state.newPhoneFilter);
 
   if (state.newPhoneFilter && state.photoFilter) {
     state.photoFilter = false;
     document.getElementById('btn-photo-filter').classList.remove('active');
-    const ps = document.getElementById('wiki-photo-status');
-    if (ps) ps.style.display = 'none';
   }
 
   if (!state.newPhoneFilter) {
-    if (statusEl) statusEl.style.display = 'none';
     state.phones.forEach(p => refreshMarker(p));
     return;
   }
@@ -1009,7 +1016,7 @@ async function toggleNewPhoneFilter() {
   }
 
   if (state.pastCaptureIds === null) {
-    btn.textContent = '✨ Loading…';
+    btn.textContent = '⏳';
     btn.disabled = true;
     try {
       const res  = await fetch(`/api/past-captures?username=${encodeURIComponent(username)}`);
@@ -1020,17 +1027,11 @@ async function toggleNewPhoneFilter() {
       state.newPhoneFilter = false;
       btn.classList.remove('active');
       btn.disabled = false;
-      btn.textContent = '✨ New Phones';
+      btn.textContent = '✨';
       return;
     }
     btn.disabled = false;
-    btn.textContent = '✨ New Phones';
-  }
-
-  if (statusEl && _lastRefreshAt) {
-    const t = new Date(_lastRefreshAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-    statusEl.textContent = `● updated ${t}`;
-    statusEl.style.display = 'block';
+    btn.textContent = '✨';
   }
 
   state.phones.forEach(p => refreshMarker(p));
@@ -1685,20 +1686,30 @@ function setMapTheme(theme) {
   saveSession();
 }
 
+// ── Auto-rotate setting ───────────────────────────────────────────
+function setAutoRotate(on) {
+  state.autoRotate = on;
+  if (!on && state.headingLocked) _releaseHeadingLock(true);
+  document.getElementById('btn-autorotate-on').classList.toggle('active', on);
+  document.getElementById('btn-autorotate-off').classList.toggle('active', !on);
+  document.getElementById('fab-centre').title = on
+    ? 'Tap: centre + lock heading · Tap again: reset north'
+    : 'Tap: centre + reset north';
+  saveSession();
+}
+
 // ── Compass / heading lock ────────────────────────────────────────
 let _compassHeading  = 0;   // device compass heading, degrees clockwise from north
 let _orientationBound = false;
 
-// Rotation is applied in discrete steps rather than tracking the sensor
-// stream: every setBearing repaints all ~14k canvas phone dots, and during
-// continuous rotation the CSS transform runs ahead of that repaint, so dots
-// and the GPS accuracy circle visibly detach from the tiles. Stepping keeps
-// every rendered frame fully aligned.
-const HEADING_STEP_MIN_DEG = 4;    // ignore smaller heading changes (sensor noise)
-const HEADING_STEP_MIN_MS  = 250;  // at most ~4 rotation steps per second
-let _appliedHeading = null;        // heading currently applied to the map
-let _lastHeadingAt  = 0;
-let _headingSettle  = null;        // trailing timer to settle on the final heading
+// The map eases toward the sensor heading a fraction of the remaining arc
+// per animation frame, so turning reads as one continuous smooth rotation
+// rather than discrete jumps. The deadband stops the loop (and the ~14k-dot
+// canvas repaint) once the map is visually aligned, so sensor jitter while
+// standing still doesn't keep repainting.
+const HEADING_DEADBAND_DEG = 0.8;   // ignore sub-degree sensor noise
+const HEADING_SMOOTHING    = 0.18;  // fraction of the remaining arc per frame
+let _headingAnim = null;            // rAF id while easing toward the target
 
 // leaflet-rotate's setBearing(θ) rotates the map content clockwise by θ,
 // so to put compass heading H at the top of the screen, north must swing
@@ -1707,31 +1718,25 @@ function bearingForHeading(heading) {
   return (360 - heading) % 360;
 }
 
-function _applyHeading(heading) {
-  _appliedHeading = heading;
-  _lastHeadingAt  = Date.now();
-  if (typeof map.setBearing === 'function') map.setBearing(bearingForHeading(heading));
-  updateCompassArrow();
+function _stopHeadingAnim() {
+  if (_headingAnim) { cancelAnimationFrame(_headingAnim); _headingAnim = null; }
+}
+
+function _animateHeading() {
+  _headingAnim = null;
+  if (!state.headingLocked || typeof map.setBearing !== 'function') return;
+  const target  = bearingForHeading(_compassHeading);
+  const current = map.getBearing();
+  const delta   = ((target - current + 540) % 360) - 180;
+  if (Math.abs(delta) <= HEADING_DEADBAND_DEG) return;
+  map.setBearing(current + delta * HEADING_SMOOTHING);
+  _headingAnim = requestAnimationFrame(_animateHeading);
 }
 
 function _onHeadingChange(heading) {
   _compassHeading = heading;
   if (!state.headingLocked) return;
-  const delta = _appliedHeading === null
-    ? Infinity
-    : Math.abs(((heading - _appliedHeading + 540) % 360) - 180);
-  if (delta < HEADING_STEP_MIN_DEG) return;
-  const elapsed = Date.now() - _lastHeadingAt;
-  clearTimeout(_headingSettle);
-  if (elapsed >= HEADING_STEP_MIN_MS) {
-    _applyHeading(heading);
-  } else {
-    // Too soon after the last step — settle on the latest heading once the
-    // step window elapses, so the map always ends on the true heading.
-    _headingSettle = setTimeout(() => {
-      if (state.headingLocked) _applyHeading(_compassHeading);
-    }, HEADING_STEP_MIN_MS - elapsed);
-  }
+  if (!_headingAnim) _headingAnim = requestAnimationFrame(_animateHeading);
 }
 
 function updateCompassArrow() {
@@ -1745,21 +1750,34 @@ map.on('move', updateCompassArrow);
 map.on('rotate', updateCompassArrow);  // fired by setBearing
 
 function handleCompassTap() {
-  if (!state.headingLocked) {
+  if (state.headingLocked) {
+    _releaseHeadingLock(true);
+  } else if (state.autoRotate) {
     state.headingLocked = true;
     document.getElementById('fab-centre').classList.add('heading-locked');
     centreOnMe();
-    _applyHeading(_compassHeading);
+    if (typeof map.setBearing === 'function') map.setBearing(bearingForHeading(_compassHeading));
     _startDeviceOrientation();
   } else {
-    state.headingLocked = false;
-    document.getElementById('fab-centre').classList.remove('heading-locked');
-    clearTimeout(_headingSettle);
-    _appliedHeading = null;
+    // Auto-rotate disabled in settings — FAB just centres and squares up north
+    centreOnMe();
     if (typeof map.setBearing === 'function') map.setBearing(0);
-    updateCompassArrow();
   }
 }
+
+function _releaseHeadingLock(resetNorth) {
+  state.headingLocked = false;
+  document.getElementById('fab-centre').classList.remove('heading-locked');
+  _stopHeadingAnim();
+  if (resetNorth && typeof map.setBearing === 'function') map.setBearing(0);
+  updateCompassArrow();
+}
+
+// A two-finger touch is a manual rotate/pinch gesture — release the heading
+// lock (keeping the current bearing) so the compass doesn't fight the fingers.
+map.getContainer().addEventListener('touchstart', e => {
+  if (e.touches.length >= 2 && state.headingLocked) _releaseHeadingLock(false);
+}, { passive: true });
 
 function _startDeviceOrientation() {
   if (_orientationBound) return;
@@ -1814,6 +1832,7 @@ function saveSession() {
       lastRoute:           state.lastRoute,
       routeMode:           state.routeMode,
       mapTheme:            state.mapTheme,
+      autoRotate:          state.autoRotate,
       orienteerArriveBy: document.getElementById('orienteer-arrive-by')?.value || '',
     }));
   } catch (_) {}
@@ -1831,6 +1850,7 @@ function restoreSession() {
     if (s.end)         state.end       = s.end;
     if (s.lastRoute)   state.lastRoute = s.lastRoute;
     if (s.mapTheme && TILE_URLS[s.mapTheme]) setMapTheme(s.mapTheme);
+    if (typeof s.autoRotate === 'boolean') setAutoRotate(s.autoRotate);
     // Restore arrive-by time (or let IIFE set default if absent)
     if (s.orienteerArriveBy) {
       const el = document.getElementById('orienteer-arrive-by');
@@ -1936,10 +1956,6 @@ async function refreshPhones() {
     } else {
       setStatus(`updated ${now}${changed ? ` · ${changed} changed` : ''}`, healthColor + 'b3');
     }
-    if (state.newPhoneFilter) {
-      const el = document.getElementById('new-phone-status');
-      if (el) { el.textContent = `● updated ${now}`; el.style.display = 'block'; }
-    }
   } catch (_) {
     _refreshFailCount++;
     updateRefreshDot();
@@ -1978,6 +1994,16 @@ document.addEventListener('visibilitychange', () => {
 // ── URL prefill ───────────────────────────────────────────────────
 (function() {
   restoreSession();
+  // No orientation API at all → auto-rotate can never work; grey the setting
+  // out. (Done after restoreSession so setAutoRotate's saveSession doesn't
+  // clobber the stored session with unrestored values.)
+  if (typeof DeviceOrientationEvent === 'undefined') {
+    setAutoRotate(false);
+    document.getElementById('btn-autorotate-on').disabled = true;
+    document.getElementById('btn-autorotate-off').disabled = true;
+    document.getElementById('autorotate-note').textContent =
+      'This device has no compass. Use a two-finger twist to rotate the map manually.';
+  }
   const p = new URLSearchParams(location.search);
   if (p.get('username')) document.getElementById('username').value = p.get('username');
   const hasUsername = document.getElementById('username').value.trim();
