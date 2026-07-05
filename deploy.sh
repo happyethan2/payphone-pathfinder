@@ -30,7 +30,12 @@ git pull
 
 # --- Pull new images (must happen before digest comparison) ---
 echo ">>> docker compose pull"
-docker compose pull
+# The backend image is built locally from source — it exists on no registry,
+# so a bare `docker compose pull` fails with "pull access denied". Skip
+# build: services (--ignore-buildable, Compose >= v2.15); on older Compose
+# where that flag is unknown, fall back to naming the registry images.
+docker compose pull --ignore-buildable \
+  || docker compose pull osrm-foot osrm-bicycle osrm-car vroom
 
 # --- Detect OSRM image change via digest, not tag string ---
 # Tag renames (e.g. v26.5.0 -> v26.5.0-amd64-alpine) resolve to the same digest

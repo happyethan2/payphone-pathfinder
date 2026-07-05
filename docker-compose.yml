@@ -39,6 +39,7 @@ services:
 
   backend:
     build: ./backend
+    pull_policy: build   # built locally from source; never pull from a registry
     ports:
       - "8000:8000"
     volumes:
