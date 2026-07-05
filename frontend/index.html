@@ -135,7 +135,8 @@
     #endpoint-actions {
       display: none; position: fixed; left: 50%; transform: translateX(-50%);
       bottom: calc(66px + env(safe-area-inset-bottom, 0px));
-      z-index: 1001; gap: 10px;
+      /* Below the panel (1000): swiping the menu up covers these buttons */
+      z-index: 999; gap: 10px;
     }
     #endpoint-actions button {
       flex: none; min-height: 0; padding: 11px 26px;
@@ -431,6 +432,8 @@
       <div class="sec-title">Start &amp; End</div>
       <div class="btn-row">
         <button id="btn-set-endpoints" onclick="startSetEndpoints()">📍 Set Start &amp; End</button>
+        <button id="btn-clear-endpoints" onclick="flashDanger('btn-clear-endpoints');clearEndpoints()"
+                class="danger icon-only" aria-label="Clear start and end">✕</button>
       </div>
     </div>
 
@@ -1259,6 +1262,19 @@ function finishSetEndpoints() {
   document.getElementById('btn-set-endpoints').classList.remove('active');
 }
 
+// Remove the start/end waypoints and their markers. Deliberately leaves any
+// active route alone — its layers, waypoints and progress live separately,
+// so a route being followed keeps working.
+function clearEndpoints() {
+  if (state.mode === 'setStart' || state.mode === 'setEnd') finishSetEndpoints();
+  ['start', 'end'].forEach(which => {
+    state[which] = null;
+    const key = `${which}Marker`;
+    if (state[key]) { map.removeLayer(state[key]); state[key] = null; }
+  });
+  saveSession();
+}
+
 // Snap to nearest phone within SNAP_PX pixels, otherwise raw coords
 const SNAP_PX = 44;
 function snapPoint(latlng) {
@@ -1285,11 +1301,24 @@ function makeBracketIcon(which) {
   });
 }
 
+// Snapped points get a bracket around the node's circle; custom (unsnapped)
+// points have no circle to bracket, so they get a standalone coloured dot
+function makeEndpointIcon(which, point) {
+  if (point.phone_id != null) return makeBracketIcon(which);
+  const color = which === 'start' ? '#2ecc71' : '#e74c3c';
+  return L.divIcon({
+    html: `<div style="width:12px;height:12px;border-radius:50%;
+      background:${color};
+      border:2px solid #fff;box-shadow:0 0 0 3px ${color}4d"></div>`,
+    className: '', iconSize: [12, 12], iconAnchor: [6, 6],
+  });
+}
+
 function setEndpoint(which, point) {
   state[which] = point;
   const oldKey = `${which}Marker`;
   if (state[oldKey]) map.removeLayer(state[oldKey]);
-  const icon = makeBracketIcon(which);
+  const icon = makeEndpointIcon(which, point);
   state[oldKey] = L.marker([point.lat, point.lon], { icon, zIndexOffset: 500 }).addTo(map);
 
   // Sequential flow: after start is set, automatically prompt for end
@@ -1966,7 +1995,7 @@ function restoreEndpointMarkers() {
     if (!point) return;
     const markerKey = `${which}Marker`;
     if (state[markerKey]) map.removeLayer(state[markerKey]);
-    state[markerKey] = L.marker([point.lat, point.lon], { icon: makeBracketIcon(which), zIndexOffset: 500 }).addTo(map);
+    state[markerKey] = L.marker([point.lat, point.lon], { icon: makeEndpointIcon(which, point), zIndexOffset: 500 }).addTo(map);
   });
 }
 
