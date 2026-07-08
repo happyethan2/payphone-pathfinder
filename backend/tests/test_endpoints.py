@@ -1,4 +1,4 @@
-"""Endpoint contract tests with all upstreams (game API, OSRM, Vroom, wiki) mocked."""
+"""Endpoint contract tests with all upstreams (game API, OSRM, Vroom) mocked."""
 import json
 import time
 
@@ -323,43 +323,66 @@ async def test_orienteer_excludes_own_and_cellmate_phones(client, mock_api):
     assert coord_str.count(";") == 4
 
 
-# ── /api/wiki-photos ────────────────────────────────────────────────
+# ── /api/photo-coverage ─────────────────────────────────────────────
 
-def _wiki_handler(request):
-    params = request.url.params
-    if params.get("list") == "allimages":
-        return httpx.Response(200, json={"query": {"allimages": [
-            {"name": "Payphone-08835506X2-20240101120000.jpg"},
-            {"name": "SomethingElse.jpg"},
-        ]}})
-    return httpx.Response(200, json={"query": {"pages": {
-        "1": {"revisions": [{"slots": {"main": {"*": "{{Payphone\n| id = 42\n}}"}}}]},
-    }}})
+async def test_photo_coverage_happy_path(client, mock_api):
+    route = mock_api.get(main.PHOTO_COVERAGE_URL).mock(
+        return_value=httpx.Response(200, json={"ids": [46, 17, 40]})
+    )
 
-
-async def test_wiki_photos_crawl(client, mock_api):
-    mock_api.get(main.WIKI_API).mock(side_effect=_wiki_handler)
-
-    r = await client.get("/api/wiki-photos")
+    r = await client.get("/api/photo-coverage")
 
     assert r.status_code == 200
-    assert r.json()["has_photo"] == [42]
+    assert r.json()["has_photo"] == [17, 40, 46]  # sorted
+    assert route.call_count == 1
+
+    # Second request within TTL is served from cache — no extra upstream call
+    await client.get("/api/photo-coverage")
+    assert route.call_count == 1
 
 
-async def test_wiki_photos_cold_failure_503(client, mock_api):
-    mock_api.get(main.WIKI_API).mock(return_value=httpx.Response(500))
+async def test_photo_coverage_missing_ids_key_is_empty(client, mock_api):
+    route = mock_api.get(main.PHOTO_COVERAGE_URL).mock(
+        return_value=httpx.Response(200, json={})
+    )
 
-    r = await client.get("/api/wiki-photos")
+    r = await client.get("/api/photo-coverage")
+
+    assert r.status_code == 200
+    assert r.json()["has_photo"] == []
+
+    # An empty coverage set must still cache — no re-fetch within the TTL
+    await client.get("/api/photo-coverage")
+    assert route.call_count == 1
+
+
+async def test_photo_coverage_cold_failure_503(client, mock_api):
+    mock_api.get(main.PHOTO_COVERAGE_URL).mock(return_value=httpx.Response(500))
+
+    r = await client.get("/api/photo-coverage")
 
     assert r.status_code == 503
+    assert r.json()["detail"] == main.UPSTREAM_DOWN_DETAIL
 
 
-async def test_wiki_photos_stale_fallback(client, mock_api):
-    main._WIKI_CACHE    = {42}
-    main._WIKI_CACHE_AT = time.monotonic() - main._WIKI_CACHE_TTL - 1
-    mock_api.get(main.WIKI_API).mock(return_value=httpx.Response(500))
+async def test_photo_coverage_cooldown_skips_upstream(client, mock_api):
+    # With no cached snapshot, a hit inside the failure cooldown must 503
+    # immediately without touching upstream.
+    main._PHOTO_FAIL_UNTIL = time.monotonic() + main._PHONES_FAIL_COOLDOWN
+    route = mock_api.get(main.PHOTO_COVERAGE_URL).mock(return_value=httpx.Response(200, json={"ids": [1]}))
 
-    r = await client.get("/api/wiki-photos")
+    r = await client.get("/api/photo-coverage")
+
+    assert r.status_code == 503
+    assert route.call_count == 0
+
+
+async def test_photo_coverage_stale_fallback(client, mock_api):
+    main._PHOTO_CACHE    = {42}
+    main._PHOTO_CACHE_AT = time.monotonic() - main._PHOTO_CACHE_TTL - 1
+    mock_api.get(main.PHOTO_COVERAGE_URL).mock(return_value=httpx.Response(500))
+
+    r = await client.get("/api/photo-coverage")
 
     assert r.status_code == 200
     assert r.json()["has_photo"] == [42]

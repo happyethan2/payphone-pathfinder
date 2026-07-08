@@ -1036,7 +1036,7 @@ async function togglePhotoFilter() {
     btn.textContent = '⏳ Loading…';
     btn.disabled = true;
     try {
-      const res  = await fetch('/api/wiki-photos');
+      const res  = await fetch('/api/photo-coverage');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       state.wikiPhotoIds = new Set((data.has_photo || []).map(Number));

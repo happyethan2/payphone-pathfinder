@@ -1,7 +1,6 @@
 import asyncio
 import math
 import os
-import re
 import time
 from contextlib import asynccontextmanager
 
@@ -31,12 +30,12 @@ OSRM_URLS = {
     "bicycle": os.getenv("OSRM_BICYCLE_URL", "http://osrm-bicycle:5000"),
     "car":     os.getenv("OSRM_CAR_URL",     "http://osrm-car:5000"),
 }
-VROOM_URL         = os.getenv("VROOM_URL", "http://vroom:3000")
-PAYPHONE_API_BASE = os.getenv("PAYPHONE_API_BASE", "https://payphonetag.com/api")
-PHONES_URL        = f"{PAYPHONE_API_BASE}/payphones"
-WIKI_API          = os.getenv("WIKI_API_URL", "https://wiki.payphonetag.com/api.php")
-FRONTEND_DIR      = os.getenv("FRONTEND_DIR", "/app/frontend")
-CERT_FILE         = os.getenv("CERT_FILE", "/app/certs/cert.pem")
+VROOM_URL          = os.getenv("VROOM_URL", "http://vroom:3000")
+PAYPHONE_API_BASE  = os.getenv("PAYPHONE_API_BASE", "https://payphonetag.com/api")
+PHONES_URL         = f"{PAYPHONE_API_BASE}/payphones"
+PHOTO_COVERAGE_URL = f"{PAYPHONE_API_BASE}/photo-coverage"
+FRONTEND_DIR       = os.getenv("FRONTEND_DIR", "/app/frontend")
+CERT_FILE          = os.getenv("CERT_FILE", "/app/certs/cert.pem")
 
 # Must match --max-table-size in docker-compose.yml
 MAX_TABLE_COORDS = int(os.getenv("MAX_TABLE_COORDS", "200"))
@@ -89,14 +88,15 @@ _UPSTREAM_RETRY_DELAY: float = 0.5
 _UPSTREAM_TIMEOUT: float   = 6.0   # per-attempt; keeps polling latency bounded
 
 # ---------------------------------------------------------------------------
-# Wiki photo cache — paginate allimages once per TTL, extract phone IDs
+# Photo-coverage cache — which phones have a photo, from the game API.
+# Cheap single call, so it uses the same resilient pattern and cadence as the
+# other game-API caches (short TTL, single-flight, fail cooldown, stale fallback).
 # ---------------------------------------------------------------------------
-_WIKI_CACHE: set | None = None
-_WIKI_CACHE_AT: float   = 0.0
-_WIKI_CACHE_TTL: float  = 300.0  # 5 minutes
-_WIKI_LOCK  = asyncio.Lock()
-_WIKI_FAIL_UNTIL: float = 0.0
-_WIKI_FAIL_COOLDOWN: float = 60.0
+_PHOTO_CACHE: set[int] | None = None
+_PHOTO_CACHE_AT: float   = 0.0
+_PHOTO_CACHE_TTL: float  = 30.0  # match phone state cache TTL
+_PHOTO_LOCK  = asyncio.Lock()
+_PHOTO_FAIL_UNTIL: float = 0.0
 
 # ---------------------------------------------------------------------------
 # Past-captures cache — per-user with TTL; stale entries are kept as fallback
@@ -116,7 +116,7 @@ def reset_caches() -> None:
     """
     global _HTTP
     global _PHONES_CACHE, _PHONES_CACHE_AT, _PHONES_FETCHED_AT, _PHONES_FAIL_UNTIL, _PHONES_FAILS
-    global _WIKI_CACHE, _WIKI_CACHE_AT, _WIKI_FAIL_UNTIL
+    global _PHOTO_CACHE, _PHOTO_CACHE_AT, _PHOTO_FAIL_UNTIL
     global _CAPTURES_CACHE, _CAPTURES_FAIL_UNTIL
     _HTTP              = None
     _PHONES_CACHE      = None
@@ -124,9 +124,9 @@ def reset_caches() -> None:
     _PHONES_FETCHED_AT = 0.0
     _PHONES_FAIL_UNTIL = 0.0
     _PHONES_FAILS      = 0
-    _WIKI_CACHE        = None
-    _WIKI_CACHE_AT     = 0.0
-    _WIKI_FAIL_UNTIL   = 0.0
+    _PHOTO_CACHE       = None
+    _PHOTO_CACHE_AT    = 0.0
+    _PHOTO_FAIL_UNTIL  = 0.0
     _CAPTURES_CACHE    = {}
     _CAPTURES_FAIL_UNTIL = 0.0
 
@@ -243,102 +243,44 @@ async def _fetch_phones_data() -> dict:
     return data
 
 
-async def _fetch_wiki_photo_ids() -> set[int]:
-    """Return the set of sequential payphone API IDs that have at least one wiki photo.
+async def _fetch_photo_coverage_ids() -> set[int]:
+    """Return the set of payphone API IDs that have at least one photo.
 
-    Two-step process:
-      1. Paginate allimages?aiprefix=Payphone- to collect unique CAB codes
-         (e.g. "08835506X2") from filenames like Payphone-08835506X2-timestamp.jpg
-      2. Batch-fetch the corresponding wiki pages (50 at a time) and parse the
-         `| id = XXXX` template field, which holds the sequential payphone API ID.
-
-    Guarded by a lock (one crawl at a time) with stale fallback on failure.
+    Sourced from the game API's /photo-coverage endpoint ({"ids": [...]}). One
+    cheap call, cached with the same resilient pattern as the other game-API
+    caches: short TTL, single-flight lock, failure cooldown, and stale fallback.
     """
-    global _WIKI_CACHE, _WIKI_CACHE_AT, _WIKI_FAIL_UNTIL
+    global _PHOTO_CACHE, _PHOTO_CACHE_AT, _PHOTO_FAIL_UNTIL
 
     now = time.monotonic()
-    if _WIKI_CACHE is not None and (now - _WIKI_CACHE_AT) < _WIKI_CACHE_TTL:
-        return _WIKI_CACHE
+    if _PHOTO_CACHE is not None and (now - _PHOTO_CACHE_AT) < _PHOTO_CACHE_TTL:
+        return _PHOTO_CACHE
 
-    async with _WIKI_LOCK:
+    async with _PHOTO_LOCK:
         now = time.monotonic()
-        if _WIKI_CACHE is not None and (now - _WIKI_CACHE_AT) < _WIKI_CACHE_TTL:
-            return _WIKI_CACHE
-        if now < _WIKI_FAIL_UNTIL:
-            if _WIKI_CACHE is not None:
-                return _WIKI_CACHE
-            raise HTTPException(503, "The Payphone Tag wiki is currently unavailable — try again shortly.")
+        if _PHOTO_CACHE is not None and (now - _PHOTO_CACHE_AT) < _PHOTO_CACHE_TTL:
+            return _PHOTO_CACHE
+        if now < _PHOTO_FAIL_UNTIL:
+            if _PHOTO_CACHE is not None:
+                return _PHOTO_CACHE
+            raise HTTPException(503, UPSTREAM_DOWN_DETAIL)
 
         try:
-            has_photo = await _crawl_wiki_photo_ids()
-        except (httpx.HTTPError, ValueError, KeyError) as e:
-            _WIKI_FAIL_UNTIL = time.monotonic() + _WIKI_FAIL_COOLDOWN
-            if _WIKI_CACHE is not None:
-                return _WIKI_CACHE
-            raise HTTPException(503, "The Payphone Tag wiki is currently unavailable — try again shortly.") from e
+            resp = await _http().get(PHOTO_COVERAGE_URL, timeout=_UPSTREAM_TIMEOUT)
+            resp.raise_for_status()
+            payload = resp.json()
+            if not isinstance(payload, dict):
+                raise ValueError("unexpected payload from game API")
+            ids: set[int] = set(int(i) for i in payload.get("ids", []))
+        except (httpx.HTTPError, ValueError, TypeError) as e:
+            _PHOTO_FAIL_UNTIL = time.monotonic() + _PHONES_FAIL_COOLDOWN
+            if _PHOTO_CACHE is not None:
+                return _PHOTO_CACHE  # stale fallback
+            raise HTTPException(503, UPSTREAM_DOWN_DETAIL) from e
 
-        _WIKI_CACHE    = has_photo
-        _WIKI_CACHE_AT = time.monotonic()
-        return _WIKI_CACHE
-
-
-async def _crawl_wiki_photo_ids() -> set[int]:
-    # ── Step 1: collect unique CAB codes from all uploaded images ──
-    cab_ids: set[str] = set()
-    img_params: dict = {
-        "action":   "query",
-        "list":     "allimages",
-        "aiprefix": "Payphone-",
-        "ailimit":  "500",
-        "format":   "json",
-    }
-    while True:
-        resp = await _http().get(WIKI_API, params=img_params, timeout=60.0)
-        resp.raise_for_status()
-        body = resp.json()
-        for img in body.get("query", {}).get("allimages", []):
-            m = re.match(r"^Payphone-(\d+X\d+)-", img["name"])
-            if m:
-                cab_ids.add(m.group(1))
-        cont = body.get("continue", {}).get("aicontinue")
-        if not cont:
-            break
-        img_params["aicontinue"] = cont
-
-    # ── Step 2: batch-fetch wiki pages and extract sequential API id ──
-    has_photo: set[int] = set()
-    cab_list  = sorted(cab_ids)
-    batch_size = 50
-    for i in range(0, len(cab_list), batch_size):
-        batch  = cab_list[i : i + batch_size]
-        titles = "|".join(f"Payphone:{cab}" for cab in batch)
-        resp = await _http().get(WIKI_API, params={
-            "action":  "query",
-            "titles":  titles,
-            "prop":    "revisions",
-            "rvprop":  "content",
-            "rvslots": "*",
-            "format":  "json",
-        }, timeout=60.0)
-        resp.raise_for_status()
-        body = resp.json()
-        for page in body.get("query", {}).get("pages", {}).values():
-            if "revisions" not in page:
-                continue
-            rev = page["revisions"][0]
-            # Support both old MediaWiki (rev["*"]) and new (rev["slots"]["main"])
-            content = (
-                rev.get("*")
-                or rev.get("content")
-                or (rev.get("slots") or {}).get("main", {}).get("*", "")
-                or (rev.get("slots") or {}).get("main", {}).get("content", "")
-                or ""
-            )
-            id_match = re.search(r"\|\s*id\s*=\s*(\d+)", content)
-            if id_match:
-                has_photo.add(int(id_match.group(1)))
-
-    return has_photo
+        _PHOTO_CACHE    = ids
+        _PHOTO_CACHE_AT = time.monotonic()
+        return _PHOTO_CACHE
 
 
 def _resolve_player(data: dict, username: str, cell_tag: str | None):
@@ -556,10 +498,10 @@ async def bust_phones_cache():
     return {"ok": True}
 
 
-@app.get("/api/wiki-photos")
-async def get_wiki_photos():
-    """Return IDs of phones that have at least one user photo on the payphonetag wiki."""
-    ids = await _fetch_wiki_photo_ids()
+@app.get("/api/photo-coverage")
+async def get_photo_coverage():
+    """Return IDs of phones that have at least one photo, from the game API."""
+    ids = await _fetch_photo_coverage_ids()
     return {"has_photo": sorted(ids)}
 
 
