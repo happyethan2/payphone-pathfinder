@@ -84,6 +84,11 @@ if [ "$REPROCESS" = true ]; then
   echo ">>> Reprocessing OSRM data with $COMPOSE_IMAGE"
   docker compose down osrm-foot osrm-bicycle osrm-car 2>/dev/null || true
 
+  # Australia drives on the left. OSRM ships polygons describing which regions do,
+  # but only consults them when handed this file — without it every profile silently
+  # falls back to right-hand traffic and biases turns the wrong way.
+  LDD="/usr/local/share/osrm/data/driving_side.geojson"
+
   for PROFILE in foot bicycle car; do
     DATA_DIR="$(pwd)/osrm-data/${PROFILE}"
     PBF="$DATA_DIR/australia-latest.osm.pbf"
@@ -92,7 +97,22 @@ if [ "$REPROCESS" = true ]; then
       exit 1
     fi
     echo "  -> $PROFILE"
-    docker run --rm -v "$DATA_DIR:/data" "$COMPOSE_IMAGE" osrm-extract -p "/opt/${PROFILE}.lua" /data/australia-latest.osm.pbf
+
+    # The stock bicycle profile never runs WayHandlers.driving_side, so it cannot
+    # tell which side of the road it is on. Use our wrapper for bicycle. It is
+    # mounted into /opt (alongside the stock profile and lib/) rather than over it,
+    # so the stock profile's own require('lib/...') calls still resolve. Mounting it
+    # unconditionally keeps this loop free of per-profile argument juggling; foot and
+    # car simply never reference it.
+    PROFILE_LUA="/opt/${PROFILE}.lua"
+    if [ "$PROFILE" = "bicycle" ]; then
+      PROFILE_LUA="/opt/bicycle-lht.lua"
+    fi
+
+    docker run --rm -v "$DATA_DIR:/data" \
+      -v "$(pwd)/osrm-profiles/bicycle-lht.lua:/opt/bicycle-lht.lua:ro" \
+      "$COMPOSE_IMAGE" \
+      osrm-extract -p "$PROFILE_LUA" --location-dependent-data "$LDD" /data/australia-latest.osm.pbf
     docker run --rm -v "$DATA_DIR:/data" "$COMPOSE_IMAGE" osrm-partition /data/australia-latest.osrm
     docker run --rm -v "$DATA_DIR:/data" "$COMPOSE_IMAGE" osrm-customize /data/australia-latest.osrm
   done
