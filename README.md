@@ -35,6 +35,21 @@ cp .env.example .env
 
 Edit `.env` with your Payphone Tag username and cell tag. You can also just type them in the UI at runtime.
 
+**Get a CARTO basemap key.** As of August 2026 CARTO requires an API key for their raster
+basemaps. Without one the map still works, but every tile is stamped "API KEY REQUIRED".
+Grab a free key at [carto.com/basemaps/apikey](https://carto.com/basemaps/apikey) — no
+account or approval needed, 5,000,000 tiles/month — and put it in `.env`:
+
+```
+CARTO_API_KEY=your_key_here
+```
+
+Each instance needs its own key; don't reuse someone else's, since the quota is per-key.
+The key is served to the browser (it has to be — it travels in the tile URLs), so it isn't
+a secret, but keep it in `.env`, which is gitignored, and never in `.env.example`. Please
+also leave the CARTO and OpenStreetMap attribution on the map: that's the condition of the
+free tier.
+
 ### 2. Preprocess OSRM data
 
 Download the Australia PBF and run preprocessing for each profile. Takes 30–60 min per profile — run all three in separate terminals at the same time.
@@ -139,6 +154,12 @@ Step 2 is the one people miss.
 **OSRM preprocessing fails on Windows** — add `MSYS_NO_PATHCONV=1` before every `docker run`.
 
 **GPS denied on iOS** — Settings → Privacy & Security → Location Services → Safari/Firefox → set to "While Using".
+
+**Map tiles say "API KEY REQUIRED"** — this instance has no `CARTO_API_KEY` set. See
+[step 1](#1-clone-and-configure). If you've just added one and the watermark is still there,
+hard-refresh: both your browser and CARTO's CDN cache tiles, so an old one can linger. You
+can check what the server is handing out with `curl http://localhost:8000/api/config.js`.
+
 
 **OSRM slow to respond after startup** — it needs a minute or two to load the Australia dataset into memory.
 

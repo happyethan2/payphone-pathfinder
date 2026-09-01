@@ -573,6 +573,25 @@
   <span id="status-bar-msg"></span>
 </div>
 
+<!-- ── CARTO basemap key notice (host-facing, dismissible) ─────── -->
+<!-- Sits below #status-bar's z-index so a transient endpoint prompt wins. -->
+<div id="carto-notice" style="
+  display:none; position:fixed; top:0; left:0; right:0; z-index:1001;
+  background:rgba(40,28,10,0.96); border-bottom:1px solid rgba(230,126,34,0.4);
+  padding:10px 16px; padding-top:max(10px, env(safe-area-inset-top));
+  text-align:center; font-size:12.5px; color:#f0d5ac; letter-spacing:0.2px;">
+  <span>
+    Map tiles are watermarked because this instance has no CARTO basemap key.
+    Whoever hosts it can grab a free one at
+    <a href="https://carto.com/basemaps/apikey" target="_blank" rel="noopener"
+       style="color:#f5b041;">carto.com/basemaps/apikey</a>
+    and set <code style="color:#f5b041;">CARTO_API_KEY</code> in <code style="color:#f5b041;">.env</code>.
+  </span>
+  <button onclick="dismissCartoNotice()" title="Dismiss"
+          style="margin-left:10px; background:none; border:1px solid rgba(230,126,34,0.5);
+                 color:#f0d5ac; border-radius:4px; padding:2px 8px; cursor:pointer;">Dismiss</button>
+</div>
+
 <!-- Endpoint selection actions — bottom of screen, in thumb range -->
 <div id="endpoint-actions">
   <button onclick="skipEndpointStep()"
@@ -605,6 +624,9 @@
 <script src="https://unpkg.com/leaflet-polylinedecorator@1.6.0/dist/leaflet.polylineDecorator.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.min.js"></script>
 <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
+<!-- Per-instance config (CARTO key). Blocking on purpose: TILE_URLS below is built
+     synchronously, so this must be defined before the main script runs. -->
+<script src="/api/config.js"></script>
 <script>
 // ── State ─────────────────────────────────────────────────────────
 const state = {
@@ -714,10 +736,32 @@ const STATUS_COLORS = {
 };
 
 // ── Map init ──────────────────────────────────────────────────────
+// CARTO requires an API key as of Aug 2026 — without one every tile is stamped
+// "API KEY REQUIRED". The host sets CARTO_API_KEY in .env; /api/config.js hands it
+// over. With no key the URLs below are byte-identical to the pre-key ones, so an
+// unconfigured instance behaves exactly as it does today (watermark and all).
+const CARTO_KEY = (window.PP_CONFIG && window.PP_CONFIG.cartoApiKey) || '';
+const CARTO_Q   = CARTO_KEY ? `?key=${encodeURIComponent(CARTO_KEY)}` : '';
 const TILE_URLS = {
-  dark:  'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-  light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+  dark:  `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png${CARTO_Q}`,
+  light: `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png${CARTO_Q}`,
 };
+
+// Nudge the host to configure a key, once, dismissibly. Kept out of SESSION_KEY so
+// clearing a session (or importing someone else's) doesn't resurrect the notice.
+const CARTO_NOTICE_KEY = 'payphone_pathfinder_carto_notice_dismissed';
+
+function dismissCartoNotice() {
+  document.getElementById('carto-notice').style.display = 'none';
+  try { localStorage.setItem(CARTO_NOTICE_KEY, '1'); } catch (e) {}
+}
+
+function maybeShowCartoNotice() {
+  if (CARTO_KEY) return;
+  let dismissed = false;
+  try { dismissed = localStorage.getItem(CARTO_NOTICE_KEY) === '1'; } catch (e) {}
+  if (!dismissed) document.getElementById('carto-notice').style.display = 'block';
+}
 
 const map = L.map('map', {
   center: [-25.0, 134.0], zoom: 5,
@@ -2126,6 +2170,7 @@ document.addEventListener('visibilitychange', () => {
     document.getElementById('autorotate-note').textContent =
       'This device has no compass. Use a two-finger twist to rotate the map manually.';
   }
+  maybeShowCartoNotice();
   const p = new URLSearchParams(location.search);
   if (p.get('username')) document.getElementById('username').value = p.get('username');
   const hasUsername = document.getElementById('username').value.trim();

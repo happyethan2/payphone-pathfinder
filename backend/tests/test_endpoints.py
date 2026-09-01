@@ -276,6 +276,25 @@ async def test_route_snapped_endpoints_cover_captures(client, mock_api):
     vroom_req = json.loads(vroom.calls.last.request.content)
     assert [j["id"] for j in vroom_req["jobs"]] == [6]
 
+# ── /api/config.js ──────────────────────────────────────────────────
+
+async def test_config_js_exposes_carto_key(client, monkeypatch):
+    monkeypatch.setattr(main, "CARTO_API_KEY", "test-key-123")
+    r = await client.get("/api/config.js")
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/javascript")
+    assert "window.PP_CONFIG" in r.text
+    assert '"cartoApiKey": "test-key-123"' in r.text
+
+
+async def test_config_js_blank_key_is_valid_js(client, monkeypatch):
+    monkeypatch.setattr(main, "CARTO_API_KEY", "")
+    r = await client.get("/api/config.js")
+
+    assert r.status_code == 200
+    assert '"cartoApiKey": ""' in r.text
+
 
 # ── /api/orienteer ──────────────────────────────────────────────────
 

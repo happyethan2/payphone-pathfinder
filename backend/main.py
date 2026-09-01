@@ -1,11 +1,13 @@
 import asyncio
+import json
 import math
 import os
 import time
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
@@ -36,6 +38,14 @@ PHONES_URL         = f"{PAYPHONE_API_BASE}/payphones"
 PHOTO_COVERAGE_URL = f"{PAYPHONE_API_BASE}/photo-coverage"
 FRONTEND_DIR       = os.getenv("FRONTEND_DIR", "/app/frontend")
 CERT_FILE          = os.getenv("CERT_FILE", "/app/certs/cert.pem")
+
+# CARTO began requiring an API key for their raster basemaps in Aug 2026; without one
+# every tile carries an "API KEY REQUIRED" watermark. Free key, no account needed:
+# https://carto.com/basemaps/apikey
+# Served to the browser by /api/config.js. This key is *meant* to be public — it rides
+# in the tile URLs the browser fetches, and CARTO scopes keys per domain. Not a secret,
+# but it is still per-instance: hosts set their own in .env (never in .env.example).
+CARTO_API_KEY      = os.getenv("CARTO_API_KEY", "")
 
 # Must match --max-table-size in docker-compose.yml
 MAX_TABLE_COORDS = int(os.getenv("MAX_TABLE_COORDS", "200"))
@@ -920,6 +930,27 @@ async def download_cert():
         raise HTTPException(404, "No certificate is configured on this instance")
     return FileResponse(CERT_FILE, media_type="application/x-pem-file",
                         headers={"Content-Disposition": "attachment; filename=payphone-pathfinder.pem"})
+
+
+@app.get("/api/config.js")
+async def serve_config_js():
+    """Expose per-instance frontend config as a JS global.
+
+    The frontend has no build step and is mounted read-only, so it can't be
+    templated at deploy time. A tiny blocking <script src> is the simplest way to
+    get host config into top-level code (TILE_URLS is built synchronously, before
+    any fetch could resolve) with no flash of unkeyed tiles.
+    """
+    payload = json.dumps({"cartoApiKey": CARTO_API_KEY})
+    return Response(
+        content=f"window.PP_CONFIG = {payload};\n",
+        media_type="application/javascript",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma":        "no-cache",
+            "Expires":       "0",
+        },
+    )
 
 
 @app.get("/")
