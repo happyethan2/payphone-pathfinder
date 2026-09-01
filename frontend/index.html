@@ -460,8 +460,10 @@
         <div class="sec-title">Route</div>
         <div class="btn-row">
           <button onclick="findRoute()" id="btn-route" class="go">Find optimal route →</button>
+          <button id="btn-share" onclick="shareSelection()" class="icon-only" aria-label="Copy share link" title="Copy a link to this selection">🔗</button>
           <button id="btn-clear-route" onclick="flashDanger('btn-clear-route');clearRoute()" class="danger icon-only" aria-label="Clear route">✕</button>
         </div>
+        <div id="share-status" class="sub-text" style="margin-top:4px;display:none;"></div>
         <div id="spinner"></div>
       </div>
 
@@ -1385,6 +1387,113 @@ function setProfile(p) {
     document.getElementById(`btn-${n}`).classList.toggle('active', n === p));
 }
 
+// ── Share links ───────────────────────────────────────────────────
+// Encode the selection as query params so a route plan can be pasted into chat.
+// Endpoints are "lat,lon" for a free point or "lat,lon,phone_id" when snapped to a
+// phone — carrying the coords means markers place before phones finish loading, and
+// carrying the id preserves the exact snap instead of re-snapping to a neighbour.
+// Phone ids are global to Payphone Tag, so a link rebuilds identically for anyone.
+// The username is deliberately *not* included: that's the recipient's own identity.
+
+function _encodeEndpoint(pt) {
+  if (!pt) return null;
+  const base = `${(+pt.lat).toFixed(6)},${(+pt.lon).toFixed(6)}`;
+  return pt.phone_id != null ? `${base},${pt.phone_id}` : base;
+}
+
+function _decodeEndpoint(raw) {
+  if (!raw) return null;
+  const parts = raw.split(',');
+  if (parts.length < 2 || parts.length > 3) return null;
+  const lat = parseFloat(parts[0]), lon = parseFloat(parts[1]);
+  if (!isFinite(lat) || !isFinite(lon)) return null;
+  if (parts.length === 3) {
+    const pid = parseInt(parts[2], 10);
+    if (Number.isInteger(pid)) return { lat, lon, phone_id: pid };
+  }
+  return { lat, lon };
+}
+
+function buildShareUrl() {
+  const p = new URLSearchParams();
+  p.set('profile', state.profile);
+  const s = _encodeEndpoint(state.start), e = _encodeEndpoint(state.end);
+  if (s) p.set('start', s);
+  if (e) p.set('end', e);
+  if (state.selectedIds.size) p.set('ids', Array.from(state.selectedIds).join(','));
+  // Commas are legal unencoded in a query string (RFC 3986 sub-delims) and
+  // URLSearchParams escapes them anyway. Put them back: these links get
+  // pasted into Discord, and %2C x198 is a lot of noise for no benefit.
+  return `${location.origin}${location.pathname}?${p}`.replace(/%2C/g, ',');
+}
+
+function showShareStatus(msg, color) {
+  const el = document.getElementById('share-status');
+  el.textContent = msg;
+  el.style.color = color || '#778';
+  el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.display = 'none'; }, 6000);
+}
+
+async function shareSelection() {
+  if (!state.selectedIds.size && !state.start && !state.end) {
+    showShareStatus('Nothing to share yet — select some phones first.', '#e67e22');
+    return;
+  }
+  const url = buildShareUrl();
+  // navigator.clipboard needs a secure context; some instances run plain HTTP
+  // behind a proxy, so fall back before giving up.
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(url);
+      showShareStatus('Share link copied to clipboard.', '#2ecc71');
+      return;
+    }
+  } catch (err) { /* fall through to the legacy path */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = url;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0;';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (ok) { showShareStatus('Share link copied to clipboard.', '#2ecc71'); return; }
+  } catch (err) { /* fall through to manual copy */ }
+  window.prompt('Copy this share link:', url);
+}
+
+// Returns true if the URL carried a shared selection.
+function applyShareParams(p) {
+  const rawIds   = p.get('ids');
+  const rawStart = p.get('start');
+  const rawEnd   = p.get('end');
+  const rawProf  = p.get('profile');
+  if (!rawIds && !rawStart && !rawEnd && !rawProf) return false;
+
+  if (['foot', 'bicycle', 'car'].includes(rawProf)) setProfile(rawProf);
+
+  // Replace rather than merge: unioning a shared selection with whatever the
+  // recipient had restored from localStorage would silently route both.
+  state.selectedIds.clear();
+  if (rawIds) {
+    for (const part of rawIds.split(',')) {
+      const id = parseInt(part, 10);
+      if (Number.isInteger(id)) state.selectedIds.add(id);
+    }
+  }
+  state.start = _decodeEndpoint(rawStart);
+  state.end   = _decodeEndpoint(rawEnd);
+  // The recipient's own stored route has nothing to do with this selection;
+  // loadPhones() would otherwise redraw it straight over the shared one.
+  state.lastRoute       = null;
+  state.routeOrderedIds = [];
+  state.routeProgress   = 0;
+  return true;
+}
+
 // ── Map click: endpoint setting with snap ─────────────────────────
 map.on('click', (e) => {
   if (state.mode === 'setStart') {
@@ -2178,8 +2287,23 @@ document.addEventListener('visibilitychange', () => {
   maybeShowCartoNotice();
   const p = new URLSearchParams(location.search);
   if (p.get('username')) document.getElementById('username').value = p.get('username');
+
+  // Share link: applied *after* restoreSession so it replaces the recipient's
+  // stored selection rather than merging with it.
+  const shared = applyShareParams(p);
+  if (shared) {
+    // Drop the share params from the address bar. Otherwise a later reload — or
+    // saveSession() writing the restored copy back — would re-apply this link on
+    // top of whatever the recipient has since changed. The 🔗 button regenerates
+    // a link on demand, so nothing is lost. Keep ?username=, which is theirs.
+    const keep = new URLSearchParams();
+    if (p.get('username')) keep.set('username', p.get('username'));
+    const qs = keep.toString();
+    history.replaceState(null, '', location.pathname + (qs ? `?${qs}` : ''));
+  }
+
   const hasUsername = document.getElementById('username').value.trim();
-  if (hasUsername) {
+  if (hasUsername || shared) {
     panelOpen = true;
     document.getElementById('panel').classList.add('open');
     loadPhones();

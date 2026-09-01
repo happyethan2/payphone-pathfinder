@@ -149,6 +149,25 @@ Step 2 is the one people miss.
 
 ---
 
+## Share links
+
+The 🔗 button next to **Find optimal route** copies a link to your current plan — transport
+mode, start, end, and every selected phone:
+
+```
+https://your-instance:8000/?profile=car&start=-34.910000,138.590000&end=-34.980000,138.660000,4821&ids=1,2,3
+```
+
+Opening it loads that exact selection, replacing whatever the recipient had selected. They
+don't need a username — phones load uncoloured until they enter one. Phone IDs come from
+Payphone Tag and are the same for everyone, so a link rebuilds identically on any instance
+running this version.
+
+Your username isn't included in the link, and the solved route isn't either — the recipient
+re-solves it, so they get a route for their own transport mode and current game state.
+
+---
+
 ## Troubleshooting
 
 **OSRM preprocessing fails on Windows** — add `MSYS_NO_PATHCONV=1` before every `docker run`.
