@@ -338,6 +338,12 @@ def _resolve_player(data: dict, username: str, cell_tag: str | None):
     players: dict = data.get("players", {})
     cells: dict   = data.get("cells", {})
 
+    # No username (share-link visitors, first-time users): nobody is "me" and nobody
+    # is a cellmate. Returning early matters — the name match below would otherwise
+    # compare "" against "" and claim any player with a blank name as the user.
+    if not username:
+        return None, set(), players
+
     my_player_id: str | None = None
     my_cell_id: int | None   = None
 
@@ -605,7 +611,10 @@ async def get_past_captures(
 
 @app.get("/api/phones")
 async def get_phones(
-    username: str = Query(...),
+    # Optional so share links render for someone who has never used this instance.
+    # With no username nothing is classified "mine"/"cellmate" — held phones come
+    # back "hostile" and unheld "uncaptured", which is accurate, just uncoloured.
+    username: str = Query(default=""),
     cell: str = Query(default=""),
 ):
     data, stale, age_s = await _get_phones_cached()

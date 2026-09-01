@@ -99,6 +99,36 @@ async def test_phones_username_case_insensitive(client, mock_api):
     assert phones[2]["status"] == "mine"
 
 
+async def test_phones_without_username(client, mock_api):
+    """Share links must render for someone who has never used this instance."""
+    mock_phones_ok(mock_api)
+
+    r = await client.get("/api/phones")
+
+    assert r.status_code == 200
+    phones = {p["id"]: p for p in r.json()["phones"]}
+    assert set(phones) == {1, 2, 3, 4, 6}
+    # Nobody is "me", so nothing is mine or a cellmate — held phones read hostile.
+    assert not any(p["status"] in ("mine", "cellmate") for p in phones.values())
+    assert phones[2]["status"] == "hostile"
+    assert phones[1]["status"] == "uncaptured"
+    # Holder names are public data and still resolve, so tooltips keep working.
+    assert phones[4]["holder_name"] == "<b>Rival</b>"
+
+
+async def test_phones_blank_username_does_not_match_blank_player(client, mock_api):
+    """A player with no name must not be claimed as the anonymous viewer."""
+    payload = json.loads(json.dumps(SAMPLE_PHONES))
+    payload["players"]["7"]["name"] = ""
+    mock_api.get(main.PHONES_URL).mock(return_value=httpx.Response(200, json=payload))
+
+    r = await client.get("/api/phones", params={"username": ""})
+
+    assert r.status_code == 200
+    phones = {p["id"]: p for p in r.json()["phones"]}
+    assert phones[2]["status"] != "mine"
+
+
 # ── /api/past-captures ──────────────────────────────────────────────
 
 async def test_past_captures_happy_path(client, mock_api):

@@ -858,12 +858,14 @@ function updatePanelPeek() { /* panel-peek removed; handle bar now shows tabs */
 
 // ── Load phones ───────────────────────────────────────────────────
 async function loadPhones() {
+  // Username is optional — a shared link has to render for someone who has never
+  // used this instance. Without one, phones load uncoloured (nothing is "mine").
   const username = document.getElementById('username').value.trim();
-  if (!username) { setStatus('Enter username first', '#e74c3c'); return; }
   setStatus('Loading…', '#556');
   document.getElementById('btn-load').disabled = true;
   try {
-    const res  = await fetch(`/api/phones?${new URLSearchParams({ username })}`);
+    const qs   = new URLSearchParams(username ? { username } : {});
+    const res  = await fetch(`/api/phones?${qs}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `HTTP ${res.status}`);
@@ -874,6 +876,8 @@ async function loadPhones() {
     noteRefreshResult(data);
     if (data.stale) {
       setStatus(`${state.phones.length} phones loaded — game API down, data from ${dataTimeLabel()}`, '#e67e22');
+    } else if (!username) {
+      setStatus(`${state.phones.length} phones loaded — add your username to colour-code them`, '#e67e22');
     } else {
       setStatus(`${state.phones.length} phones loaded`, '#2ecc71');
     }
@@ -2050,9 +2054,10 @@ const REFRESH_INTERVAL_IDLE_MS   = 10_000;  // no active route — relaxed polli
 
 async function refreshPhones() {
   const username = document.getElementById('username').value.trim();
-  if (!username || !state.phones.length) return;
+  if (!state.phones.length) return;   // username optional — see loadPhones()
   try {
-    const res = await fetch(`/api/phones?${new URLSearchParams({ username })}`);
+    const qs  = new URLSearchParams(username ? { username } : {});
+    const res = await fetch(`/api/phones?${qs}`);
     if (!res.ok) {
       // Backend errors (e.g. game API down with no cache yet) count as
       // failed refreshes too — previously only network errors did.
