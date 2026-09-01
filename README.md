@@ -160,6 +160,9 @@ Step 2 is the one people miss.
 hard-refresh: both your browser and CARTO's CDN cache tiles, so an old one can linger. You
 can check what the server is handing out with `curl http://localhost:8000/api/config.js`.
 
+**"A routing service (OSRM or Vroom) did not respond"** — one of the routing containers is
+down, restarting, or still loading the Australia dataset. Check `docker compose ps` and
+`docker compose logs osrm-car vroom`.
 
 **OSRM slow to respond after startup** — it needs a minute or two to load the Australia dataset into memory.
 

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import math
 import os
 import time
@@ -15,6 +16,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+logger = logging.getLogger("payphone_pathfinder")
+
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
@@ -26,6 +29,32 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Payphone Pathfinder", lifespan=_lifespan)
+
+
+@app.exception_handler(httpx.HTTPError)
+async def _upstream_error_handler(request: Request, exc: httpx.HTTPError):
+    """Turn unhandled OSRM/Vroom transport failures into a readable 502.
+
+    Without this, any upstream timeout, connection refusal (container restarting or
+    still loading the map data) or 5xx bubbles up as a bare HTTP 500 with no body —
+    which is what "it just does that sometimes" looked like from the frontend.
+    Calls that already catch httpx.HTTPError themselves (the game API paths) are
+    unaffected; this only catches what would otherwise be a 500.
+    """
+    logger.warning(
+        "Upstream failure on %s: %s: %s",
+        request.url.path, type(exc).__name__, exc,
+    )
+    return JSONResponse(
+        status_code=502,
+        content={"detail": (
+            "A routing service (OSRM or Vroom) did not respond. It may be "
+            "restarting or still loading map data. Wait a moment and try again — "
+            "if it persists, check `docker compose ps` and `docker compose logs` "
+            "on the host running this instance."
+        )},
+    )
+
 
 OSRM_URLS = {
     "foot":    os.getenv("OSRM_FOOT_URL",    "http://osrm-foot:5000"),
@@ -733,28 +762,41 @@ async def solve_route(req: RouteRequest):
             f"{shown}{more}. Deselect them or switch transport mode.",
         )
 
-    # Vroom TSP solve
-    ordered_ids = await _vroom_solve(
-        coords=all_coords,
-        start_idx=0,
-        end_idx=end_idx,
-        job_indices=job_indices,
-        durations=durations,
-        distances=distances,
-    )
+    # Vroom TSP solve — skipped when there is nothing left to order.
+    # If every selected phone is also an endpoint (e.g. "start here, end at this
+    # phone, and that phone is my only selection"), job_phone_ids is empty. That's a
+    # legitimate request, but Vroom rejects a jobs-less problem with an HTTP 400,
+    # which used to bubble out as a bare 500. With no jobs to sequence, the direct
+    # start→end route already *is* the answer — there is nothing to solve.
+    if job_indices:
+        ordered_ids = await _vroom_solve(
+            coords=all_coords,
+            start_idx=0,
+            end_idx=end_idx,
+            job_indices=job_indices,
+            durations=durations,
+            distances=distances,
+        )
+    else:
+        ordered_ids = []
 
     # Prepend/append snapped phones back into the final ordered list
     final_order: list[int] = []
     if snapped_start_id is not None:
         final_order.append(snapped_start_id)
     final_order.extend(ordered_ids)
-    if snapped_end_id is not None:
+    # ...but don't list it twice when start and end snap to the same phone.
+    if snapped_end_id is not None and snapped_end_id != snapped_start_id:
         final_order.append(snapped_end_id)
 
-    # Build visit sequence for geometry: start → phone_0 → ... → phone_N → end
-    # Each "stop" has (phone_id_or_None, coord)
-    visit_coords = [start_coord] + [phone_lookup[pid] for pid in final_order] + [end_coord]
-    visit_labels = [None] + final_order + [None]
+    # Build visit sequence for geometry: start → phone_0 → ... → phone_N → end.
+    # Walk only the solved jobs here, not final_order: a snapped endpoint's
+    # coordinate *is* start_coord/end_coord, so including it would repeat that point
+    # and emit a zero-length leading/trailing leg — two wasted OSRM round-trips per
+    # route and junk entries in path.features. The endpoints instead carry their
+    # phone id as a label, so legs are still attributed correctly.
+    visit_coords = [start_coord] + [phone_lookup[pid] for pid in ordered_ids] + [end_coord]
+    visit_labels = [snapped_start_id] + ordered_ids + [snapped_end_id]
 
     features, legs_summary, total_distance, total_duration = \
         await _build_route_geometry(visit_coords, visit_labels, req.profile)

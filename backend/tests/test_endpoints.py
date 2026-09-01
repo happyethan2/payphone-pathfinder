@@ -45,6 +45,18 @@ def mock_osrm_routes(router, profile: str):
     )
 
 
+def mock_vroom_rejects_empty(router):
+    """Mimic vroom-express refusing a problem with no jobs (HTTP 400).
+
+    This is what actually produced the reported HTTP 500: the backend filtered every
+    selected phone out of the jobs list, posted an empty problem anyway, and let the
+    resulting HTTPStatusError escape.
+    """
+    return router.post(host=VROOM_HOST).mock(
+        return_value=httpx.Response(400, json={"code": 1, "error": "Invalid jobs."})
+    )
+
+
 def mock_vroom(router, job_order, duration=240, service=0):
     steps = [{"type": "start"}] + [{"type": "job", "id": i} for i in job_order] + [{"type": "end"}]
     return router.post(host=VROOM_HOST).mock(
@@ -275,6 +287,108 @@ async def test_route_snapped_endpoints_cover_captures(client, mock_api):
     assert r.json()["ordered_ids"] == [1, 6, 4]
     vroom_req = json.loads(vroom.calls.last.request.content)
     assert [j["id"] for j in vroom_req["jobs"]] == [6]
+    # A snapped endpoint's coordinate *is* start_coord/end_coord, so the visit list
+    # must not repeat it: start(=1)→6 and 6→end(=4), not four legs with two of
+    # zero length. Endpoint legs are still attributed to their phone id.
+    legs = r.json()["legs"]
+    assert len(legs) == 2
+    assert [(l["from_id"], l["to_id"]) for l in legs] == [(1, 6), (6, 4)]
+
+
+async def test_route_single_phone_that_is_the_endpoint(client, mock_api):
+    """The bug from Discord: one selected phone which is also the end point.
+
+    Filtering endpoint-snapped phones out of the jobs list leaves nothing to solve.
+    Vroom rejects a jobs-less problem with a 400, which used to surface as a bare
+    HTTP 500. It's a legitimate request, so it must return a direct start→end route.
+    """
+    mock_phones_ok(mock_api)
+    mock_osrm_table(mock_api, "car", _matrix(2))
+    mock_osrm_routes(mock_api, "car")
+    vroom = mock_vroom_rejects_empty(mock_api)
+
+    r = await client.post("/api/route", json={
+        "phone_ids": [1],
+        "start": {"lat": -34.91, "lon": 138.59},
+        "end":   {"phone_id": 1},
+        "profile": "car",
+    })
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ordered_ids"] == [1]
+    assert len(body["legs"]) == 1
+    assert body["legs"][0]["to_id"] == 1
+    # Nothing to sequence → Vroom should never have been asked.
+    assert not vroom.called
+
+
+async def test_route_all_selected_are_endpoints(client, mock_api):
+    mock_phones_ok(mock_api)
+    mock_osrm_table(mock_api, "car", _matrix(2))
+    mock_osrm_routes(mock_api, "car")
+    vroom = mock_vroom_rejects_empty(mock_api)
+
+    r = await client.post("/api/route", json={
+        "phone_ids": [1, 4],
+        "start": {"phone_id": 1}, "end": {"phone_id": 4},
+        "profile": "car",
+    })
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ordered_ids"] == [1, 4]
+    assert len(body["legs"]) == 1
+    assert (body["legs"][0]["from_id"], body["legs"][0]["to_id"]) == (1, 4)
+    assert not vroom.called
+
+
+async def test_route_start_and_end_same_phone_not_duplicated(client, mock_api):
+    mock_phones_ok(mock_api)
+    mock_osrm_table(mock_api, "car", _matrix(3))
+    mock_osrm_routes(mock_api, "car")
+    mock_vroom(mock_api, job_order=[6])
+
+    r = await client.post("/api/route", json={
+        "phone_ids": [1, 6],
+        "start": {"phone_id": 1}, "end": {"phone_id": 1},
+        "profile": "car",
+    })
+
+    assert r.status_code == 200
+    ordered = r.json()["ordered_ids"]
+    assert ordered == [1, 6]
+    assert ordered.count(1) == 1
+
+
+async def test_route_upstream_failure_returns_502(client, mock_api):
+    """OSRM/Vroom falling over must not read as a bare 500 in the frontend."""
+    mock_phones_ok(mock_api)
+    mock_api.get(host=OSRM_HOSTS["car"], path__regex=r"/table/.*").mock(
+        return_value=httpx.Response(500, text="osrm exploded")
+    )
+
+    r = await client.post("/api/route", json={
+        "phone_ids": [1, 4], "profile": "car", **ROUTE_START_END,
+    })
+
+    assert r.status_code == 502
+    detail = r.json()["detail"]
+    assert "OSRM" in detail and "Vroom" in detail
+
+
+async def test_route_upstream_connect_error_returns_502(client, mock_api):
+    mock_phones_ok(mock_api)
+    mock_api.get(host=OSRM_HOSTS["car"], path__regex=r"/table/.*").mock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+
+    r = await client.post("/api/route", json={
+        "phone_ids": [1, 4], "profile": "car", **ROUTE_START_END,
+    })
+
+    assert r.status_code == 502
+
 
 # ── /api/config.js ──────────────────────────────────────────────────
 
