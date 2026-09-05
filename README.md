@@ -65,13 +65,13 @@ wget -O australia-latest.osm.pbf \
 ```bash
 # Foot
 cp australia-latest.osm.pbf osrm-data/foot/
-docker run --rm -v "$(pwd)/osrm-data/foot:/data" ghcr.io/project-osrm/osrm-backend:v26.5.0-amd64-alpine osrm-extract -p /opt/foot.lua /data/australia-latest.osm.pbf
+docker run --rm -v "$(pwd)/osrm-data/foot:/data" ghcr.io/project-osrm/osrm-backend:v26.5.0-amd64-alpine osrm-extract -p /opt/foot.lua --location-dependent-data /usr/local/share/osrm/data/driving_side.geojson /data/australia-latest.osm.pbf
 docker run --rm -v "$(pwd)/osrm-data/foot:/data" ghcr.io/project-osrm/osrm-backend:v26.5.0-amd64-alpine osrm-partition /data/australia-latest.osrm
 docker run --rm -v "$(pwd)/osrm-data/foot:/data" ghcr.io/project-osrm/osrm-backend:v26.5.0-amd64-alpine osrm-customize /data/australia-latest.osrm
 rm osrm-data/foot/australia-latest.osm.pbf
 ```
 
-Repeat swapping `foot` → `bicycle` / `bicycle.lua`, and `foot` → `car` / `car.lua`.
+Repeat swapping `foot` → `car` / `car.lua`. For `bicycle`, use `-p /opt/bicycle-lht.lua` and add `-v "$(pwd)/osrm-profiles/bicycle-lht.lua:/opt/bicycle-lht.lua:ro"` to the `osrm-extract` line — see [`osrm-profiles/README.md`](osrm-profiles/README.md).
 
 ### 3. Start
 
