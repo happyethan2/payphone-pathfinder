@@ -2,370 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Payphone Pathfinder</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.min.css">
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    html, body { height: 100%; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
-    body { background: #0d0d1a; color: #dde; }
-
-    #map { position: fixed; inset: 0; z-index: 0; }
-
-    /* ── Panel (bottom sheet on mobile, side panel on ≥640px) ── */
-    #panel {
-      position: fixed;
-      bottom: 0; left: 0; right: 0;
-      z-index: 1000;
-      background: rgba(13, 13, 30, 0.96);
-      border-top: 1px solid rgba(100,110,200,0.25);
-      border-radius: 16px 16px 0 0;
-      box-shadow: 0 -4px 30px rgba(0,0,0,0.6);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      display: flex; flex-direction: column;
-      max-height: 78vh;
-      transform: translateY(calc(100% - 52px));
-      transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
-      will-change: transform;
-    }
-    #panel.open { transform: translateY(0); }
-
-    #panel-handle {
-      flex-shrink: 0;
-      display: flex; flex-direction: column; align-items: center;
-      padding: 24px 0;
-      user-select: none;
-      border-bottom: 1px solid transparent;
-    }
-    #panel.open #panel-handle { padding-bottom: 4px; border-bottom-color: rgba(100,110,200,0.15); }
-    #panel-handle-pill {
-      width: 36px; height: 4px;
-      background: rgba(100,110,200,0.4); border-radius: 2px; flex-shrink: 0;
-      cursor: pointer; touch-action: manipulation;
-    }
-
-    /* ── Panel tabs ──────────────────────────────────────────────── */
-    #panel-tab-bar {
-      display: flex; width: 100%;
-      flex: 1; overflow: hidden;
-      /* Hidden in peek state; revealed when panel opens */
-      max-height: 0; margin-top: 0; opacity: 0; pointer-events: none;
-      transition: max-height 0.25s ease, margin-top 0.25s ease, opacity 0.2s ease;
-    }
-    #panel.open #panel-tab-bar {
-      max-height: 50px; margin-top: 10px;
-      opacity: 1; pointer-events: auto;
-    }
-    .panel-tab {
-      flex: 1;
-      background: transparent; border: none;
-      border-bottom: 2px solid transparent; border-radius: 0;
-      color: #556; font-size: 11px; font-weight: 700;
-      letter-spacing: 0.7px; text-transform: uppercase;
-      padding: 10px 0 8px; min-height: 0;
-      cursor: pointer; touch-action: manipulation;
-      transition: color 0.2s, border-color 0.2s;
-      -webkit-tap-highlight-color: transparent; outline: none;
-    }
-    .panel-tab.active {
-      color: #c8d0ff;
-      border-bottom-color: rgba(130,160,255,0.75);
-      background: transparent;  /* prevent button.active blue bleed */
-    }
-    .panel-tab:hover { color: #99a; background: transparent; }
-
-    #panel-body {
-      padding: 8px 14px 20px;
-      display: flex; flex-direction: column; gap: 14px;
-      overflow-y: auto; overflow-x: hidden;
-      -webkit-overflow-scrolling: touch;
-      overscroll-behavior-y: contain;
-      touch-action: pan-y;
-      flex: 1;
-    }
-
-    /* ── Section ────────────────────────────────────────────── */
-    .sec-title {
-      font-size: 10px; font-weight: 700; color: #778;
-      text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;
-    }
-
-    /* ── Inputs ─────────────────────────────────────────────── */
-    input[type=text] {
-      width: 100%; padding: 6px 9px;
-      background: rgba(255,255,255,0.05); border: 1px solid rgba(100,110,200,0.2);
-      border-radius: 7px; color: #dde; font-size: 12px; outline: none;
-    }
-    input[type=text]:focus { border-color: rgba(100,130,255,0.5); }
-    input[type=text] + input[type=text] { margin-top: 5px; }
-
-    /* ── Buttons ─────────────────────────────────────────────── */
-    .btn-row { display: flex; gap: 5px; }
-
-    button {
-      flex: 1; padding: 7px 6px;
-      background: rgba(255,255,255,0.05); border: 1px solid rgba(100,110,200,0.2);
-      border-radius: 7px; color: #aab; font-size: 11px; cursor: pointer;
-      transition: background 0.15s, color 0.15s, border-color 0.15s;
-      min-height: 44px; white-space: nowrap; text-transform: capitalize;
-      touch-action: manipulation;
-    }
-    button:hover  { background: rgba(100,110,200,0.15); color: #dde; }
-    button.active { background: rgba(70,90,220,0.55); border-color: rgba(130,160,255,0.7); color: #c8d0ff; }
-    #btn-lasso.active          { background: rgba(46,204,113,0.25); border-color: rgba(46,204,113,0.6);   color: #2ecc71; }
-    button.danger { background: rgba(255,255,255,0.04); border-color: rgba(100,110,200,0.2); color: #778; }
-    button.danger:hover { background: rgba(180,40,40,0.25); border-color: rgba(220,80,80,0.4); color: #f99; }
-    button.go     { background: rgba(30,120,60,0.3); border-color: rgba(50,180,90,0.4); color: #7ee8a2; font-weight: 600; }
-    button.go:hover { background: rgba(30,140,70,0.45); }
-    button.maps   { background: rgba(30,80,160,0.3); border-color: rgba(60,130,255,0.4); color: #7ab8ff; font-weight: 600; }
-    button.maps:hover { background: rgba(30,90,180,0.45); }
-    button.tagged { background: rgba(30,140,70,0.35); border-color: rgba(50,200,100,0.45); color: #7ee8a2; font-weight: 700; }
-    button.tagged:hover { background: rgba(30,160,80,0.5); }
-    button.skipped { background: rgba(60,60,60,0.35); border-color: rgba(120,120,120,0.3); color: #999; font-weight: 700; }
-    button.skipped:hover { background: rgba(80,80,80,0.5); }
-    button:disabled { opacity: 0.35; cursor: not-allowed; }
-
-    .ep-start { color: #2ecc71; font-weight: 700; }
-    .ep-end   { color: #e74c3c; font-weight: 700; }
-
-    /* ── Endpoint selection actions (bottom-centre, thumb range) ── */
-    #endpoint-actions {
-      display: none; position: fixed; left: 50%; transform: translateX(-50%);
-      bottom: calc(66px + env(safe-area-inset-bottom, 0px));
-      /* Below the panel (1000): swiping the menu up covers these buttons */
-      z-index: 999; gap: 10px;
-    }
-    #endpoint-actions button {
-      flex: none; min-height: 0; padding: 11px 26px;
-      border-radius: 22px; font-size: 13px; font-weight: 600;
-      background: rgba(13,13,30,0.92);
-      border: 1px solid rgba(100,110,200,0.35);
-      box-shadow: 0 2px 12px rgba(0,0,0,0.6);
-    }
-    #endpoint-actions button.danger { color: #f99; border-color: rgba(220,80,80,0.35); }
-    @media (min-width: 640px) {
-      #endpoint-actions { bottom: 20px; }
-    }
-    button.icon-only { flex: none; padding: 7px 10px; min-width: 44px; }
-
-    /* ── Danger flash (clear buttons) ───────────────────────────── */
-    @keyframes flash-danger {
-      0%   { background: rgba(180,40,40,0.45); border-color: rgba(220,80,80,0.6);
-             color: #f99; box-shadow: 0 0 10px rgba(220,80,80,0.35); }
-      100% { background: rgba(255,255,255,0.04); border-color: rgba(100,110,200,0.2);
-             color: #778; box-shadow: none; }
-    }
-    .flash-danger { animation: flash-danger 0.65s ease-out forwards; }
-
-    /* ── Legend dots ─────────────────────────────────────────── */
-    .legend { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 3px 6px; }
-    .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #99a; }
-    .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
-
-    /* ── Panel section separators ──────────────────────────────── */
-    #panel-body > div + div,
-    #section-route-common > div + div,
-    #panel-tab-route > div + div,
-    #panel-tab-orienteer > div + div,
-    #panel-tab-settings > div + div {
-      border-top: 1px solid rgba(100,110,200,0.08);
-      margin-top: 4px;
-      padding-top: 12px;
-    }
-    /* First section inside the shared wrapper still needs its separator
-       against the Identity block above it */
-    #section-route-common > div:first-child {
-      border-top: 1px solid rgba(100,110,200,0.08);
-      margin-top: 4px;
-      padding-top: 12px;
-    }
-
-
-    /* ── Time input ─────────────────────────────────────────────── */
-    /* Outer wrapper supplies the visual box + flex centering so the
-       native time widget is always vertically centered on iOS/Android. */
-    .time-field {
-      display: flex; align-items: center;
-      min-height: 44px; padding: 0 9px;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(100,110,200,0.2);
-      border-radius: 7px; box-sizing: border-box;
-      cursor: text;
-    }
-    .time-field:focus-within { border-color: rgba(100,130,255,0.5); }
-    input[type=time] {
-      flex: 1; min-width: 0; width: 100%;
-      background: transparent; border: none; padding: 0;
-      color: #dde; font-size: 13px; font-weight: 600;
-      outline: none; color-scheme: dark;
-    }
-
-    /* ── Misc text ───────────────────────────────────────────── */
-    .sub-text { font-size: 10px; color: #778; margin-top: 4px; }
-
-    #endpoint-box {
-      font-size: 10px; color: #889;
-      background: rgba(255,255,255,0.03); border: 1px solid rgba(100,110,200,0.1);
-      border-radius: 6px; padding: 5px 8px; line-height: 1.8;
-    }
-
-    #route-result {
-      background: rgba(255,255,255,0.04); border: 1px solid rgba(100,110,200,0.15);
-      border-radius: 7px; padding: 8px 10px; display: none;
-    }
-    #route-stats { font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 3px; }
-    #route-order { font-size: 10px; color: #778; line-height: 1.5; }
-
-    /* ── Waypoint markers ────────────────────────────────────── */
-    .wp {
-      width: 22px; height: 22px; border-radius: 50%;
-      background: #e67e22; color: #fff; font-size: 10px; font-weight: 700;
-      display: flex; align-items: center; justify-content: center;
-      border: 2px solid rgba(255,255,255,0.8);
-      box-shadow: 0 1px 5px rgba(0,0,0,0.6);
-    }
-    .wp-tagged  { background: #27ae60 !important; opacity: 0.75; }
-    .wp-skipped { background: #555 !important; opacity: 0.55; color: #aaa; }
-    @keyframes wp-pulse {
-      0%   { box-shadow: 0 0 0 0   rgba(230,126,34,0.7), 0 1px 5px rgba(0,0,0,0.6); }
-      70%  { box-shadow: 0 0 0 9px rgba(230,126,34,0),   0 1px 5px rgba(0,0,0,0.6); }
-      100% { box-shadow: 0 0 0 0   rgba(230,126,34,0),   0 1px 5px rgba(0,0,0,0.6); }
-    }
-    .wp-active { animation: wp-pulse 2s ease-out infinite; }
-
-    /* ── Leaflet tooltip — dark themed ──────────────────────── */
-    .leaflet-tooltip {
-      background: rgba(13,13,30,0.96); color: #dde;
-      border: 1px solid rgba(100,110,200,0.3); border-radius: 9px;
-      padding: 0; box-shadow: 0 4px 20px rgba(0,0,0,0.7);
-      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-      font-family: system-ui,-apple-system,sans-serif;
-    }
-    .leaflet-tooltip::before { border-top-color: rgba(100,110,200,0.3) !important; }
-
-    /* ── Spinner ─────────────────────────────────────────────── */
-    #spinner {
-      display: none; width: 18px; height: 18px; margin: 4px auto;
-      border: 2px solid rgba(100,110,200,0.2); border-top-color: #6677ff;
-      border-radius: 50%; animation: spin 0.7s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* ── Refresh dot stale pulse ─────────────────────────────── */
-    @keyframes dot-stale {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0.35; }
-    }
-    #refresh-dot.stale { animation: dot-stale 1.6s ease-in-out infinite; }
-
-    /* ── Live location dot ───────────────────────────────────── */
-    .loc-dot {
-      width: 13px; height: 13px; border-radius: 50%;
-      background: #4a9eff; border: 2px solid #fff;
-      animation: pulse 2.2s ease-out infinite;
-    }
-    @keyframes pulse {
-      0%   { box-shadow: 0 0 0 0   rgba(74,158,255,0.7); }
-      70%  { box-shadow: 0 0 0 11px rgba(74,158,255,0); }
-      100% { box-shadow: 0 0 0 0   rgba(74,158,255,0); }
-    }
-
-    /* ── Floating buttons (bottom-right) ─────────────────────── */
-    #fab-stack {
-      position: fixed; bottom: 66px; right: 14px;
-      z-index: 1001;
-      display: flex; flex-direction: column; align-items: center; gap: 8px;
-    }
-    #loc-badge {
-      font-size: 9px; color: #778;
-      background: rgba(13,13,30,0.85); border: 1px solid rgba(100,110,200,0.15);
-      border-radius: 4px; padding: 2px 5px; white-space: nowrap;
-    }
-    #btn-minimap {
-      width: 44px; height: 44px; border-radius: 50%;
-      background: rgba(13,13,30,0.92);
-      border: 1px solid rgba(100,110,200,0.25);
-      font-size: 20px; cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      flex: none; transition: background 0.15s;
-    }
-    #btn-minimap:hover { background: rgba(40,40,80,0.95); }
-    #btn-minimap.active {
-      background: rgba(60,60,140,0.85);
-      border-color: rgba(140,150,255,0.5);
-    }
-
-    #fab-centre {
-      width: 44px; height: 44px; border-radius: 50%;
-      background: rgba(13,13,30,0.92);
-      border: 1px solid rgba(100,110,200,0.25);
-      font-size: 20px; cursor: pointer;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.6);
-      display: flex; align-items: center; justify-content: center;
-      flex: none; transition: background 0.15s;
-    }
-    #fab-centre:hover { background: rgba(40,40,80,0.95); }
-    #fab-centre.heading-locked { background: rgba(74,158,255,0.25); border-color: rgba(74,158,255,0.55); }
-
-    /* ── Filter buttons (top-right of map) ────────────────────── */
-    #filter-stack {
-      position: fixed; top: max(14px, env(safe-area-inset-top)); right: 14px;
-      /* Below the panel (1000): if the open menu reaches these, it covers them */
-      z-index: 999;
-      display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
-      transition: top 0.25s;
-    }
-    #filter-stack button {
-      height: 40px; min-height: 40px; border-radius: 20px;
-      background: rgba(13,13,30,0.92);
-      border: 1px solid rgba(100,110,200,0.25);
-      font-size: 12px; font-weight: 600; color: #ccd;
-      cursor: pointer; padding: 0 14px; white-space: nowrap;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.6);
-      display: flex; align-items: center; justify-content: center; gap: 6px;
-      flex: none; transition: background 0.15s;
-    }
-    #filter-stack button:hover { background: rgba(40,40,80,0.95); }
-    #btn-photo-filter.active   { background: rgba(192,132,252,0.3); border-color: rgba(192,132,252,0.65); color: #e9d5ff; }
-    #btn-capture-filter.active { background: rgba(245,158,11,0.28); border-color: rgba(245,158,11,0.6); color: #fde68a; }
-
-    /* ── Desktop: revert to side panel ──────────────────────── */
-    @media (min-width: 640px) {
-      #panel {
-        top: 10px; left: 10px; bottom: auto; right: auto;
-        width: 290px; border-radius: 12px;
-        border-top: 1px solid rgba(100,110,200,0.25);
-        box-shadow: 0 4px 24px rgba(0,0,0,0.7);
-        max-height: calc(100vh - 30px);
-        transform: none !important; transition: none;
-      }
-      #panel.open { transform: none !important; }
-      #panel-handle {
-        padding: 6px 0 4px;
-        border-bottom-color: rgba(100,110,200,0.15) !important;
-      }
-      #panel-handle-pill { display: none; }
-      /* On desktop the panel is always visible — override the mobile peek-hidden state */
-      #panel-tab-bar {
-        max-height: 50px !important; margin-top: 10px !important;
-        opacity: 1 !important; pointer-events: auto !important;
-        overflow: visible !important; transition: none !important;
-      }
-      #panel-body { max-height: calc(100vh - 90px); }
-      #fab-stack   { bottom: 20px; }
-    }
-
-    /* ── Mobile: fade the FABs out under the open panel ────────── */
-    @media (max-width: 639px) {
-      #fab-stack { bottom: 66px; top: auto; transition: opacity 0.25s; }
-      /* The open panel covers most of the screen — these are map controls,
-         so they have no job while the menu is up */
-      #panel.open ~ #fab-stack { opacity: 0; pointer-events: none; }
-    }
-  </style>
+  <link rel="preload" href="fonts/Satoshi-Regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/satoshi.css">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
@@ -374,7 +17,7 @@
 <!-- ── Control panel (bottom sheet) ──────────────────────────── -->
 <div id="panel">
   <div id="panel-handle">
-    <div id="panel-handle-pill" onclick="togglePanel()"></div>
+    <button id="panel-handle-pill" type="button" onclick="togglePanel()" aria-label="Open panel" aria-expanded="false" aria-controls="panel-tab-bar panel-body"></button>
     <div id="panel-tab-bar">
       <button id="btn-panel-tab-route"     class="panel-tab active" onclick="setPanelTab('route')">Route</button>
       <button id="btn-panel-tab-orienteer" class="panel-tab"        onclick="setPanelTab('orienteer')">Orienteer</button>
@@ -388,12 +31,12 @@
     <div id="section-identity">
       <div class="sec-title">Identity</div>
       <div class="btn-row">
-        <input type="text" id="username" placeholder="Username" autocomplete="off" autocorrect="off" autocapitalize="off" style="flex:1;min-width:0;">
-        <button id="btn-load" onclick="loadPhones()" style="flex:none;padding-left:10px;padding-right:10px;">Load phones</button>
+        <input type="text" id="username" aria-label="Username" placeholder="Username" autocomplete="off" autocorrect="off" autocapitalize="off" class="identity-input">
+        <button id="btn-load" onclick="loadPhones()" class="load-button">Load phones</button>
       </div>
-      <div style="display:flex;align-items:center;gap:5px;margin-top:4px;">
-        <span id="refresh-dot" style="display:none;width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:background 0.4s;"></span>
-        <div id="load-status" class="sub-text" style="margin-top:0;flex:1;"></div>
+      <div class="refresh-row">
+        <span id="refresh-dot" class="refresh-dot-base"></span>
+        <div id="load-status" class="load-status-base sub-text"></div>
       </div>
     </div>
 
@@ -404,15 +47,15 @@
     <div>
       <div class="sec-title">Legend</div>
       <div class="legend">
-        <div class="legend-item"><span class="dot" style="background:#aaa"></span>Uncaptured</div>
-        <div class="legend-item"><span class="dot" style="background:#2ecc71"></span>Mine</div>
-        <div class="legend-item"><span class="dot" style="background:#3498db"></span>Cellmate</div>
-        <div class="legend-item"><span class="dot" style="background:#e74c3c"></span>Hostile</div>
+        <div class="legend-item"><span class="legend-uncaptured dot"></span>Uncaptured</div>
+        <div class="legend-item"><span class="legend-mine dot"></span>Mine</div>
+        <div class="legend-item"><span class="legend-cellmate dot"></span>Cellmate</div>
+        <div class="legend-item"><span class="legend-hostile dot"></span>Hostile</div>
         <div class="legend-item">
-          <span class="dot" style="background:#0d0d1a;border:2px solid #c084fc;"></span>Wiki Photo
+          <span class="legend-photo dot"></span>Wiki photo
         </div>
         <div class="legend-item">
-          <span class="dot" style="background:#0d0d1a;border:2px solid #fbbf24;"></span>New
+          <span class="legend-new dot"></span>New
         </div>
       </div>
     </div>
@@ -421,19 +64,19 @@
     <div>
       <div class="sec-title">Transport</div>
       <div class="btn-row">
-        <button id="btn-foot"    onclick="setProfile('foot')">🚶 Foot</button>
-        <button id="btn-bicycle" onclick="setProfile('bicycle')">🚲 Bike</button>
-        <button id="btn-car"     onclick="setProfile('car')"     class="active">🚗 Car</button>
+        <button id="btn-foot"    onclick="setProfile('foot')"><span class="icon icon-walk" aria-hidden="true"></span><span class="button-label">Foot</span></button>
+        <button id="btn-bicycle" onclick="setProfile('bicycle')"><span class="icon icon-bike" aria-hidden="true"></span><span class="button-label">Bike</span></button>
+        <button id="btn-car"     onclick="setProfile('car')"     class="active"><span class="icon icon-car" aria-hidden="true"></span><span class="button-label">Car</span></button>
       </div>
     </div>
 
     <!-- Start & End -->
     <div>
-      <div class="sec-title">Start &amp; End</div>
+      <div class="sec-title">Start &amp; end</div>
       <div class="btn-row">
-        <button id="btn-set-endpoints" onclick="startSetEndpoints()">📍 Set Start &amp; End</button>
+        <button id="btn-set-endpoints" onclick="startSetEndpoints()"><span class="icon icon-location" aria-hidden="true"></span><span class="button-label">Set start &amp; end</span></button>
         <button id="btn-clear-endpoints" onclick="flashDanger('btn-clear-endpoints');clearEndpoints()"
-                class="danger icon-only" aria-label="Clear start and end">✕</button>
+                class="danger icon-only" aria-label="Clear start and end"><span class="icon icon-close" aria-hidden="true"></span></button>
       </div>
     </div>
 
@@ -445,53 +88,53 @@
       <!-- Selection -->
       <div id="section-selection">
         <div class="sec-title">Selection</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:5px;">
-          <button id="btn-lasso" onclick="cycleLasso()" style="grid-column:1;grid-row:1;">Lasso</button>
-          <button id="btn-only-new" onclick="toggleOnlyNew()" style="grid-column:2;grid-row:1;font-size:11px;" title="When active, lasso only selects phones you have never captured">Skip All Except New</button>
-          <button id="btn-exclude-owned" onclick="toggleExcludeOwned()" style="grid-column:1;grid-row:2;" title="When active, lasso skips phones you already own">Skip Owned</button>
-          <button id="btn-exclude-cellmates" onclick="toggleExcludeCellmates()" style="grid-column:2;grid-row:2;" title="When active, lasso skips phones held by your cellmates">Skip Cellmates</button>
-          <button id="btn-clear-sel" onclick="flashDanger('btn-clear-sel');clearSelection()" class="danger icon-only" style="grid-column:3;grid-row:1/3;align-self:stretch;" aria-label="Clear selection">✕</button>
+        <div class="selection-grid">
+          <button id="btn-lasso" onclick="cycleLasso()" class="select-lasso">Lasso</button>
+          <button id="btn-only-new" onclick="toggleOnlyNew()" title="When active, lasso only selects phones you have never captured" class="select-new">Only new phones</button>
+          <button id="btn-exclude-owned" onclick="toggleExcludeOwned()" title="When active, lasso skips phones you already own" class="select-owned">Skip owned</button>
+          <button id="btn-exclude-cellmates" onclick="toggleExcludeCellmates()" title="When active, lasso skips phones held by your cellmates" class="select-cellmates">Skip cellmates</button>
+          <button id="btn-clear-sel" onclick="flashDanger('btn-clear-sel');clearSelection()" class="select-clear danger icon-only" aria-label="Clear selection"><span class="icon icon-close" aria-hidden="true"></span></button>
         </div>
-        <div id="sel-count" class="sub-text" style="margin-top:4px;">0 selected</div>
+        <div id="sel-count" class="sub-text">0 selected</div>
       </div>
 
       <!-- Optimal route -->
       <div>
         <div class="sec-title">Route</div>
         <div class="btn-row">
-          <button onclick="findRoute()" id="btn-route" class="go">Find optimal route →</button>
-          <button id="btn-share" onclick="shareSelection()" class="icon-only" aria-label="Copy share link" title="Copy a link to this selection">🔗</button>
-          <button id="btn-clear-route" onclick="flashDanger('btn-clear-route');clearRoute()" class="danger icon-only" aria-label="Clear route">✕</button>
+          <button onclick="findRoute()" id="btn-route" class="go">Find optimal route <span class="icon icon-arrow-right" aria-hidden="true"></span></button>
+          <button id="btn-share" onclick="shareSelection()" class="icon-only" aria-label="Copy share link" title="Copy a link to this selection"><span class="icon icon-link" aria-hidden="true"></span></button>
+          <button id="btn-clear-route" onclick="flashDanger('btn-clear-route');clearRoute()" class="danger icon-only" aria-label="Clear route"><span class="icon icon-close" aria-hidden="true"></span></button>
         </div>
-        <div id="share-status" class="sub-text" style="margin-top:4px;display:none;"></div>
+        <div id="share-status" class="share-status-base sub-text"></div>
         <div id="spinner"></div>
       </div>
 
     </div><!-- /#panel-tab-route -->
 
     <!-- Orienteer tab -->
-    <div id="panel-tab-orienteer" style="display:none;">
+    <div id="panel-tab-orienteer" class="orienteer-tab-base">
 
       <div>
-        <div class="sec-title" style="margin-bottom:4px;">Arrive by</div>
-        <div class="time-field" style="margin-bottom:8px;">
-          <input type="time" id="orienteer-arrive-by">
+        <div class="sec-title">Arrive by</div>
+        <div class="arrive-field time-field">
+          <input type="time" id="orienteer-arrive-by" aria-label="Arrive by">
         </div>
-        <div class="sec-title" style="margin-bottom:3px;">Route</div>
+        <div class="sec-title">Route</div>
         <div class="btn-row">
-          <button onclick="findOrienteerRoute()" id="btn-orienteer" class="go">Find best route →</button>
-          <button id="btn-clear-route-orienteer" onclick="flashDanger('btn-clear-route-orienteer');clearRoute()" class="danger icon-only" aria-label="Clear route">✕</button>
+          <button onclick="findOrienteerRoute()" id="btn-orienteer" class="go">Find best route <span class="icon icon-arrow-right" aria-hidden="true"></span></button>
+          <button id="btn-clear-route-orienteer" onclick="flashDanger('btn-clear-route-orienteer');clearRoute()" class="danger icon-only" aria-label="Clear route"><span class="icon icon-close" aria-hidden="true"></span></button>
         </div>
-        <div id="spinner-orienteer" style="display:none;width:18px;height:18px;margin:4px auto;border:2px solid rgba(100,110,200,0.2);border-top-color:#6677ff;border-radius:50%;animation:spin 0.7s linear infinite;"></div>
+        <div id="spinner-orienteer"></div>
       </div>
 
     </div><!-- /#panel-tab-orienteer -->
 
     <!-- Settings tab -->
-    <div id="panel-tab-settings" style="display:none;">
+    <div id="panel-tab-settings" class="settings-tab-base">
 
       <div>
-        <div class="sec-title">Map Theme</div>
+        <div class="sec-title">Map theme</div>
         <div class="btn-row">
           <button id="btn-theme-dark"  onclick="setMapTheme('dark')"  class="active">Dark</button>
           <button id="btn-theme-light" onclick="setMapTheme('light')">Light</button>
@@ -499,7 +142,7 @@
       </div>
 
       <div>
-        <div class="sec-title">Auto-Rotate Map</div>
+        <div class="sec-title">Auto-rotate map</div>
         <div class="btn-row">
           <button id="btn-autorotate-on"  onclick="setAutoRotate(true)" class="active">On</button>
           <button id="btn-autorotate-off" onclick="setAutoRotate(false)">Off</button>
@@ -513,52 +156,42 @@
     </div><!-- /#panel-tab-settings -->
 
     <!-- Shared route result (always visible once solved) -->
-    <div id="route-result" style="display:none;">
+    <div id="route-result" class="route-result-base">
       <div id="route-stats"></div>
-      <div id="maps-nav" style="display:none;margin-top:8px;">
+      <div id="maps-nav" class="maps-nav-base">
         <!-- Stop indicator (LHS) + leg switcher (RHS) — card header -->
-        <div style="display:flex;align-items:stretch;margin-bottom:8px;
-                    background:rgba(255,255,255,0.05);
-                    border:1px solid rgba(100,110,200,0.2);border-radius:9px;overflow:hidden;">
+        <div class="route-progress">
           <!-- LHS: stop indicator (shown when route active) -->
-          <div id="stop-indicator" style="display:none;flex-direction:column;align-items:center;
-               justify-content:center;gap:4px;padding:9px 12px;
-               border-right:1px solid rgba(100,110,200,0.15);">
-            <div style="font-size:9px;color:#778;text-transform:uppercase;letter-spacing:0.9px;">targeting</div>
-            <div style="display:flex;align-items:center;gap:7px;margin-top:1px;">
-              <div id="stop-badge" class="wp wp-active" style="width:32px;height:32px;font-size:14px;border-width:2.5px;flex-shrink:0;"></div>
-              <span style="font-size:12px;color:#889;">/<span id="stop-total-label" style="color:#bbc;font-weight:700;font-size:13px;margin-left:3px;"></span></span>
+          <div id="stop-indicator" class="stop-indicator-base">
+            <div class="progress-caption">Targeting</div>
+            <div class="stop-count">
+              <div id="stop-badge" class="stop-badge-base wp wp-active"></div>
+              <span class="stop-total">/<span id="stop-total-label" class="stop-total-label-base"></span></span>
             </div>
           </div>
           <!-- RHS: leg switcher (expands to fill when stop-indicator hidden) -->
-          <div style="flex:1;display:flex;flex-direction:column;align-items:center;
-               justify-content:center;gap:4px;padding:9px 6px;">
-            <div style="font-size:9px;color:#778;text-transform:uppercase;letter-spacing:0.9px;">leg</div>
-            <div style="display:flex;align-items:center;width:100%;margin-top:1px;">
+          <div class="leg-switcher">
+            <div class="leg-caption">Leg</div>
+            <div class="leg-controls">
               <span id="leg-prev-hint" onclick="changeLeg(-1)" role="button" tabindex="0"
                     aria-label="Previous leg"
                     onkeydown="if(event.key==='Enter'||event.key===' '){changeLeg(-1);event.preventDefault();}"
-                    style="flex:1;display:flex;justify-content:flex-end;align-items:center;
-                           padding:6px 8px;cursor:pointer;user-select:none;touch-action:manipulation;
-                           font-size:18px;color:#889;line-height:1;transition:opacity 0.2s;">‹</span>
-              <span id="leg-label" style="flex:2;text-align:center;font-size:12px;color:#ccd;
-                                          white-space:nowrap;font-weight:600;pointer-events:none;"></span>
+                    class="leg-prev"><span class="icon icon-chevron-left" aria-hidden="true"></span></span>
+              <span id="leg-label" class="leg-label-base"></span>
               <span id="leg-next-hint" onclick="changeLeg(1)" role="button" tabindex="0"
                     aria-label="Next leg"
                     onkeydown="if(event.key==='Enter'||event.key===' '){changeLeg(1);event.preventDefault();}"
-                    style="flex:1;display:flex;justify-content:flex-start;align-items:center;
-                           padding:6px 8px;cursor:pointer;user-select:none;touch-action:manipulation;
-                           font-size:18px;color:#889;line-height:1;transition:opacity 0.2s;">›</span>
+                    class="leg-next"><span class="icon icon-chevron-right" aria-hidden="true"></span></span>
             </div>
           </div>
         </div>
         <!-- UNDO + SKIP -->
-        <div id="tag-row" class="btn-row" style="margin-bottom:5px;display:none;">
-          <button id="btn-revert" onclick="revertLeg()" class="danger" style="font-size:11px;" disabled>↩ UNDO</button>
-          <button onclick="tagCurrentLeg('skipped')" class="skipped" style="font-size:11px;">✕ SKIP</button>
+        <div id="tag-row" class="tag-row-base btn-row">
+          <button id="btn-revert" onclick="revertLeg()" class="danger" disabled><span class="icon icon-undo" aria-hidden="true"></span>Undo</button>
+          <button onclick="tagCurrentLeg('skipped')" class="skipped"><span class="icon icon-close" aria-hidden="true"></span><span class="button-label">Skip</span></button>
         </div>
-        <button onclick="openCurrentLeg()" class="maps" style="font-size:11px;width:100%;">
-          Open in Google Maps ↗
+        <button onclick="openCurrentLeg()" class="maps-button maps">
+          Open in Google Maps <span class="icon icon-external" aria-hidden="true"></span>
         </button>
       </div>
     </div>
@@ -569,9 +202,9 @@
 <!-- ── Status bar (set-endpoint prompts) ──────────────────────── -->
 <div id="status-bar" style="
   display:none; position:fixed; top:0; left:0; right:0; z-index:1002;
-  background:rgba(13,13,30,0.95); border-bottom:1px solid rgba(100,110,200,0.25);
+  background:var(--surface); border-bottom:1px solid var(--border);
   padding:10px 16px; padding-top:max(10px, env(safe-area-inset-top));
-  text-align:center; font-size:13px; color:#c8d0ff; letter-spacing:0.2px;">
+  text-align:center; font-size:13px; color:#c3d7ee; letter-spacing:0.2px;">
   <span id="status-bar-msg"></span>
 </div>
 
@@ -606,18 +239,18 @@
 <!-- Filter buttons (top-right of map) -->
 <div id="filter-stack">
   <button id="btn-photo-filter" onclick="togglePhotoFilter()"
-          title="Highlight phones that have a wiki photo">📷 Wiki Photos</button>
+          title="Highlight phones that have a wiki photo"><span class="icon icon-camera" aria-hidden="true"></span><span class="button-label">Wiki photos</span></button>
   <button id="btn-capture-filter" onclick="toggleNewPhoneFilter()"
-          title="Highlight phones you have never captured">✨ New Phones</button>
+          title="Highlight phones you have never captured"><span class="icon icon-magic" aria-hidden="true"></span><span class="button-label">New phones</span></button>
 </div>
 
 <div id="fab-stack">
   <div id="loc-badge">no GPS</div>
-  <button id="btn-minimap" onclick="toggleMiniMap()" title="Toggle mini-map">🗺</button>
+  <button id="btn-minimap" onclick="toggleMiniMap()" title="Toggle mini-map" aria-label="Toggle mini-map"><span class="icon icon-map" aria-hidden="true"></span></button>
   <button id="fab-centre" onclick="handleCompassTap()" title="Tap: centre + lock heading  ·  Tap again: reset north">
     <svg id="compass-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" style="transition:transform 0.15s;">
       <path d="M12 4 L14.5 13 L12 11.5 L9.5 13 Z" fill="#e74c3c"/>
-      <path d="M12 20 L9.5 13 L12 14.5 L14.5 13 Z" fill="#778"/>
+      <path d="M12 20 L9.5 13 L12 14.5 L14.5 13 Z" fill="#a8afb5"/>
     </svg>
   </button>
 </div>
@@ -676,8 +309,8 @@ let _dataStale        = false;  // backend reported it is serving cached data (g
 
 function updateRefreshDot() {
   const dot = document.getElementById('refresh-dot');
-  if (!dot) return '#556';
-  if (!_lastRefreshAt) { dot.style.display = 'none'; return '#556'; }
+  if (!dot) return '#a8afb5';
+  if (!_lastRefreshAt) { dot.style.display = 'none'; return '#a8afb5'; }
   dot.style.display = 'inline-block';
   const age = Date.now() - _lastRefreshAt;
   let color;
@@ -726,7 +359,7 @@ function makeTooltipHtml(phone) {
       <span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;display:inline-block;"></span>
       <span style="font-size:11px;color:${color};font-weight:600;">${label}</span>
     </div>
-    ${phone.holder_name ? `<div style="font-size:10px;color:#778;margin-top:4px;">held by ${escapeHtml(phone.holder_name)}</div>` : ''}
+    ${phone.holder_name ? `<div style="font-size:10px;color:#a8afb5;margin-top:4px;">held by ${escapeHtml(phone.holder_name)}</div>` : ''}
   </div>`;
 }
 
@@ -834,10 +467,28 @@ const mapEl = map.getContainer();
 
 // ── Panel (bottom sheet) ──────────────────────────────────────────
 let panelOpen = false;
-function togglePanel() {
-  panelOpen = !panelOpen;
-  document.getElementById('panel').classList.toggle('open', panelOpen);
+const desktopPanel = window.matchMedia('(min-width: 640px)');
+function syncPanelAccessibility() {
+  const expanded = desktopPanel.matches || panelOpen;
+  const handle = document.getElementById('panel-handle-pill');
+  handle.setAttribute('aria-expanded', String(expanded));
+  handle.setAttribute('aria-label', expanded ? 'Close panel' : 'Open panel');
+  document.getElementById('panel-tab-bar').inert = !expanded;
+  document.getElementById('panel-body').inert = !expanded;
 }
+function setPanelOpen(open) {
+  panelOpen = open;
+  if (!open && !desktopPanel.matches && document.getElementById('panel-body').contains(document.activeElement)) {
+    document.getElementById('panel-handle-pill').focus();
+  }
+  document.getElementById('panel').classList.toggle('open', open);
+  syncPanelAccessibility();
+}
+function togglePanel() {
+  setPanelOpen(!panelOpen);
+}
+desktopPanel.addEventListener('change', syncPanelAccessibility);
+syncPanelAccessibility();
 
 // Swipe up on handle → open; swipe down → close
 {
@@ -851,8 +502,8 @@ function togglePanel() {
     const dy = e.changedTouches[0].clientY - _sheetStartY;
     _sheetStartY = null;
     if (Math.abs(dy) < 20) return; // tiny movement = tap, handled by onclick
-    if (dy < 0 && !panelOpen) { panelOpen = true;  document.getElementById('panel').classList.add('open'); }
-    else if (dy > 0 && panelOpen) { panelOpen = false; document.getElementById('panel').classList.remove('open'); }
+    if (dy < 0 && !panelOpen) setPanelOpen(true);
+    else if (dy > 0 && panelOpen) setPanelOpen(false);
   }, { passive: true });
 }
 
@@ -863,7 +514,7 @@ async function loadPhones() {
   // Username is optional — a shared link has to render for someone who has never
   // used this instance. Without one, phones load uncoloured (nothing is "mine").
   const username = document.getElementById('username').value.trim();
-  setStatus('Loading…', '#556');
+  setStatus('Loading…', '#a8afb5');
   document.getElementById('btn-load').disabled = true;
   try {
     const qs   = new URLSearchParams(username ? { username } : {});
@@ -900,7 +551,7 @@ async function loadPhones() {
 function setStatus(msg, color) {
   const el = document.getElementById('load-status');
   el.textContent = msg;
-  el.style.color = color || '#556';
+  el.style.color = color || '#a8afb5';
 }
 
 // ── Markers ───────────────────────────────────────────────────────
@@ -1007,7 +658,7 @@ function setMode(mode) {
   const lassoActive = mode === 'lasso' || mode === 'lasso-deselect';
   document.getElementById('btn-lasso').classList.toggle('active', lassoActive);
   document.getElementById('btn-lasso').textContent =
-    mode === 'lasso-deselect' ? 'Lasso ✕' : 'Lasso';
+    mode === 'lasso-deselect' ? 'Deselect' : 'Lasso';
 
   if (lassoActive) {
     map.dragging.disable();
@@ -1083,7 +734,8 @@ async function togglePhotoFilter() {
   }
 
   if (state.wikiPhotoIds === null) {
-    btn.textContent = '⏳ Loading…';
+    btn.querySelector('.button-label').textContent = 'Loading…';
+    btn.setAttribute('aria-busy', 'true');
     btn.disabled = true;
     try {
       const res  = await fetch('/api/photo-coverage');
@@ -1094,11 +746,13 @@ async function togglePhotoFilter() {
       state.photoFilter = false;
       btn.classList.remove('active');
       btn.disabled = false;
-      btn.textContent = '📷 Wiki Photos';
+      btn.querySelector('.button-label').textContent = 'Wiki photos';
+      btn.removeAttribute('aria-busy');
       return;
     }
     btn.disabled = false;
-    btn.textContent = '📷 Wiki Photos';
+    btn.querySelector('.button-label').textContent = 'Wiki photos';
+    btn.removeAttribute('aria-busy');
   }
 
   state.phones.forEach(p => refreshMarker(p));
@@ -1128,7 +782,8 @@ async function toggleNewPhoneFilter() {
   }
 
   if (state.pastCaptureIds === null) {
-    btn.textContent = '⏳ Loading…';
+    btn.querySelector('.button-label').textContent = 'Loading…';
+    btn.setAttribute('aria-busy', 'true');
     btn.disabled = true;
     try {
       const res  = await fetch(`/api/past-captures?username=${encodeURIComponent(username)}`);
@@ -1139,11 +794,13 @@ async function toggleNewPhoneFilter() {
       state.newPhoneFilter = false;
       btn.classList.remove('active');
       btn.disabled = false;
-      btn.textContent = '✨ New Phones';
+      btn.querySelector('.button-label').textContent = 'New phones';
+      btn.removeAttribute('aria-busy');
       return;
     }
     btn.disabled = false;
-    btn.textContent = '✨ New Phones';
+    btn.querySelector('.button-label').textContent = 'New phones';
+    btn.removeAttribute('aria-busy');
   }
 
   state.phones.forEach(p => refreshMarker(p));
@@ -1430,7 +1087,7 @@ function buildShareUrl() {
 function showShareStatus(msg, color) {
   const el = document.getElementById('share-status');
   el.textContent = msg;
-  el.style.color = color || '#778';
+  el.style.color = color || '#a8afb5';
   el.style.display = 'block';
   clearTimeout(el._t);
   el._t = setTimeout(() => { el.style.display = 'none'; }, 6000);
@@ -1541,16 +1198,16 @@ function setPanelTab(tab) {
   state.routeMode = tab;
   const isSettings = tab === 'settings';
   document.getElementById('panel-tab-route').style.display      = tab === 'route'     ? '' : 'none';
-  document.getElementById('panel-tab-orienteer').style.display  = tab === 'orienteer' ? '' : 'none';
-  document.getElementById('panel-tab-settings').style.display   = isSettings          ? '' : 'none';
+  document.getElementById('panel-tab-orienteer').style.display  = tab === 'orienteer' ? 'block' : 'none';
+  document.getElementById('panel-tab-settings').style.display   = isSettings ? 'block' : 'none';
   document.getElementById('section-route-common').style.display = isSettings ? 'none' : '';
   document.getElementById('section-identity').style.display     = isSettings ? 'none' : '';
   const routeResult = document.getElementById('route-result');
-  if (routeResult && isSettings) routeResult.style.display = 'none';
+  if (routeResult) routeResult.style.display = !isSettings && state.lastRoute ? 'block' : 'none';
   document.getElementById('btn-panel-tab-route').classList.toggle('active',     tab === 'route');
   document.getElementById('btn-panel-tab-orienteer').classList.toggle('active', tab === 'orienteer');
   document.getElementById('btn-panel-tab-settings').classList.toggle('active',  tab === 'settings');
-  if (!panelOpen) { panelOpen = true; document.getElementById('panel').classList.add('open'); }
+  if (!panelOpen) setPanelOpen(true);
   saveSession();
 }
 
@@ -1805,7 +1462,7 @@ function renderLeg() {
     document.getElementById('stop-total-label').textContent = orderedIds.length;
     tagRow.style.display = 'flex';
     document.getElementById('btn-revert').disabled = prog === 0;
-    tagRow.children[1].textContent = '✕ SKIP';
+    tagRow.children[1].querySelector('.button-label').textContent = 'Skip';
   } else {
     stopInd.style.display = 'none';
     tagRow.style.display  = 'none';
@@ -2304,8 +1961,7 @@ document.addEventListener('visibilitychange', () => {
 
   const hasUsername = document.getElementById('username').value.trim();
   if (hasUsername || shared) {
-    panelOpen = true;
-    document.getElementById('panel').classList.add('open');
+    setPanelOpen(true);
     loadPhones();
   }
   // Set default arrive-by to now+2h rounded up to the nearest 15 min,

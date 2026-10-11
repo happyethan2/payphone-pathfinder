@@ -13,7 +13,7 @@ Sorry Android users, instructions for mobile setup are for iOS.
 - **Backend**: Python + FastAPI
 - **Routing**: OSRM (self-hosted, full Australia dataset)
 - **Optimiser**: Vroom (TSP solver)
-- **Frontend**: Single HTML file, Leaflet.js
+- **Frontend**: HTML, CSS, local Satoshi fonts and SVG icons, Leaflet.js (no build step)
 
 ---
 
@@ -82,6 +82,38 @@ docker compose up -d
 Open **http://localhost:8000**. Give the OSRM containers a couple of minutes on first start to load the dataset.
 
 ---
+
+## Local frontend development (Windows, without Docker)
+
+From PowerShell in the repository root:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+.\start-local.ps1
+```
+
+Open **http://127.0.0.1:8000**. The local FastAPI process serves the frontend,
+loads `.env`, supplies the CARTO key, and proxies phone data. Changes to HTML and
+CSS appear on refresh; restart the process after changing Python or `.env`.
+Stop it with Ctrl+C. Use `./start-local.ps1 -Port 8001` to choose another port.
+
+To calculate routes through existing services, set their reachable URLs in `.env`:
+
+```dotenv
+OSRM_FOOT_URL=http://your-routing-host:5001
+OSRM_BICYCLE_URL=http://your-routing-host:5002
+OSRM_CAR_URL=http://your-routing-host:5003
+VROOM_URL=http://your-routing-host:3000
+```
+
+These example ports must match your server's exposed ports. The local launcher
+does not start OSRM or VROOM. Without them, CARTO and phone loading still work,
+but route calculation is unavailable. Keep the actual URLs and CARTO key in the
+gitignored `.env`. Open the HTTP URL rather than `frontend/index.html` directly
+so the frontend can reach `/api/config.js` and the other backend endpoints.
+
+Run the backend tests with `./.venv/Scripts/python.exe -B -m pytest backend/tests -q`.
 
 ## Deploying updates
 
