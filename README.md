@@ -1,134 +1,61 @@
 # Payphone Pathfinder
 
-A route optimiser for [Payphone Tag](https://payphonetag.com). Select phones on the map, set a start and end point, and it finds the optimal order to visit all of them.
+A route optimiser for [Payphone Tag](https://payphonetag.com): select phones on the map, set a start and end point, and it finds the best order to visit them all. Phones are colour-coded by who holds them, and a finished route opens leg by leg in Google Maps. It is self-hosted with Docker and routes across all of Australia.
 
-Phones are colour-coded by who holds them — yours, your cell's, hostile, and uncaptured. You can click to select individual phones or draw a lasso around a group. Once you've got a route, it splits it into legs and opens each one directly in Google Maps.
+## Prerequisites
 
-Runs locally using Docker.
-
-Sorry Android users, instructions for mobile setup are for iOS.
-
-## Stack
-
-- **Backend**: Python + FastAPI
-- **Routing**: OSRM (self-hosted, full Australia dataset)
-- **Optimiser**: Vroom (TSP solver)
-- **Frontend**: HTML, CSS, local Satoshi fonts and SVG icons, Leaflet.js (no build step)
-
----
-
-## Setup
-
-### Prerequisites
-
-- Docker + Docker Compose
+- Docker with Docker Compose
 - ~16 GB free disk space
-- Git Bash or WSL on Windows
+- On Windows: Git Bash or WSL
 
-### 1. Clone and configure
+## Install
 
 ```bash
 git clone https://github.com/happyethan2/payphone-pathfinder.git
 cd payphone-pathfinder
-cp .env.example .env
-```
+cp .env.example .env   # then set CARTO_API_KEY (free key: https://carto.com/basemaps/apikey)
 
-Edit `.env` with your Payphone Tag username and cell tag. You can also just type them in the UI at runtime.
-
-**Get a CARTO basemap key.** As of August 2026 CARTO requires an API key for their raster
-basemaps. Without one the map still works, but every tile is stamped "API KEY REQUIRED".
-Grab a free key at [carto.com/basemaps/apikey](https://carto.com/basemaps/apikey) — no
-account or approval needed, 5,000,000 tiles/month — and put it in `.env`:
-
-```
-CARTO_API_KEY=your_key_here
-```
-
-Each instance needs its own key; don't reuse someone else's, since the quota is per-key.
-The key is served to the browser (it has to be — it travels in the tile URLs), so it isn't
-a secret, but keep it in `.env`, which is gitignored, and never in `.env.example`. Please
-also leave the CARTO and OpenStreetMap attribution on the map: that's the condition of the
-free tier.
-
-### 2. Preprocess OSRM data
-
-Download the Australia PBF and run preprocessing for each profile. Takes 30–60 min per profile — run all three in separate terminals at the same time.
-
-```bash
 mkdir -p osrm-data/{foot,bicycle,car}
-wget -O australia-latest.osm.pbf \
-  "https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf"
+curl -L -o osrm-data/foot/australia-latest.osm.pbf \
+  https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf
+cp osrm-data/foot/australia-latest.osm.pbf osrm-data/bicycle/
+cp osrm-data/foot/australia-latest.osm.pbf osrm-data/car/
+
+./deploy.sh --reprocess-osrm   # builds the routing data (1–3 hours), then starts everything
 ```
 
-**Windows (Git Bash): prefix every `docker run` with `MSYS_NO_PATHCONV=1`** or the path to the lua profile gets mangled.
+On Windows Git Bash, run the last line as `MSYS_NO_PATHCONV=1 ./deploy.sh --reprocess-osrm`.
 
-```bash
-# Foot
-cp australia-latest.osm.pbf osrm-data/foot/
-docker run --rm -v "$(pwd)/osrm-data/foot:/data" ghcr.io/project-osrm/osrm-backend:v26.5.0-amd64-alpine osrm-extract -p /opt/foot.lua --location-dependent-data /usr/local/share/osrm/data/driving_side.geojson /data/australia-latest.osm.pbf
-docker run --rm -v "$(pwd)/osrm-data/foot:/data" ghcr.io/project-osrm/osrm-backend:v26.5.0-amd64-alpine osrm-partition /data/australia-latest.osrm
-docker run --rm -v "$(pwd)/osrm-data/foot:/data" ghcr.io/project-osrm/osrm-backend:v26.5.0-amd64-alpine osrm-customize /data/australia-latest.osrm
-rm osrm-data/foot/australia-latest.osm.pbf
-```
-
-Repeat swapping `foot` → `car` / `car.lua`. For `bicycle`, use `-p /opt/bicycle-lht.lua` and add `-v "$(pwd)/osrm-profiles/bicycle-lht.lua:/opt/bicycle-lht.lua:ro"` to the `osrm-extract` line — see [`osrm-profiles/README.md`](osrm-profiles/README.md).
-
-### 3. Start
-
-```bash
-docker compose up -d
-```
-
-Open **http://localhost:8000**. Give the OSRM containers a couple of minutes on first start to load the dataset.
+Open **http://localhost:8000**. Keep the `.osm.pbf` files: `deploy.sh` needs them to rebuild the routing data later.
 
 ---
 
-## Deploying updates
+## Extra details
 
-Use the deploy script instead of running Docker commands manually. It pulls the latest code, rebuilds the backend, pulls new images, and does a health check afterward.
+### Updating
 
 ```bash
 ./deploy.sh
 ```
 
-If the OSRM image version has changed since the last deploy, the script will detect it and ask whether to reprocess. Say yes — skipping it will cause OSRM to crash-loop on startup. Reprocessing takes 15–30 min but only happens when the image actually changes, not on every deploy.
+This pulls the latest code and images, rebuilds the backend, and runs a health check. If the OSRM image has changed, it asks to rebuild the routing data. Say yes, or OSRM will crash-loop on startup. To force a rebuild, run `./deploy.sh --reprocess-osrm`.
 
-If you ever need to force a reprocess manually:
+### CARTO basemap key
 
-```bash
-./deploy.sh --reprocess-osrm
-```
+Since August 2026, CARTO requires an API key for its basemaps. Without one, the map still works, but every tile is stamped "API KEY REQUIRED". The key is free, needs no account, and allows 5M tiles a month.
 
----
+- Each instance needs its own key, because the quota is per key.
+- The key travels in tile URLs, so it isn't secret. Still, keep it in `.env` (gitignored), never in `.env.example`.
+- Leave the CARTO and OpenStreetMap attribution on the map. That is a condition of the free tier.
 
-## Running tests
+### Phones and GPS
 
-The backend has a pytest suite covering the API endpoints and the game-API
-failure handling (stale-cache fallback, retry/cooldown behaviour, request
-coalescing). All upstream services are mocked — no Docker or network needed.
+GPS needs HTTPS. The mobile steps below are for iOS.
 
-```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt -r requirements-dev.txt
-python -m pytest tests -v
-```
+**Tailscale (easiest):** run `tailscale serve --bg 8000` and open your Tailscale HTTPS URL.
 
-The same suite runs in GitHub Actions on every push and pull request.
+**Self-signed cert (direct IP access):** generate a cert into `backend/certs/`. The backend serves HTTPS automatically when a cert is there.
 
----
-
-## Mobile + GPS
-
-GPS needs HTTPS. Two options:
-
-**Tailscale serve** (easiest):
-```bash
-tailscale serve --bg 8000
-```
-Access via your Tailscale HTTPS URL. GPS works without any cert setup.
-
-**Self-signed cert** (for direct IP access):
 ```bash
 mkdir -p backend/certs
 docker run --rm -v "$(pwd)/backend/certs:/certs" alpine/openssl \
@@ -137,60 +64,41 @@ docker run --rm -v "$(pwd)/backend/certs:/certs" alpine/openssl \
   -subj '/CN=payphone-pathfinder' \
   -addext "subjectAltName=IP:YOUR_LOCAL_IP,IP:YOUR_TAILSCALE_IP,IP:127.0.0.1" \
   -addext "extendedKeyUsage=serverAuth"
+docker compose restart backend
 ```
 
-Update `backend/Dockerfile` to copy the cert and pass it to uvicorn, then rebuild.
+Then, on iOS:
 
-On iOS you have to do two things or it won't work:
-1. Open `http://YOUR_IP:8000/cert.pem` in Safari and install the profile
-2. Go to **Settings → General → About → Certificate Trust Settings** and enable it
+1. Open `https://YOUR_IP:8000/cert.pem` in Safari and install the profile.
+2. Turn the cert on under **Settings → General → About → Certificate Trust Settings**. This is the step people miss.
 
-Step 2 is the one people miss.
+### Share links
 
----
+The link button next to **Find optimal route** copies a link to your current plan. The link holds the transport mode, start, end, and every selected phone. Opening it replaces the recipient's own selection.
 
-## Share links
+The recipient doesn't need a username: phones load uncoloured until they enter one. The link leaves out your username and the solved route, so the recipient re-solves it for their own game state. Phone IDs are the same for every player, so a link works on any instance running this version.
 
-The 🔗 button next to **Find optimal route** copies a link to your current plan — transport
-mode, start, end, and every selected phone:
+### Running tests
 
-```
-https://your-instance:8000/?profile=car&start=-34.910000,138.590000&end=-34.980000,138.660000,4821&ids=1,2,3
-```
+The backend tests mock all upstream services, so they need no Docker or network access. They also run in GitHub Actions on every push and pull request.
 
-Opening it loads that exact selection, replacing whatever the recipient had selected. They
-don't need a username — phones load uncoloured until they enter one. Phone IDs come from
-Payphone Tag and are the same for everyone, so a link rebuilds identically on any instance
-running this version.
-
-Your username isn't included in the link, and the solved route isn't either — the recipient
-re-solves it, so they get a route for their own transport mode and current game state.
-
----
-
-## Troubleshooting
-
-**OSRM preprocessing fails on Windows** — add `MSYS_NO_PATHCONV=1` before every `docker run`.
-
-**GPS denied on iOS** — Settings → Privacy & Security → Location Services → Safari/Firefox → set to "While Using".
-
-**Map tiles say "API KEY REQUIRED"** — this instance has no `CARTO_API_KEY` set. See
-[step 1](#1-clone-and-configure). If you've just added one and the watermark is still there,
-hard-refresh: both your browser and CARTO's CDN cache tiles, so an old one can linger. You
-can check what the server is handing out with `curl http://localhost:8000/api/config.js`.
-
-**"A routing service (OSRM or Vroom) did not respond"** — one of the routing containers is
-down, restarting, or still loading the Australia dataset. Check `docker compose ps` and
-`docker compose logs osrm-car vroom`.
-
-**OSRM slow to respond after startup** — it needs a minute or two to load the Australia dataset into memory.
-
-**Vroom returns no routes** — usually means the selected phones aren't reachable under the chosen transport mode. Try switching profiles or selecting a different area.
-
-**OSRM fingerprint mismatch on startup** — the preprocessed data doesn't match the running image version. Re-run `./deploy.sh --reprocess-osrm`. Make sure you used the same image tag listed in `docker-compose.yml` when you first preprocessed.
-
-**Can't reach the app via Tailscale on Linux** — Docker's iptables can block traffic from the Tailscale interface:
 ```bash
-sudo iptables -I FORWARD -i tailscale0 -j ACCEPT
-sudo iptables -I FORWARD -o tailscale0 -j ACCEPT
+cd backend
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest tests -v
 ```
+
+### Troubleshooting
+
+- **OSRM commands fail on Windows:** prefix them with `MSYS_NO_PATHCONV=1`.
+- **GPS denied on iOS:** go to Settings → Privacy & Security → Location Services → Safari, and set it to "While Using".
+- **Tiles say "API KEY REQUIRED":** `CARTO_API_KEY` isn't set. If you just set it, hard-refresh, because old tiles can stay cached. Check what the server sends with `curl http://localhost:8000/api/config.js`.
+- **"A routing service (OSRM or Vroom) did not respond":** a routing container is down or still loading. OSRM takes a minute or two to load after startup. Check `docker compose ps` and `docker compose logs osrm-car vroom`.
+- **Vroom returns no routes:** the selected phones can't be reached with that transport mode. Try another mode or area.
+- **OSRM fingerprint mismatch on startup:** the routing data doesn't match the OSRM image. Run `./deploy.sh --reprocess-osrm`.
+- **Can't reach the app over Tailscale on Linux:** Docker's iptables rules can block it. Run:
+  ```bash
+  sudo iptables -I FORWARD -i tailscale0 -j ACCEPT
+  sudo iptables -I FORWARD -o tailscale0 -j ACCEPT
+  ```
