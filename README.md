@@ -13,7 +13,7 @@ Sorry Android users, instructions for mobile setup are for iOS.
 - **Backend**: Python + FastAPI
 - **Routing**: OSRM (self-hosted, full Australia dataset)
 - **Optimiser**: Vroom (TSP solver)
-- **Frontend**: Single HTML file, Leaflet.js
+- **Frontend**: HTML, CSS, local Satoshi fonts and SVG icons, Leaflet.js (no build step)
 
 ---
 
