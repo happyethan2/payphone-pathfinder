@@ -53,11 +53,11 @@ button.panel-tab:hover { color: var(--text); background: var(--raised); }
 .sub-text:empty { display: none; }
 
 /* Inputs and controls */
-input[type=text], .time-field { min-height: 44px; width: 100%; padding: 10px 12px; background: var(--raised); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; caret-color: var(--success); }
+input[type=text], .time-field { min-height: 44px; width: 100%; padding: 10px 12px; background: var(--raised); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 16px; caret-color: var(--success); }
 input::placeholder { color: var(--muted); opacity: 1; }
 input[type=text]:focus, .time-field:focus-within { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
 .time-field { display: flex; align-items: center; }
-input[type=time] { flex: 1; min-width: 0; width: 100%; background: transparent; border: 0; color: var(--text); font-size: 14px; font-weight: 500; }
+input[type=time] { flex: 1; min-width: 0; width: 100%; background: transparent; border: 0; color: var(--text); font-size: 16px; font-weight: 500; }
 .btn-row { display: flex; gap: 8px; }
 button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: 1; min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--raised); color: #cbd0d4; font-size: 13px; font-weight: 500; line-height: 1.3; cursor: pointer; touch-action: manipulation; transition: background .15s, border-color .15s, color .15s; }
 button:hover:not(:disabled) { background: var(--hover); border-color: #727c85; color: var(--text); }

@@ -1203,7 +1203,7 @@ function setPanelTab(tab) {
   document.getElementById('section-route-common').style.display = isSettings ? 'none' : '';
   document.getElementById('section-identity').style.display     = isSettings ? 'none' : '';
   const routeResult = document.getElementById('route-result');
-  if (routeResult) routeResult.style.display = !isSettings && state.lastRoute ? 'block' : 'none';
+  if (routeResult) routeResult.style.display = !isSettings && state.routeOrderedIds.length ? 'block' : 'none';
   document.getElementById('btn-panel-tab-route').classList.toggle('active',     tab === 'route');
   document.getElementById('btn-panel-tab-orienteer').classList.toggle('active', tab === 'orienteer');
   document.getElementById('btn-panel-tab-settings').classList.toggle('active',  tab === 'settings');
