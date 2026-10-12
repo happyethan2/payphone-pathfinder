@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Pathfinder redesign mockup</title>
+<!-- Throwaway design mockup (direction B: map-first, Plan → Navigate).
+     Fake phone data, no backend calls except /api/config.js for the tile key. -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="../fonts/satoshi.css">
+<link rel="stylesheet" href="../styles.css">
+<script src="/api/config.js"></script>
+<style>
+  [hidden] { display: none !important; }
+  .icon-layers   { --icon: var(--i-layers); }
+  .icon-user     { --icon: var(--i-user); }
+  .icon-lasso    { --icon: var(--i-lasso); }
+  .icon-deselect { --icon: var(--i-deselect); }
+  .icon-check    { --icon: var(--i-check); }
+  .icon-clock    { --icon: var(--i-clock); }
+  .icon-chevron-down { --icon: var(--i-chevron-down); }
+  .icon-share    { --icon: var(--i-share); }
+
+  /* ── Floating map controls ─────────────────────────────────── */
+  .map-btn {
+    flex: none; width: 44px; height: 44px; padding: 0; border-radius: 50%;
+    background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.3); position: relative;
+  }
+  #top-right { position: fixed; z-index: 900; top: max(16px, env(safe-area-inset-top)); right: 16px;
+    display: flex; flex-direction: column; gap: 10px; }
+  #avatar-btn { font-weight: 700; font-size: 16px; color: var(--text); }
+  #avatar-btn .status-dot { position: absolute; right: 1px; bottom: 1px; width: 11px; height: 11px;
+    border-radius: 50%; background: var(--success); border: 2px solid var(--surface); }
+  #compass-btn { position: fixed; z-index: 900; right: 16px; bottom: calc(var(--sheet-h, 160px) + 12px); }
+
+  #tool-dock { position: fixed; z-index: 900; left: 16px; bottom: calc(var(--sheet-h, 160px) + 12px);
+    display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+  .segmented { display: flex; padding: 3px; gap: 3px; background: var(--raised); border: 1px solid var(--border); border-radius: 12px; }
+  .segmented button { border: 0; background: transparent; min-height: 38px; padding: 8px 12px; border-radius: 9px; color: var(--muted); }
+  .segmented button[aria-pressed=true] { background: var(--accent-surface); color: #d5e5f7; }
+  #tool-dock .segmented { background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.3); border-radius: 22px; }
+  #tool-dock .segmented button { flex: none; border-radius: 18px; padding: 8px 14px; }
+  #tool-dock .segmented button.remove[aria-pressed=true] { background: #35211f; color: var(--danger); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { flex: none; min-height: 34px; padding: 6px 12px; border-radius: 17px; font-size: 13px;
+    background: var(--surface); color: var(--muted); box-shadow: 0 3px 12px rgba(0,0,0,.25); }
+  .chip .icon { width: 14px; height: 14px; flex-basis: 14px; display: none; }
+  .chip[aria-pressed=true] { background: var(--accent-surface); border-color: var(--accent); color: #d5e5f7; }
+  .chip[aria-pressed=true] .icon { display: inline-block; }
+  #lasso-hint { font-size: 12px; color: var(--text); background: var(--surface); padding: 4px 10px; border-radius: 10px; }
+
+  /* ── Sheet: bottom sheet on mobile, side panel on desktop ──── */
+  #sheet { position: fixed; z-index: 1000; left: 0; right: 0; bottom: 0; background: var(--surface);
+    border-radius: 16px 16px 0 0; box-shadow: 0 -4px 28px rgba(0,0,0,.35);
+    max-height: 86dvh; overflow-y: auto; overscroll-behavior: contain;
+    padding: 0 16px max(16px, env(safe-area-inset-bottom)); transition: transform .25s ease; }
+  body.picking #sheet { transform: translateY(110%); }
+  #grabber { display: flex; justify-content: center; width: 100%; height: 28px; min-height: 28px; padding: 0;
+    border: 0; background: transparent; }
+  #grabber::before { content: ""; width: 36px; height: 4px; border-radius: 2px; background: #7e868d; margin-top: 10px; }
+
+  #plan-summary { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 0 12px; border: 0;
+    background: transparent; justify-content: space-between; text-align: left; min-height: 0; }
+  #plan-summary:hover { background: transparent; }
+  #plan-summary .line { font-size: 15px; font-weight: 500; color: var(--text); }
+  #plan-summary .hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  #sheet.full #plan-summary .icon { transform: rotate(180deg); }
+  #plan-details { display: none; }
+  #sheet.full #plan-details { display: block; }
+
+  .field { padding: 12px 0; border-top: 1px solid var(--divider); }
+  .field-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .field-head .sec-title { margin: 0; }
+  .text-btn { flex: none; min-height: 32px; padding: 4px 8px; margin-right: -8px; border: 0; background: transparent;
+    color: var(--accent); font-weight: 500; }
+  .text-btn:hover:not(:disabled) { background: var(--raised); border: 0; color: var(--accent); }
+  .row-btn { width: 100%; justify-content: flex-start; gap: 12px; background: transparent; border: 0;
+    border-radius: 8px; padding: 8px; margin: 0 -8px; width: calc(100% + 16px); text-align: left; }
+  .row-btn .k { width: 40px; color: var(--muted); font-size: 13px; }
+  .row-btn .v { flex: 1; color: var(--text); font-size: 14px; }
+  .row-btn .v.unset { color: var(--muted); }
+  .dot-start, .dot-end { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .dot-start { background: #2ecc71; } .dot-end { background: #e74c3c; }
+  .count { font-size: 14px; color: var(--text); }
+  .note { font-size: 12px; color: var(--muted); line-height: 1.5; margin-top: 6px; }
+  #mode-switch { margin-bottom: 4px; }
+  #mode-switch button, #profile-switch button { flex: 1; }
+
+  .cta-row { display: flex; gap: 8px; padding-top: 4px; }
+  .go { flex: 1; }
+  #share-btn { flex: none; width: 48px; }
+
+  /* Navigate card */
+  .nav-head { display: flex; align-items: center; gap: 12px; padding: 4px 0 12px; }
+  .nav-head .wp { width: 36px; height: 36px; font-size: 15px; flex: none; }
+  .nav-title { font-size: 17px; font-weight: 700; color: var(--text); }
+  .nav-stats { font-size: 13px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .leg-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;
+    background: var(--raised); border-radius: 8px; padding: 2px; }
+  .leg-row button { flex: none; width: 40px; min-height: 36px; border: 0; background: transparent; padding: 0; }
+  .leg-row span { font-size: 13px; color: var(--text); }
+  .nav-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .nav-actions button { background: transparent; }
+  #end-route-btn { color: var(--danger); }
+  #end-route-btn:hover:not(:disabled) { background: #35211f; border-color: var(--danger); }
+
+  /* ── Popovers (avatar, layers): bottom sheet on mobile, dropdown on desktop ── */
+  .scrim { position: fixed; inset: 0; z-index: 1150; background: rgba(0,0,0,.45); }
+  .popover { position: fixed; z-index: 1200; left: 0; right: 0; bottom: 0; background: var(--surface);
+    border-radius: 16px 16px 0 0; padding: 8px 16px max(20px, env(safe-area-inset-bottom));
+    max-height: 80dvh; overflow-y: auto; box-shadow: 0 -4px 28px rgba(0,0,0,.4); }
+  .popover-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 0 4px; }
+  .popover-head h2 { font-size: 16px; font-weight: 700; }
+  .popover .field:first-of-type { border-top: 0; }
+  .switch-row { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; color: var(--text); cursor: pointer; }
+  .switch-row .label { flex: 1; display: flex; align-items: center; gap: 8px; }
+  .switch-row .icon { color: var(--muted); }
+  input[type=checkbox][role=switch] { appearance: none; width: 42px; height: 24px; border-radius: 12px; flex: none;
+    background: var(--border); position: relative; cursor: pointer; transition: background .15s; }
+  input[type=checkbox][role=switch]::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+    border-radius: 50%; background: var(--text); transition: transform .15s; }
+  input[type=checkbox][role=switch]:checked { background: var(--success); }
+  input[type=checkbox][role=switch]:checked::after { transform: translateX(18px); background: var(--surface); }
+  .legend { margin-top: 2px; }
+  .status-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .status-line .d { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+  .name-row { display: flex; gap: 8px; }
+  .name-row button { flex: none; }
+  .name-row input { flex: 1; min-width: 0; }
+
+  /* ── Toast, endpoint prompt, onboarding ────────────────────── */
+  #toast { position: fixed; z-index: 1100; left: 16px; right: 16px; bottom: calc(var(--sheet-h, 160px) + 12px);
+    display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 16px; border-radius: 10px;
+    background: #e8eaec; color: #101112; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+  #toast span { flex: 1; }
+  #toast button { flex: none; min-height: 36px; border: 0; background: transparent; color: #1d4f80; font-weight: 700; }
+  #pick-banner { position: fixed; z-index: 1100; top: 0; left: 0; right: 0; text-align: center;
+    padding: max(14px, env(safe-area-inset-top)) 16px 14px; background: var(--surface); border-bottom: 1px solid var(--border);
+    font-size: 15px; color: var(--text); }
+  #pick-actions { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%);
+    bottom: max(24px, env(safe-area-inset-bottom)); display: flex; gap: 8px; }
+  #pick-actions button { flex: none; padding: 10px 24px; border-radius: 22px; background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.3); }
+  #onboard { position: fixed; inset: 0; z-index: 1300; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.6); }
+  #onboard .card { width: 100%; max-width: 380px; background: var(--surface); border: 1px solid var(--divider);
+    border-radius: 16px; padding: 24px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  #onboard h1 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+  #onboard p { font-size: 14px; color: var(--muted); line-height: 1.5; margin-bottom: 16px; }
+  #onboard .go { width: 100%; margin-top: 12px; }
+  #onboard .text-btn { width: 100%; margin: 8px 0 0; justify-content: center; }
+  body.picking #tool-dock, body.picking #compass-btn { display: none; }
+  @media (max-width: 639px) { body.sheet-full #tool-dock, body.sheet-full #compass-btn { display: none; } }
+  #plan-summary .line, #plan-summary .hint { display: block; }
+  .mock-tag { position: fixed; z-index: 800; left: 50%; top: max(16px, env(safe-area-inset-top)); transform: translateX(-50%);
+    font-size: 11px; color: var(--muted); background: var(--surface); padding: 3px 8px; border-radius: 8px; opacity: .85; pointer-events: none; }
+
+  @media (min-width: 640px) {
+    #sheet { top: 16px; left: 16px; right: auto; bottom: auto; width: 360px; border-radius: 12px;
+      max-height: calc(100dvh - 32px); padding-top: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.3); }
+    body.picking #sheet { transform: none; }
+    #grabber, #plan-summary { display: none; }
+    #plan-details { display: block; }
+    #plan-details > .field:first-child { border-top: 0; padding-top: 0; }
+    #tool-dock { left: 392px; bottom: 20px; }
+    #compass-btn { bottom: 20px; }
+    #toast { left: 50%; right: auto; transform: translateX(-50%); width: 420px; bottom: 20px; }
+    .scrim { background: transparent; }
+    .popover { left: auto; right: 72px; top: 16px; bottom: auto; width: 320px; border-radius: 12px; border: 1px solid var(--divider); }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="mock-tag">Mockup · fake data</div>
+
+<!-- Top-right: identity + layers (Google Maps-style corner) -->
+<div id="top-right">
+  <button id="avatar-btn" class="map-btn" aria-label="Your profile and settings" onclick="openPopover('avatar')"></button>
+  <button id="layers-btn" class="map-btn" aria-label="Map layers and legend" onclick="openPopover('layers')"><span class="icon icon-layers" aria-hidden="true"></span></button>
+</div>
+
+<!-- Map tools: selection lives on the map, not in the panel -->
+<div id="tool-dock">
+  <div id="lasso-chips" class="chips" hidden>
+    <button class="chip" data-filter="onlyNew" aria-pressed="false"><span class="icon icon-check" aria-hidden="true"></span>Only new</button>
+    <button class="chip" data-filter="skipOwned" aria-pressed="false"><span class="icon icon-check" aria-hidden="true"></span>Skip owned</button>
+    <button class="chip" data-filter="skipCell" aria-pressed="false"><span class="icon icon-check" aria-hidden="true"></span>Skip cellmates</button>
+  </div>
+  <div id="lasso-hint" hidden>Draw around phones</div>
+  <div class="segmented" role="group" aria-label="Map selection tools">
+    <button id="lasso-add" aria-pressed="false" onclick="setLasso('add')"><span class="icon icon-lasso" aria-hidden="true"></span>Lasso</button>
+    <button id="lasso-remove" class="remove" aria-pressed="false" onclick="setLasso('remove')"><span class="icon icon-deselect" aria-hidden="true"></span>Deselect</button>
+  </div>
+</div>
+
+<button id="compass-btn" class="map-btn" aria-label="Centre on me" onclick="toast('Centred on your location (mockup)')">
+  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 4 L14.5 13 L12 11.5 L9.5 13 Z" fill="#e74c3c"/><path d="M12 20 L9.5 13 L12 14.5 L14.5 13 Z" fill="#a8afb5"/></svg>
+</button>
+
+<!-- Sheet -->
+<div id="sheet">
+  <button id="grabber" aria-label="Expand plan" onclick="toggleSheet()"></button>
+
+  <!-- PLAN -->
+  <section id="plan-view" class="view">
+    <button id="plan-summary" onclick="toggleSheet()" aria-expanded="false">
+      <span><span class="line" id="summary-line"></span><span class="hint" id="summary-hint"></span></span>
+      <span class="icon icon-chevron-down" aria-hidden="true"></span>
+    </button>
+
+    <div id="plan-details">
+      <div class="field">
+        <div class="segmented" id="mode-switch" role="group" aria-label="How to choose phones">
+          <button data-mode="pick" aria-pressed="true">I'll pick</button>
+          <button data-mode="auto" aria-pressed="false">Pick for me</button>
+        </div>
+      </div>
+      <div class="field">
+        <div class="segmented" id="profile-switch" role="group" aria-label="Transport">
+          <button data-profile="foot" aria-pressed="false"><span class="icon icon-walk" aria-hidden="true"></span>Foot</button>
+          <button data-profile="bicycle" aria-pressed="false"><span class="icon icon-bike" aria-hidden="true"></span>Bike</button>
+          <button data-profile="car" aria-pressed="true"><span class="icon icon-car" aria-hidden="true"></span>Car</button>
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-head"><div class="sec-title">Start &amp; end</div>
+          <button class="text-btn" id="clear-ends" onclick="clearEnds()">Clear</button></div>
+        <button class="row-btn" onclick="startPicking('start')"><span class="dot-start"></span><span class="k">Start</span><span class="v" id="start-v"></span><span class="icon icon-chevron-right" aria-hidden="true"></span></button>
+        <button class="row-btn" onclick="startPicking('end')"><span class="dot-end"></span><span class="k">End</span><span class="v" id="end-v"></span><span class="icon icon-chevron-right" aria-hidden="true"></span></button>
+      </div>
+      <div class="field" id="sel-field">
+        <div class="field-head"><div class="sec-title">Phones</div>
+          <button class="text-btn" id="clear-sel" onclick="clearSelection()">Clear</button></div>
+        <div class="count" id="sel-count"></div>
+        <div class="note">Tap phones on the map, or use Lasso to draw around a group.</div>
+      </div>
+      <div class="field" id="arrive-field" hidden>
+        <div class="field-head"><div class="sec-title">Arrive at the end by</div></div>
+        <div class="time-field"><span class="icon icon-clock" aria-hidden="true" style="margin-right:8px;color:var(--muted)"></span>
+          <input type="time" id="arrive-by" aria-label="Arrive by"></div>
+        <div class="note" id="auto-note">Picks the most phones you can reach in time.</div>
+      </div>
+    </div>
+
+    <div class="cta-row">
+      <button class="go" id="find-btn" onclick="findRoute()"></button>
+      <button id="share-btn" aria-label="Copy share link" title="Copy share link" onclick="toast('Share link copied')"><span class="icon icon-share" aria-hidden="true"></span></button>
+    </div>
+  </section>
+
+  <!-- NAVIGATE -->
+  <section id="nav-view" class="view" hidden>
+    <div class="nav-head">
+      <div class="wp wp-active" id="nav-badge"></div>
+      <div><div class="nav-title" id="nav-title"></div><div class="nav-stats" id="nav-stats"></div></div>
+    </div>
+    <div class="leg-row" id="leg-row">
+      <button aria-label="Previous leg" onclick="changeLeg(-1)"><span class="icon icon-chevron-left" aria-hidden="true"></span></button>
+      <span id="leg-label"></span>
+      <button aria-label="Next leg" onclick="changeLeg(1)"><span class="icon icon-chevron-right" aria-hidden="true"></span></button>
+    </div>
+    <button class="go" style="width:100%" onclick="openMaps()">Open in Google Maps <span class="icon icon-external" aria-hidden="true"></span></button>
+    <div class="nav-actions">
+      <button onclick="skipStop()"><span class="icon icon-arrow-right" aria-hidden="true"></span>Skip</button>
+      <button id="undo-stop-btn" onclick="undoStop()"><span class="icon icon-undo" aria-hidden="true"></span>Undo</button>
+      <button id="end-route-btn" onclick="endRoute()">End route</button>
+    </div>
+  </section>
+</div>
+
+<!-- Avatar popover -->
+<div class="scrim" id="scrim" hidden onclick="closePopover()"></div>
+<div class="popover" id="pop-avatar" role="dialog" aria-modal="true" aria-labelledby="pop-avatar-h" hidden>
+  <div class="popover-head"><h2 id="pop-avatar-h">You</h2><button class="text-btn" onclick="closePopover()">Done</button></div>
+  <div class="field">
+    <div class="sec-title">Payphone Tag name</div>
+    <div class="name-row"><input type="text" id="name-input" placeholder="Your in-game name" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="Payphone Tag name">
+      <button onclick="saveName(document.getElementById('name-input').value)">Save</button></div>
+    <div class="status-line" id="status-line"><span class="d"></span><span id="status-text"></span></div>
+    <div class="note">Your name colours phones by who holds them. Without it, phones load uncoloured.</div>
+  </div>
+  <div class="field">
+    <button style="width:100%" onclick="reloadPhones()">Reload phones</button>
+  </div>
+  <div class="field">
+    <label class="switch-row"><span class="label">Auto-rotate map</span><input type="checkbox" role="switch" id="autorotate" checked></label>
+    <div class="note">The compass button locks the map to the direction you're facing.</div>
+  </div>
+  <div class="field"><button class="text-btn" onclick="replayOnboarding()">Replay first-run prompt (mockup)</button></div>
+</div>
+
+<!-- Layers popover -->
+<div class="popover" id="pop-layers" role="dialog" aria-modal="true" aria-labelledby="pop-layers-h" hidden>
+  <div class="popover-head"><h2 id="pop-layers-h">Map</h2><button class="text-btn" onclick="closePopover()">Done</button></div>
+  <div class="field">
+    <div class="sec-title">Highlight</div>
+    <label class="switch-row"><span class="label"><span class="icon icon-camera" aria-hidden="true"></span>Phones with a wiki photo</span><input type="checkbox" role="switch" data-hl="photo"></label>
+    <label class="switch-row"><span class="label"><span class="icon icon-magic" aria-hidden="true"></span>Phones you've never captured</span><input type="checkbox" role="switch" data-hl="isNew"></label>
+  </div>
+  <div class="field">
+    <div class="sec-title">Legend</div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-uncaptured dot"></span>Uncaptured</div>
+      <div class="legend-item"><span class="legend-mine dot"></span>Mine</div>
+      <div class="legend-item"><span class="legend-cellmate dot"></span>Cellmate</div>
+      <div class="legend-item"><span class="legend-hostile dot"></span>Hostile</div>
+      <div class="legend-item"><span class="legend-photo dot"></span>Wiki photo</div>
+      <div class="legend-item"><span class="legend-new dot"></span>New</div>
+    </div>
+  </div>
+  <div class="field">
+    <div class="sec-title">Map style</div>
+    <div class="segmented" id="theme-switch" role="group" aria-label="Map style">
+      <button data-theme="dark" aria-pressed="true" style="flex:1">Dark</button>
+      <button data-theme="light" aria-pressed="false" style="flex:1">Light</button>
+    </div>
+    <label class="switch-row" style="margin-top:8px"><span class="label">Mini-map</span><input type="checkbox" role="switch" id="minimap"></label>
+  </div>
+</div>
+
+<!-- Endpoint picking -->
+<div id="pick-banner" hidden></div>
+<div id="pick-actions" hidden>
+  <button onclick="pickSkip()">Skip</button>
+  <button onclick="pickCancel()">Cancel</button>
+</div>
+
+<div id="toast" role="status" hidden><span id="toast-msg"></span><button id="toast-undo" hidden>Undo</button></div>
+
+<!-- First run -->
+<div id="onboard" role="dialog" aria-modal="true" aria-labelledby="onboard-h" hidden>
+  <div class="card">
+    <h1 id="onboard-h">Welcome to Pathfinder</h1>
+    <p>Enter your Payphone Tag name to colour phones by who holds them. You can add or change it later from the button in the top corner.</p>
+    <input type="text" id="onboard-name" placeholder="Your in-game name" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="Payphone Tag name">
+    <button class="go" onclick="finishOnboarding(document.getElementById('onboard-name').value)">Continue</button>
+    <button class="text-btn" onclick="finishOnboarding('')">Browse without a name</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ── Icons not in the shared stylesheet (stroke SVGs used as masks) ───────
+{
+  const icons = {
+    layers: '<path d="M9 2L1.5 6 9 10l7.5-4L9 2zM1.5 9.5L9 13.5l7.5-4M1.5 13L9 17l7.5-4"/>',
+    user: '<circle cx="9" cy="6" r="3.2"/><path d="M2.8 16c.8-3.2 3.3-4.8 6.2-4.8s5.4 1.6 6.2 4.8"/>',
+    lasso: '<ellipse cx="9" cy="7.5" rx="6.5" ry="4.5" stroke-dasharray="2.4 2"/><path d="M5.5 11.3c-.9 1.5-.4 3.3 1.4 3.9"/>',
+    deselect: '<circle cx="9" cy="9" r="6.5"/><path d="M6 9h6"/>',
+    check: '<path d="M4 9.5l3 3 7-7"/>',
+    clock: '<circle cx="9" cy="9" r="6.5"/><path d="M9 5.5V9l2.5 1.5"/>',
+    'chevron-down': '<path d="M4 7l5 5 5-5"/>',
+    share: '<path d="M9 2v10M5 6l4-4 4 4M3 10v5h12v-5"/>',
+  };
+  for (const [k, body] of Object.entries(icons)) {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" fill="none" stroke="black" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+    document.documentElement.style.setProperty(`--i-${k}`, `url("data:image/svg+xml,${encodeURIComponent(svg)}")`);
+  }
+}
+
+// ── Fake data ─────────────────────────────────────────────────────────────
+const STORE = 'pp_mockup_v1';
+const COLORS = { uncaptured: '#aaaaaa', mine: '#2ecc71', cellmate: '#3498db', hostile: '#e74c3c' };
+const SPEED_KMH = { foot: 5, bicycle: 15, car: 35 };
+const LEG_SIZE = 9;  // Google Maps waypoint limit per leg
+const CENTRE = [-38.147, 144.36];  // Geelong
+
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rand = rng(42);
+const PHONES = Array.from({ length: 420 }, (_, i) => {
+  const r = 0.07 * Math.sqrt(rand()), a = rand() * 2 * Math.PI, s = rand();
+  return {
+    id: 1000 + i,
+    lat: CENTRE[0] + r * Math.sin(a) * 0.8,
+    lon: CENTRE[1] + r * Math.cos(a),
+    owner: s < 0.45 ? 'uncaptured' : s < 0.6 ? 'mine' : s < 0.75 ? 'cellmate' : 'hostile',
+    photo: rand() < 0.3,
+    isNew: rand() < 0.35,
+  };
+});
+const byId = new Map(PHONES.map(p => [p.id, p]));
+
+// ── State ─────────────────────────────────────────────────────────────────
+const S = {
+  name: null, sel: new Set(), start: null, end: null, profile: 'car', mode: 'pick',
+  lasso: null, filters: { onlyNew: false, skipOwned: false, skipCell: false },
+  hl: { photo: false, isNew: false }, route: null, progress: 0, skipped: new Set(), leg: 0,
+  picking: null, pickBackup: null, sheetFull: false, updatedAt: new Date(),
+};
+try { const saved = JSON.parse(localStorage.getItem(STORE) || 'null'); if (saved) S.name = saved.name; } catch (e) {}
+function persist() { try { localStorage.setItem(STORE, JSON.stringify({ name: S.name })); } catch (e) {} }
+
+// ── Map ───────────────────────────────────────────────────────────────────
+const KEY = (window.PP_CONFIG && window.PP_CONFIG.cartoApiKey) || '';
+const Q = KEY ? `?key=${encodeURIComponent(KEY)}` : '';
+const TILES = {
+  dark: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png${Q}`,
+  light: `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png${Q}`,
+};
+const map = L.map('map', { zoomControl: false, preferCanvas: true, attributionControl: true }).setView(CENTRE, 14);
+let tiles = L.tileLayer(TILES.dark, { attribution: '© OpenStreetMap © CARTO', maxZoom: 19 }).addTo(map);
+const markers = new Map();
+const routeLayer = L.layerGroup().addTo(map);
+let startMarker = null, endMarker = null;
+
+function radius(sel) { const z = map.getZoom(); const b = z >= 15 ? 7 : z >= 13 ? 5 : z >= 11 ? 3 : 2; return sel ? b + 2 : b; }
+function styleFor(p) {
+  const sel = S.sel.has(p.id);
+  const fill = S.name ? COLORS[p.owner] : COLORS.uncaptured;
+  const hlNew = S.hl.isNew && p.isNew, hlPhoto = S.hl.photo && p.photo;
+  return { radius: radius(sel), fillColor: fill, fillOpacity: 0.9, opacity: 1,
+    color: hlNew ? '#fbbf24' : hlPhoto ? '#c084fc' : sel ? '#fff' : 'rgba(0,0,0,0.3)',
+    weight: hlNew || hlPhoto ? 2 : sel ? 2.5 : 1 };
+}
+for (const p of PHONES) {
+  const m = L.circleMarker([p.lat, p.lon], styleFor(p)).addTo(map);
+  m.on('click', e => { L.DomEvent.stopPropagation(e); onPhoneTap(p); });
+  markers.set(p.id, m);
+}
+function restyle() { for (const p of PHONES) markers.get(p.id).setStyle(styleFor(p)); }
+map.on('zoomend', restyle);
+
+function onPhoneTap(p) {
+  if (S.picking) return setEndpoint(S.picking, { lat: p.lat, lon: p.lon });
+  if (S.route) return;
+  S.sel.has(p.id) ? S.sel.delete(p.id) : S.sel.add(p.id);
+  markers.get(p.id).setStyle(styleFor(p));
+  renderPlan();
+}
+
+map.on('click', e => {
+  if (S.picking) return setEndpoint(S.picking, { lat: e.latlng.lat, lon: e.latlng.lng });
+  if (S.sheetFull && innerWidth < 640) setSheetFull(false);
+});
+
+// ── Lasso ─────────────────────────────────────────────────────────────────
+let lassoPts = null, lassoLine = null;
+const mapEl = map.getContainer();
+function setLasso(kind) {
+  S.lasso = S.lasso === kind ? null : kind;
+  document.getElementById('lasso-add').setAttribute('aria-pressed', S.lasso === 'add');
+  document.getElementById('lasso-remove').setAttribute('aria-pressed', S.lasso === 'remove');
+  document.getElementById('lasso-chips').hidden = S.lasso !== 'add';
+  document.getElementById('lasso-hint').hidden = !S.lasso;
+  if (S.lasso) { map.dragging.disable(); mapEl.style.touchAction = 'none'; if (innerWidth < 640) setSheetFull(false); }
+  else { map.dragging.enable(); mapEl.style.touchAction = ''; }
+}
+document.querySelectorAll('#lasso-chips .chip').forEach(c => c.onclick = () => {
+  const k = c.dataset.filter; S.filters[k] = !S.filters[k];
+  c.setAttribute('aria-pressed', S.filters[k]);
+});
+mapEl.addEventListener('pointerdown', e => {
+  if (!S.lasso) return;
+  mapEl.setPointerCapture(e.pointerId);
+  lassoPts = [map.mouseEventToLatLng(e)];
+  lassoLine = L.polyline(lassoPts, { color: S.lasso === 'add' ? '#9bbce0' : '#efa29a', weight: 2, dashArray: '6 6' }).addTo(map);
+});
+mapEl.addEventListener('pointermove', e => {
+  if (!lassoPts) return;
+  lassoPts.push(map.mouseEventToLatLng(e)); lassoLine.setLatLngs(lassoPts);
+});
+mapEl.addEventListener('pointerup', () => {
+  if (!lassoPts) return;
+  const poly = lassoPts.map(ll => map.latLngToContainerPoint(ll));
+  map.removeLayer(lassoLine); lassoPts = null;
+  if (poly.length < 3) return;
+  let n = 0;
+  for (const p of PHONES) {
+    const pt = map.latLngToContainerPoint([p.lat, p.lon]);
+    if (!inPoly(pt, poly)) continue;
+    if (S.lasso === 'remove') { if (S.sel.delete(p.id)) n++; continue; }
+    if (S.filters.onlyNew && !p.isNew) continue;
+    if (S.filters.skipOwned && p.owner === 'mine') continue;
+    if (S.filters.skipCell && p.owner === 'cellmate') continue;
+    if (!S.sel.has(p.id)) { S.sel.add(p.id); n++; }
+  }
+  restyle(); renderPlan();
+  toast(S.lasso === 'remove' ? `${n} phones removed` : `${n} phones added`);
+});
+function inPoly(pt, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > pt.y) !== (b.y > pt.y) && pt.x < (b.x - a.x) * (pt.y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+// ── Endpoints ─────────────────────────────────────────────────────────────
+function endpointIcon(which) {
+  const c = which === 'start' ? '#2ecc71' : '#e74c3c';
+  return L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9],
+    html: `<div style="width:18px;height:18px;border-radius:50%;background:${c};border:3px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.6)"></div>` });
+}
+function drawEndpoints() {
+  for (const m of [startMarker, endMarker]) if (m) map.removeLayer(m);
+  startMarker = S.start && L.marker([S.start.lat, S.start.lon], { icon: endpointIcon('start'), zIndexOffset: 500 }).addTo(map);
+  endMarker = S.end && L.marker([S.end.lat, S.end.lon], { icon: endpointIcon('end'), zIndexOffset: 400 }).addTo(map);
+}
+function startPicking(which) {
+  if (S.lasso) setLasso(S.lasso);
+  S.pickBackup = { start: S.start, end: S.end, both: which === 'start' };
+  S.picking = which;
+  document.body.classList.add('picking'); syncSheetH();
+  document.getElementById('pick-banner').hidden = false;
+  document.getElementById('pick-actions').hidden = false;
+  renderPick();
+}
+function renderPick() {
+  document.getElementById('pick-banner').innerHTML = S.picking === 'start'
+    ? 'Tap your <b style="color:#2ecc71">start</b> on the map'
+    : 'Tap your <b style="color:#e74c3c">end</b> on the map';
+}
+function setEndpoint(which, pt) { S[which] = pt; drawEndpoints(); advancePick(); }
+function advancePick() {
+  if (S.picking === 'start' && S.pickBackup.both) { S.picking = 'end'; return renderPick(); }
+  stopPicking();
+}
+function pickSkip() { advancePick(); }
+function pickCancel() { S.start = S.pickBackup.start; S.end = S.pickBackup.end; drawEndpoints(); stopPicking(); }
+function stopPicking() {
+  S.picking = null;
+  document.body.classList.remove('picking'); syncSheetH();
+  document.getElementById('pick-banner').hidden = true;
+  document.getElementById('pick-actions').hidden = true;
+  renderPlan();
+}
+function clearEnds() {
+  const prev = { start: S.start, end: S.end };
+  S.start = S.end = null; drawEndpoints(); renderPlan();
+  toast('Start and end cleared', () => { Object.assign(S, prev); drawEndpoints(); renderPlan(); });
+}
+function clearSelection() {
+  const prev = new Set(S.sel);
+  S.sel.clear(); restyle(); renderPlan();
+  toast(`${prev.size} phones cleared`, () => { S.sel = prev; restyle(); renderPlan(); });
+}
+
+// ── Sheet ─────────────────────────────────────────────────────────────────
+const sheet = document.getElementById('sheet');
+function setSheetFull(full) {
+  S.sheetFull = full;
+  sheet.classList.toggle('full', full);
+  document.body.classList.toggle('sheet-full', full);
+  document.getElementById('plan-summary').setAttribute('aria-expanded', full);
+  document.getElementById('grabber').setAttribute('aria-label', full ? 'Collapse plan' : 'Expand plan');
+}
+function toggleSheet() { if (!S.route) setSheetFull(!S.sheetFull); }
+// Floating controls sit just above the sheet, whatever its height
+function syncSheetH() {
+  const h = innerWidth < 640 && !document.body.classList.contains('picking') ? sheet.offsetHeight : 0;
+  document.documentElement.style.setProperty('--sheet-h', `${h}px`);
+}
+new ResizeObserver(syncSheetH).observe(sheet);
+addEventListener('resize', syncSheetH);
+
+// Swipe the grabber/summary to open or close
+{
+  let y0 = null;
+  for (const el of [document.getElementById('grabber'), document.getElementById('plan-summary')]) {
+    el.addEventListener('touchstart', e => { y0 = e.touches[0].clientY; }, { passive: true });
+    el.addEventListener('touchend', e => {
+      if (y0 === null) return; const dy = e.changedTouches[0].clientY - y0; y0 = null;
+      if (Math.abs(dy) > 24 && !S.route) { setSheetFull(dy < 0); e.preventDefault(); }
+    });
+  }
+}
+
+// ── Plan ──────────────────────────────────────────────────────────────────
+function fmtPt(p) { return p ? `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}` : 'Tap to set'; }
+function sameSpot(a, b) { return a && b && Math.abs(a.lat - b.lat) < 1e-5 && Math.abs(a.lon - b.lon) < 1e-5; }
+function fmtTime(d) { return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+const PROFILE_LABEL = { foot: 'Foot', bicycle: 'Bike', car: 'Car' };
+
+function planProblem() {
+  if (!S.start || !S.end) return 'Set a start and end';
+  if (S.mode === 'pick' && !S.sel.size) return 'Select phones on the map';
+  if (S.mode === 'auto' && !S.name) return 'Add your name to use Pick for me';
+  return null;
+}
+function renderPlan() {
+  const auto = S.mode === 'auto';
+  const t = document.getElementById('arrive-by').value;
+  const ends = !S.start || !S.end ? 'No start/end' : sameSpot(S.start, S.end) ? 'Round trip' : 'Start → End';
+  const what = auto ? `Pick for me by ${t ? fmtTime(new Date(`1970-01-01T${t}`)) : '—'}` : `${S.sel.size} phones`;
+  document.getElementById('summary-line').textContent = `${what} · ${PROFILE_LABEL[S.profile]} · ${ends}`;
+  const problem = planProblem();
+  document.getElementById('summary-hint').textContent = problem || 'Tap to edit the plan';
+
+  document.querySelectorAll('#mode-switch button').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === S.mode));
+  document.querySelectorAll('#profile-switch button').forEach(b => b.setAttribute('aria-pressed', b.dataset.profile === S.profile));
+  document.getElementById('sel-field').hidden = auto;
+  document.getElementById('arrive-field').hidden = !auto;
+  document.getElementById('auto-note').textContent = S.name
+    ? 'Picks the most phones you can capture before then.'
+    : 'Needs your name, so it can skip phones you already hold.';
+  document.getElementById('sel-count').textContent = S.sel.size ? `${S.sel.size} phones selected` : 'None selected';
+  document.getElementById('clear-sel').hidden = !S.sel.size;
+  document.getElementById('clear-ends').hidden = !S.start && !S.end;
+  for (const k of ['start', 'end']) {
+    const v = document.getElementById(`${k}-v`);
+    v.textContent = k === 'end' && sameSpot(S.start, S.end) ? 'Same as start' : fmtPt(S[k]);
+    v.classList.toggle('unset', !S[k]);
+  }
+  const find = document.getElementById('find-btn');
+  find.innerHTML = `${auto ? 'Find best route' : 'Find optimal route'} <span class="icon icon-arrow-right" aria-hidden="true"></span>`;
+  find.disabled = !!problem;
+  document.getElementById('share-btn').disabled = !S.sel.size && !S.start;
+  document.getElementById('tool-dock').hidden = !!S.route || auto;
+}
+document.querySelectorAll('#mode-switch button').forEach(b => b.onclick = () => { S.mode = b.dataset.mode; if (S.mode === 'auto' && S.lasso) setLasso(S.lasso); renderPlan(); });
+document.querySelectorAll('#profile-switch button').forEach(b => b.onclick = () => { S.profile = b.dataset.profile; renderPlan(); });
+document.getElementById('arrive-by').addEventListener('input', renderPlan);
+{
+  const d = new Date(Date.now() + 2 * 3600e3); d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15, 0, 0);
+  document.getElementById('arrive-by').value = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// ── Fake solver ───────────────────────────────────────────────────────────
+function km(a, b) {
+  const R = 6371, dLat = (b.lat - a.lat) * Math.PI / 180, dLon = (b.lon - a.lon) * Math.PI / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h)) * 1.35;  // crude road factor
+}
+function nearestOrder(from, pool) {
+  const out = [], left = [...pool]; let cur = from;
+  while (left.length) {
+    let bi = 0; for (let i = 1; i < left.length; i++) if (km(cur, left[i]) < km(cur, left[bi])) bi = i;
+    cur = left.splice(bi, 1)[0]; out.push(cur);
+  }
+  return out;
+}
+function findRoute() {
+  const btn = document.getElementById('find-btn');
+  btn.disabled = true; btn.textContent = 'Finding route…';
+  setTimeout(() => {
+    const speed = SPEED_KMH[S.profile];
+    let stops;
+    if (S.mode === 'pick') {
+      stops = nearestOrder(S.start, [...S.sel].map(id => byId.get(id)));
+    } else {
+      const [h, m] = document.getElementById('arrive-by').value.split(':').map(Number);
+      const deadline = new Date(); deadline.setHours(h, m, 0, 0);
+      if (deadline < Date.now()) deadline.setDate(deadline.getDate() + 1);
+      let budget = (deadline - Date.now()) / 60000;
+      const pool = PHONES.filter(p => p.owner === 'uncaptured' || p.owner === 'hostile');
+      stops = []; let cur = S.start;
+      while (pool.length) {
+        let bi = 0; for (let i = 1; i < pool.length; i++) if (km(cur, pool[i]) < km(cur, pool[bi])) bi = i;
+        const cand = pool[bi], cost = km(cur, cand) / speed * 60 + 1;
+        if (cost + km(cand, S.end) / speed * 60 > budget) break;
+        budget -= cost; stops.push(cand); cur = pool.splice(bi, 1)[0];
+      }
+      if (!stops.length) { renderPlan(); return toast('No phones reachable before that time'); }
+    }
+    const path = [S.start, ...stops, S.end];
+    let dist = 0; for (let i = 1; i < path.length; i++) dist += km(path[i - 1], path[i]);
+    S.route = { ids: stops.map(p => p.id), dist, mins: dist / speed * 60 + stops.length };
+    S.progress = 0; S.skipped = new Set(); S.leg = 0;
+    if (S.lasso) setLasso(S.lasso);
+    setSheetFull(false);
+    drawRoute(); renderNav();
+    map.fitBounds(L.latLngBounds(path.map(p => [p.lat, p.lon])), { padding: [60, 60] });
+  }, 700);
+}
+
+// ── Navigate ──────────────────────────────────────────────────────────────
+function wpIcon(n, cls) {
+  return L.divIcon({ className: '', iconSize: [24, 24], iconAnchor: [12, 12],
+    html: `<div class="wp ${cls}" style="width:24px;height:24px;font-size:11px">${n}</div>` });
+}
+function drawRoute() {
+  routeLayer.clearLayers();
+  if (!S.route) return;
+  const stops = S.route.ids.map(id => byId.get(id));
+  const path = [S.start, ...stops, S.end];
+  for (let i = 1; i < path.length; i++) {
+    const hue = Math.round(120 + 240 * i / path.length) % 360;
+    L.polyline([[path[i - 1].lat, path[i - 1].lon], [path[i].lat, path[i].lon]], { color: `hsl(${hue} 70% 60%)`, weight: 4, opacity: .85 }).addTo(routeLayer);
+  }
+  stops.forEach((p, i) => {
+    const cls = S.skipped.has(p.id) ? 'wp-skipped' : i < S.progress ? 'wp-tagged' : i === S.progress ? 'wp-active' : '';
+    L.marker([p.lat, p.lon], { icon: wpIcon(i + 1, cls), zIndexOffset: 600 }).addTo(routeLayer);
+  });
+}
+function legCount() { return Math.max(1, Math.ceil(S.route.ids.length / LEG_SIZE)); }
+function renderNav() {
+  const inNav = !!S.route;
+  document.getElementById('plan-view').hidden = inNav;
+  document.getElementById('nav-view').hidden = !inNav;
+  document.getElementById('grabber').hidden = inNav;
+  renderPlan();
+  if (!inNav) return;
+  const n = S.route.ids.length, done = S.progress >= n;
+  document.getElementById('nav-badge').textContent = done ? '✓' : S.progress + 1;
+  document.getElementById('nav-title').textContent = done ? 'All stops visited' : `Stop ${S.progress + 1} of ${n}`;
+  const eta = new Date(Date.now() + S.route.mins * 60000);
+  document.getElementById('nav-stats').textContent =
+    `${S.route.dist.toFixed(1)} km · ${Math.round(S.route.mins)} min · arrive ${fmtTime(eta)}`;
+  const legs = legCount();
+  document.getElementById('leg-row').hidden = legs < 2;
+  const a = S.leg * LEG_SIZE + 1, b = Math.min(n, a + LEG_SIZE - 1);
+  document.getElementById('leg-label').textContent = `Leg ${S.leg + 1} of ${legs} · stops ${a}–${b}`;
+  document.getElementById('undo-stop-btn').disabled = S.progress === 0;
+}
+function changeLeg(d) { S.leg = Math.min(legCount() - 1, Math.max(0, S.leg + d)); renderNav(); }
+function skipStop() {
+  if (S.progress >= S.route.ids.length) return;
+  S.skipped.add(S.route.ids[S.progress]); S.progress++;
+  S.leg = Math.min(legCount() - 1, Math.floor(S.progress / LEG_SIZE));
+  drawRoute(); renderNav();
+}
+function undoStop() {
+  if (!S.progress) return;
+  S.progress--; S.skipped.delete(S.route.ids[S.progress]);
+  S.leg = Math.floor(S.progress / LEG_SIZE);
+  drawRoute(); renderNav();
+}
+function endRoute() {
+  const prev = { route: S.route, progress: S.progress, skipped: S.skipped, leg: S.leg };
+  S.route = null; drawRoute(); renderNav();
+  toast('Route ended', () => { Object.assign(S, prev); drawRoute(); renderNav(); });
+}
+function openMaps() {
+  const ids = S.route.ids.slice(S.leg * LEG_SIZE, (S.leg + 1) * LEG_SIZE).map(id => byId.get(id));
+  const o = S.leg === 0 ? S.start : byId.get(S.route.ids[S.leg * LEG_SIZE - 1]);
+  const last = (S.leg + 1) * LEG_SIZE >= S.route.ids.length;
+  const dest = last ? S.end : ids.pop();
+  const ll = p => `${p.lat},${p.lon}`;
+  const mode = { foot: 'walking', bicycle: 'bicycling', car: 'driving' }[S.profile];
+  window.open(`https://www.google.com/maps/dir/?api=1&origin=${ll(o)}&destination=${ll(dest)}&waypoints=${ids.map(ll).join('|')}&travelmode=${mode}`, '_blank', 'noopener');
+}
+
+// ── Popovers ──────────────────────────────────────────────────────────────
+let openPop = null, popReturn = null;
+function openPopover(which) {
+  closePopover();
+  openPop = document.getElementById(`pop-${which}`);
+  popReturn = document.activeElement;
+  document.getElementById('scrim').hidden = false;
+  openPop.hidden = false;
+  if (which === 'avatar') { document.getElementById('name-input').value = S.name || ''; renderStatus(); }
+  openPop.querySelector('input, button').focus();
+}
+function closePopover() {
+  if (!openPop) return;
+  openPop.hidden = true; document.getElementById('scrim').hidden = true; openPop = null;
+  if (popReturn) popReturn.focus();
+}
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (openPop) closePopover(); else if (S.picking) pickCancel(); else if (S.lasso) setLasso(S.lasso);
+});
+document.querySelectorAll('[data-hl]').forEach(i => i.onchange = () => { S.hl[i.dataset.hl] = i.checked; restyle(); });
+document.querySelectorAll('#theme-switch button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#theme-switch button').forEach(x => x.setAttribute('aria-pressed', x === b));
+  tiles.setUrl(TILES[b.dataset.theme]);
+});
+document.getElementById('minimap').onchange = e => toast(`Mini-map ${e.target.checked ? 'on' : 'off'} (mockup)`);
+
+// ── Identity ──────────────────────────────────────────────────────────────
+function renderAvatar() {
+  const btn = document.getElementById('avatar-btn');
+  btn.innerHTML = (S.name ? S.name[0].toUpperCase() : '<span class="icon icon-user" aria-hidden="true"></span>')
+    + '<span class="status-dot" aria-hidden="true"></span>';
+  btn.setAttribute('aria-label', S.name ? `${S.name} — profile and settings` : 'Add your name — profile and settings');
+}
+function renderStatus() {
+  document.getElementById('status-text').textContent = `${PHONES.length} phones · updated ${S.updatedAt.toLocaleTimeString()}`;
+}
+function saveName(v, msg) {
+  S.name = v.trim() || null; persist(); renderAvatar(); restyle(); renderPlan(); renderStatus();
+  toast(msg || (S.name ? `Phones coloured for ${S.name}` : 'Name removed — phones uncoloured'));
+}
+function reloadPhones() { S.updatedAt = new Date(); renderStatus(); toast('Phones reloaded'); }
+function finishOnboarding(v) {
+  document.getElementById('onboard').hidden = true;
+  try { localStorage.setItem(STORE + '_seen', '1'); } catch (e) {}
+  saveName(v, v.trim() ? null : 'Browsing without a name. Add it any time from the top corner.');
+}
+function replayOnboarding() {
+  closePopover();
+  document.getElementById('onboard-name').value = S.name || '';
+  document.getElementById('onboard').hidden = false;
+  document.getElementById('onboard-name').focus();
+}
+
+// ── Toast with optional undo ──────────────────────────────────────────────
+let toastTimer = null;
+function toast(msg, undo) {
+  const el = document.getElementById('toast'), btn = document.getElementById('toast-undo');
+  document.getElementById('toast-msg').textContent = msg;
+  btn.hidden = !undo;
+  btn.onclick = () => { el.hidden = true; undo(); };
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, undo ? 6000 : 2500);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+renderAvatar(); renderPlan(); renderNav();
+let seen = false; try { seen = !!localStorage.getItem(STORE + '_seen'); } catch (e) {}
+if (!seen) { document.getElementById('onboard').hidden = false; document.getElementById('onboard-name').focus(); }
+</script>
+</body>
+</html>
