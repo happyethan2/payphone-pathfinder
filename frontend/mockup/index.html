@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Pathfinder redesign mockup</title>
 <!-- Throwaway design mockup (direction B: map-first, Plan → Navigate).
-     Fake phone data, no backend calls except /api/config.js for the tile key. -->
+     Fake phone data and a fake solver. Address search uses the public Photon API;
+     the real app will use a self-hosted Photon behind /api/geocode (same request format). -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="../fonts/satoshi.css">
 <link rel="stylesheet" href="../styles.css">
@@ -20,6 +21,9 @@
   .icon-clock    { --icon: var(--i-clock); }
   .icon-chevron-down { --icon: var(--i-chevron-down); }
   .icon-share    { --icon: var(--i-share); }
+  .icon-gps      { --icon: var(--i-gps); }
+  .icon-pin      { --icon: var(--i-pin); }
+  .icon-loop     { --icon: var(--i-loop); }
 
   /* ── Floating map controls ─────────────────────────────────── */
   .map-btn {
@@ -35,12 +39,13 @@
 
   #tool-dock { position: fixed; z-index: 900; left: 16px; bottom: calc(var(--sheet-h, 160px) + 12px);
     display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+  .dock-row { display: flex; align-items: center; gap: 12px; }
   .segmented { display: flex; padding: 3px; gap: 3px; background: var(--raised); border: 1px solid var(--border); border-radius: 12px; }
   .segmented button { border: 0; background: transparent; min-height: 38px; padding: 8px 12px; border-radius: 9px; color: var(--muted); }
   .segmented button[aria-pressed=true] { background: var(--accent-surface); color: #d5e5f7; }
   #tool-dock .segmented { background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.3); border-radius: 22px; }
   #tool-dock .segmented button { flex: none; border-radius: 18px; padding: 8px 14px; }
-  #tool-dock .segmented button.remove[aria-pressed=true] { background: #35211f; color: var(--danger); }
+  .dock-btn { flex: none; min-height: 44px; padding: 8px 16px; border-radius: 22px; background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.3); }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip { flex: none; min-height: 34px; padding: 6px 12px; border-radius: 17px; font-size: 13px;
     background: var(--surface); color: var(--muted); box-shadow: 0 3px 12px rgba(0,0,0,.25); }
@@ -61,9 +66,8 @@
 
   #plan-summary { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 0 12px; border: 0;
     background: transparent; justify-content: space-between; text-align: left; min-height: 0; }
-  #plan-summary:hover { background: transparent; }
-  #plan-summary .line { font-size: 15px; font-weight: 500; color: var(--text); }
-  #plan-summary .hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  #plan-summary .line { display: block; font-size: 15px; font-weight: 500; color: var(--text); }
+  #plan-summary .hint { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
   #sheet.full #plan-summary .icon { transform: rotate(180deg); }
   #plan-details { display: none; }
   #sheet.full #plan-details { display: block; }
@@ -73,18 +77,23 @@
   .field-head .sec-title { margin: 0; }
   .text-btn { flex: none; min-height: 32px; padding: 4px 8px; margin-right: -8px; border: 0; background: transparent;
     color: var(--accent); font-weight: 500; }
-  .text-btn:hover:not(:disabled) { background: var(--raised); border: 0; color: var(--accent); }
-  .row-btn { width: 100%; justify-content: flex-start; gap: 12px; background: transparent; border: 0;
-    border-radius: 8px; padding: 8px; margin: 0 -8px; width: calc(100% + 16px); text-align: left; }
-  .row-btn .k { width: 40px; color: var(--muted); font-size: 13px; }
-  .row-btn .v { flex: 1; color: var(--text); font-size: 14px; }
-  .row-btn .v.unset { color: var(--muted); }
-  .dot-start, .dot-end { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-  .dot-start { background: #2ecc71; } .dot-end { background: #e74c3c; }
   .count { font-size: 14px; color: var(--text); }
   .note { font-size: 12px; color: var(--muted); line-height: 1.5; margin-top: 6px; }
-  #mode-switch { margin-bottom: 4px; }
   #mode-switch button, #profile-switch button { flex: 1; }
+
+  /* From / To search */
+  .place { display: flex; align-items: center; gap: 10px; }
+  .place + .place, .suggest + .place { margin-top: 8px; }
+  .place .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .place input { flex: 1; min-width: 0; }
+  .suggest { list-style: none; margin: 6px 0 0 20px; background: var(--raised); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .suggest li { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px 12px; cursor: pointer; }
+  .suggest li + li { border-top: 1px solid var(--divider); }
+  .suggest li[aria-selected=true] { background: var(--hover); }
+  .suggest .icon { color: var(--muted); }
+  .suggest .t { display: block; font-size: 14px; color: var(--text); }
+  .suggest .s { display: block; font-size: 12px; color: var(--muted); margin-top: 1px; }
+  .suggest .msg { color: var(--muted); font-size: 13px; cursor: default; }
 
   .cta-row { display: flex; gap: 8px; padding-top: 4px; }
   .go { flex: 1; }
@@ -95,14 +104,16 @@
   .nav-head .wp { width: 36px; height: 36px; font-size: 15px; flex: none; }
   .nav-title { font-size: 17px; font-weight: 700; color: var(--text); }
   .nav-stats { font-size: 13px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
-  .leg-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;
-    background: var(--raised); border-radius: 8px; padding: 2px; }
-  .leg-row button { flex: none; width: 40px; min-height: 36px; border: 0; background: transparent; padding: 0; }
-  .leg-row span { font-size: 13px; color: var(--text); }
+  /* Wide halves so the leg arrows are easy to hit; swiping the card also changes leg */
+  .leg-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; margin-bottom: 10px;
+    background: var(--raised); border-radius: 8px; }
+  .leg-row button { width: 100%; min-height: 44px; border: 0; background: transparent; padding: 0 12px; border-radius: 8px; }
+  .leg-row button:first-child { justify-content: flex-start; }
+  .leg-row button:last-child { justify-content: flex-end; }
+  .leg-row span { font-size: 13px; color: var(--text); font-variant-numeric: tabular-nums; pointer-events: none; }
   .nav-actions { display: flex; gap: 8px; margin-top: 8px; }
   .nav-actions button { background: transparent; }
   #end-route-btn { color: var(--danger); }
-  #end-route-btn:hover:not(:disabled) { background: #35211f; border-color: var(--danger); }
 
   /* ── Popovers (avatar, layers): bottom sheet on mobile, dropdown on desktop ── */
   .scrim { position: fixed; inset: 0; z-index: 1150; background: rgba(0,0,0,.45); }
@@ -149,9 +160,15 @@
   #onboard .text-btn { width: 100%; margin: 8px 0 0; justify-content: center; }
   body.picking #tool-dock, body.picking #compass-btn { display: none; }
   @media (max-width: 639px) { body.sheet-full #tool-dock, body.sheet-full #compass-btn { display: none; } }
-  #plan-summary .line, #plan-summary .hint { display: block; }
   .mock-tag { position: fixed; z-index: 800; left: 50%; top: max(16px, env(safe-area-inset-top)); transform: translateX(-50%);
     font-size: 11px; color: var(--muted); background: var(--surface); padding: 3px 8px; border-radius: 8px; opacity: .85; pointer-events: none; }
+
+  @media (hover: hover) {
+    .text-btn:hover:not(:disabled) { background: var(--raised); border: 0; color: var(--accent); }
+    #plan-summary:hover { background: transparent; }
+    #end-route-btn:hover:not(:disabled) { background: #35211f; border-color: var(--danger); }
+    .suggest li:not(.msg):hover { background: var(--hover); }
+  }
 
   @media (min-width: 640px) {
     #sheet { top: 16px; left: 16px; right: auto; bottom: auto; width: 360px; border-radius: 12px;
@@ -170,7 +187,7 @@
 </head>
 <body>
 <div id="map"></div>
-<div class="mock-tag">Mockup · fake data</div>
+<div class="mock-tag">Mockup · Fake Data</div>
 
 <!-- Top-right: identity + layers (Google Maps-style corner) -->
 <div id="top-right">
@@ -181,14 +198,17 @@
 <!-- Map tools: selection lives on the map, not in the panel -->
 <div id="tool-dock">
   <div id="lasso-chips" class="chips" hidden>
-    <button class="chip" data-filter="onlyNew" aria-pressed="false"><span class="icon icon-check" aria-hidden="true"></span>Only new</button>
-    <button class="chip" data-filter="skipOwned" aria-pressed="false"><span class="icon icon-check" aria-hidden="true"></span>Skip owned</button>
-    <button class="chip" data-filter="skipCell" aria-pressed="false"><span class="icon icon-check" aria-hidden="true"></span>Skip cellmates</button>
+    <button class="chip" data-filter="onlyNew" aria-pressed="false"><span class="icon icon-check" aria-hidden="true"></span>Only New</button>
+    <button class="chip" data-filter="skipOwned" aria-pressed="false"><span class="icon icon-check" aria-hidden="true"></span>Skip Owned</button>
+    <button class="chip" data-filter="skipCell" aria-pressed="false"><span class="icon icon-check" aria-hidden="true"></span>Skip Cellmates</button>
   </div>
   <div id="lasso-hint" hidden>Draw around phones</div>
-  <div class="segmented" role="group" aria-label="Map selection tools">
-    <button id="lasso-add" aria-pressed="false" onclick="setLasso('add')"><span class="icon icon-lasso" aria-hidden="true"></span>Lasso</button>
-    <button id="lasso-remove" class="remove" aria-pressed="false" onclick="setLasso('remove')"><span class="icon icon-deselect" aria-hidden="true"></span>Deselect</button>
+  <div class="dock-row">
+    <div class="segmented" role="group" aria-label="Map selection tools">
+      <button id="lasso-add" aria-pressed="false" onclick="setLasso('add')"><span class="icon icon-lasso" aria-hidden="true"></span>Lasso</button>
+      <button id="lasso-remove" aria-pressed="false" onclick="setLasso('remove')"><span class="icon icon-deselect" aria-hidden="true"></span>Deselect</button>
+    </div>
+    <button id="dock-clear" class="dock-btn" onclick="clearSelection()" hidden>Clear</button>
   </div>
 </div>
 
@@ -201,7 +221,7 @@
   <button id="grabber" aria-label="Expand plan" onclick="toggleSheet()"></button>
 
   <!-- PLAN -->
-  <section id="plan-view" class="view">
+  <section id="plan-view">
     <button id="plan-summary" onclick="toggleSheet()" aria-expanded="false">
       <span><span class="line" id="summary-line"></span><span class="hint" id="summary-hint"></span></span>
       <span class="icon icon-chevron-down" aria-hidden="true"></span>
@@ -209,9 +229,9 @@
 
     <div id="plan-details">
       <div class="field">
-        <div class="segmented" id="mode-switch" role="group" aria-label="How to choose phones">
-          <button data-mode="pick" aria-pressed="true">I'll pick</button>
-          <button data-mode="auto" aria-pressed="false">Pick for me</button>
+        <div class="segmented" id="mode-switch" role="group" aria-label="Planning mode">
+          <button data-mode="pick" aria-pressed="true">Routing</button>
+          <button data-mode="auto" aria-pressed="false">Orienteering</button>
         </div>
       </div>
       <div class="field">
@@ -222,47 +242,52 @@
         </div>
       </div>
       <div class="field">
-        <div class="field-head"><div class="sec-title">Start &amp; end</div>
+        <div class="field-head"><div class="sec-title">Start &amp; End</div>
           <button class="text-btn" id="clear-ends" onclick="clearEnds()">Clear</button></div>
-        <button class="row-btn" onclick="startPicking('start')"><span class="dot-start"></span><span class="k">Start</span><span class="v" id="start-v"></span><span class="icon icon-chevron-right" aria-hidden="true"></span></button>
-        <button class="row-btn" onclick="startPicking('end')"><span class="dot-end"></span><span class="k">End</span><span class="v" id="end-v"></span><span class="icon icon-chevron-right" aria-hidden="true"></span></button>
+        <div class="place"><span class="dot" style="background:#2ecc71"></span>
+          <input type="text" id="start-input" data-which="start" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="start-list"
+                 aria-label="Start" placeholder="Search for a start" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+        <ul class="suggest" id="start-list" role="listbox" aria-label="Start suggestions" hidden></ul>
+        <div class="place"><span class="dot" style="background:#e74c3c"></span>
+          <input type="text" id="end-input" data-which="end" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="end-list"
+                 aria-label="End" placeholder="Search for an end" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+        <ul class="suggest" id="end-list" role="listbox" aria-label="End suggestions" hidden></ul>
       </div>
       <div class="field" id="sel-field">
-        <div class="field-head"><div class="sec-title">Phones</div>
-          <button class="text-btn" id="clear-sel" onclick="clearSelection()">Clear</button></div>
+        <div class="field-head"><div class="sec-title">Phones</div></div>
         <div class="count" id="sel-count"></div>
-        <div class="note">Tap phones on the map, or use Lasso to draw around a group.</div>
+        <div class="note">Recommended to use lasso for selecting phones</div>
       </div>
       <div class="field" id="arrive-field" hidden>
-        <div class="field-head"><div class="sec-title">Arrive at the end by</div></div>
+        <div class="field-head"><div class="sec-title">Arrive By</div></div>
         <div class="time-field"><span class="icon icon-clock" aria-hidden="true" style="margin-right:8px;color:var(--muted)"></span>
           <input type="time" id="arrive-by" aria-label="Arrive by"></div>
-        <div class="note" id="auto-note">Picks the most phones you can reach in time.</div>
+        <div class="note" id="auto-note"></div>
       </div>
     </div>
 
     <div class="cta-row">
       <button class="go" id="find-btn" onclick="findRoute()"></button>
-      <button id="share-btn" aria-label="Copy share link" title="Copy share link" onclick="toast('Share link copied')"><span class="icon icon-share" aria-hidden="true"></span></button>
+      <button id="share-btn" aria-label="Copy share link" title="Copy Share Link" onclick="toast('Share link copied')"><span class="icon icon-share" aria-hidden="true"></span></button>
     </div>
   </section>
 
   <!-- NAVIGATE -->
-  <section id="nav-view" class="view" hidden>
+  <section id="nav-view" hidden>
     <div class="nav-head">
       <div class="wp wp-active" id="nav-badge"></div>
       <div><div class="nav-title" id="nav-title"></div><div class="nav-stats" id="nav-stats"></div></div>
     </div>
     <div class="leg-row" id="leg-row">
-      <button aria-label="Previous leg" onclick="changeLeg(-1)"><span class="icon icon-chevron-left" aria-hidden="true"></span></button>
+      <button id="leg-prev" aria-label="Previous leg" onclick="changeLeg(-1)"><span class="icon icon-chevron-left" aria-hidden="true"></span></button>
       <span id="leg-label"></span>
-      <button aria-label="Next leg" onclick="changeLeg(1)"><span class="icon icon-chevron-right" aria-hidden="true"></span></button>
+      <button id="leg-next" aria-label="Next leg" onclick="changeLeg(1)"><span class="icon icon-chevron-right" aria-hidden="true"></span></button>
     </div>
     <button class="go" style="width:100%" onclick="openMaps()">Open in Google Maps <span class="icon icon-external" aria-hidden="true"></span></button>
     <div class="nav-actions">
-      <button onclick="skipStop()"><span class="icon icon-arrow-right" aria-hidden="true"></span>Skip</button>
+      <button id="skip-stop-btn" onclick="skipStop()"><span class="icon icon-arrow-right" aria-hidden="true"></span>Skip</button>
       <button id="undo-stop-btn" onclick="undoStop()"><span class="icon icon-undo" aria-hidden="true"></span>Undo</button>
-      <button id="end-route-btn" onclick="endRoute()">End route</button>
+      <button id="end-route-btn" onclick="endRoute()">End Route</button>
     </div>
   </section>
 </div>
@@ -272,20 +297,20 @@
 <div class="popover" id="pop-avatar" role="dialog" aria-modal="true" aria-labelledby="pop-avatar-h" hidden>
   <div class="popover-head"><h2 id="pop-avatar-h">You</h2><button class="text-btn" onclick="closePopover()">Done</button></div>
   <div class="field">
-    <div class="sec-title">Payphone Tag name</div>
+    <div class="sec-title">Payphone Tag Name</div>
     <div class="name-row"><input type="text" id="name-input" placeholder="Your in-game name" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="Payphone Tag name">
       <button onclick="saveName(document.getElementById('name-input').value)">Save</button></div>
-    <div class="status-line" id="status-line"><span class="d"></span><span id="status-text"></span></div>
+    <div class="status-line"><span class="d"></span><span id="status-text"></span></div>
     <div class="note">Your name colours phones by who holds them. Without it, phones load uncoloured.</div>
   </div>
   <div class="field">
-    <button style="width:100%" onclick="reloadPhones()">Reload phones</button>
+    <button style="width:100%" onclick="reloadPhones()">Reload Phones</button>
   </div>
   <div class="field">
-    <label class="switch-row"><span class="label">Auto-rotate map</span><input type="checkbox" role="switch" id="autorotate" checked></label>
+    <label class="switch-row"><span class="label">Auto-Rotate Map</span><input type="checkbox" role="switch" id="autorotate" checked></label>
     <div class="note">The compass button locks the map to the direction you're facing.</div>
   </div>
-  <div class="field"><button class="text-btn" onclick="replayOnboarding()">Replay first-run prompt (mockup)</button></div>
+  <div class="field"><button class="text-btn" onclick="replayOnboarding()">Replay First-Run Prompt (Mockup)</button></div>
 </div>
 
 <!-- Layers popover -->
@@ -293,8 +318,8 @@
   <div class="popover-head"><h2 id="pop-layers-h">Map</h2><button class="text-btn" onclick="closePopover()">Done</button></div>
   <div class="field">
     <div class="sec-title">Highlight</div>
-    <label class="switch-row"><span class="label"><span class="icon icon-camera" aria-hidden="true"></span>Phones with a wiki photo</span><input type="checkbox" role="switch" data-hl="photo"></label>
-    <label class="switch-row"><span class="label"><span class="icon icon-magic" aria-hidden="true"></span>Phones you've never captured</span><input type="checkbox" role="switch" data-hl="isNew"></label>
+    <label class="switch-row"><span class="label"><span class="icon icon-camera" aria-hidden="true"></span>Phones with a Wiki Photo</span><input type="checkbox" role="switch" data-hl="photo"></label>
+    <label class="switch-row"><span class="label"><span class="icon icon-magic" aria-hidden="true"></span>Phones You've Never Captured</span><input type="checkbox" role="switch" data-hl="isNew"></label>
   </div>
   <div class="field">
     <div class="sec-title">Legend</div>
@@ -303,26 +328,23 @@
       <div class="legend-item"><span class="legend-mine dot"></span>Mine</div>
       <div class="legend-item"><span class="legend-cellmate dot"></span>Cellmate</div>
       <div class="legend-item"><span class="legend-hostile dot"></span>Hostile</div>
-      <div class="legend-item"><span class="legend-photo dot"></span>Wiki photo</div>
+      <div class="legend-item"><span class="legend-photo dot"></span>Wiki Photo</div>
       <div class="legend-item"><span class="legend-new dot"></span>New</div>
     </div>
   </div>
   <div class="field">
-    <div class="sec-title">Map style</div>
+    <div class="sec-title">Map Style</div>
     <div class="segmented" id="theme-switch" role="group" aria-label="Map style">
       <button data-theme="dark" aria-pressed="true" style="flex:1">Dark</button>
       <button data-theme="light" aria-pressed="false" style="flex:1">Light</button>
     </div>
-    <label class="switch-row" style="margin-top:8px"><span class="label">Mini-map</span><input type="checkbox" role="switch" id="minimap"></label>
+    <label class="switch-row" style="margin-top:8px"><span class="label">Mini-Map</span><input type="checkbox" role="switch" id="minimap"></label>
   </div>
 </div>
 
-<!-- Endpoint picking -->
+<!-- Endpoint picking on the map -->
 <div id="pick-banner" hidden></div>
-<div id="pick-actions" hidden>
-  <button onclick="pickSkip()">Skip</button>
-  <button onclick="pickCancel()">Cancel</button>
-</div>
+<div id="pick-actions" hidden><button onclick="pickCancel()">Cancel</button></div>
 
 <div id="toast" role="status" hidden><span id="toast-msg"></span><button id="toast-undo" hidden>Undo</button></div>
 
@@ -333,7 +355,7 @@
     <p>Enter your Payphone Tag name to colour phones by who holds them. You can add or change it later from the button in the top corner.</p>
     <input type="text" id="onboard-name" placeholder="Your in-game name" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="Payphone Tag name">
     <button class="go" onclick="finishOnboarding(document.getElementById('onboard-name').value)">Continue</button>
-    <button class="text-btn" onclick="finishOnboarding('')">Browse without a name</button>
+    <button class="text-btn" onclick="finishOnboarding('')">Browse Without a Name</button>
   </div>
 </div>
 
@@ -350,6 +372,9 @@
     clock: '<circle cx="9" cy="9" r="6.5"/><path d="M9 5.5V9l2.5 1.5"/>',
     'chevron-down': '<path d="M4 7l5 5 5-5"/>',
     share: '<path d="M9 2v10M5 6l4-4 4 4M3 10v5h12v-5"/>',
+    gps: '<circle cx="9" cy="9" r="5"/><circle cx="9" cy="9" r="1.5"/><path d="M9 1.5v2.5M9 14v2.5M1.5 9h2.5M14 9h2.5"/>',
+    pin: '<path d="M9 16s5-4.6 5-8.5a5 5 0 00-10 0C4 11.4 9 16 9 16z"/><circle cx="9" cy="7.5" r="1.8"/>',
+    loop: '<path d="M3 9a6 6 0 0110.5-4M15 9a6 6 0 01-10.5 4M13.5 1.5V5H10M4.5 16.5V13H8"/>',
   };
   for (const [k, body] of Object.entries(icons)) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" fill="none" stroke="black" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
@@ -361,6 +386,7 @@
 const STORE = 'pp_mockup_v1';
 const COLORS = { uncaptured: '#aaaaaa', mine: '#2ecc71', cellmate: '#3498db', hostile: '#e74c3c' };
 const SPEED_KMH = { foot: 5, bicycle: 15, car: 35 };
+const BY = { foot: 'on foot', bicycle: 'by bike', car: 'by car' };
 const LEG_SIZE = 9;  // Google Maps waypoint limit per leg
 const CENTRE = [-38.147, 144.36];  // Geelong
 
@@ -396,8 +422,8 @@ const TILES = {
   dark: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png${Q}`,
   light: `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png${Q}`,
 };
-const map = L.map('map', { zoomControl: false, preferCanvas: true, attributionControl: true }).setView(CENTRE, 14);
-let tiles = L.tileLayer(TILES.dark, { attribution: '© OpenStreetMap © CARTO', maxZoom: 19 }).addTo(map);
+const map = L.map('map', { zoomControl: false, preferCanvas: true }).setView(CENTRE, 14);
+const tiles = L.tileLayer(TILES.dark, { attribution: '© OpenStreetMap © CARTO', maxZoom: 19 }).addTo(map);
 const markers = new Map();
 const routeLayer = L.layerGroup().addTo(map);
 let startMarker = null, endMarker = null;
@@ -420,7 +446,7 @@ function restyle() { for (const p of PHONES) markers.get(p.id).setStyle(styleFor
 map.on('zoomend', restyle);
 
 function onPhoneTap(p) {
-  if (S.picking) return setEndpoint(S.picking, { lat: p.lat, lon: p.lon });
+  if (S.picking) return setEndpoint(S.picking, { lat: p.lat, lon: p.lon, label: `Phone #${p.id}` });
   if (S.route) return;
   S.sel.has(p.id) ? S.sel.delete(p.id) : S.sel.add(p.id);
   markers.get(p.id).setStyle(styleFor(p));
@@ -428,7 +454,7 @@ function onPhoneTap(p) {
 }
 
 map.on('click', e => {
-  if (S.picking) return setEndpoint(S.picking, { lat: e.latlng.lat, lon: e.latlng.lng });
+  if (S.picking) return pickOnMap(S.picking, e.latlng);
   if (S.sheetFull && innerWidth < 640) setSheetFull(false);
 });
 
@@ -484,6 +510,115 @@ function inPoly(pt, poly) {
   }
   return inside;
 }
+function clearSelection() {
+  const prev = new Set(S.sel);
+  S.sel.clear(); restyle(); renderPlan();
+  toast(`${prev.size} phones cleared`, () => { S.sel = prev; restyle(); renderPlan(); });
+}
+
+// ── Address search (Photon) ───────────────────────────────────────────────
+// ponytail: public Photon straight from the browser for the mockup; the real app
+// proxies a self-hosted Photon through /api/geocode (identical request format).
+const GEOCODER = 'https://photon.komoot.io';
+const AU_BBOX = '112.9,-43.8,153.7,-10.6';
+function placeFromFeature(f) {
+  const p = f.properties, [lon, lat] = f.geometry.coordinates;
+  const street = [p.housenumber, p.street].filter(Boolean).join(' ');
+  const title = p.name || street || p.city || 'Unnamed place';
+  const sub = [p.name ? street : '', p.city || p.locality || p.district, p.state].filter(Boolean).join(', ');
+  return { lat, lon, title, sub };
+}
+async function geocode(q, signal) {
+  const c = map.getCenter();
+  const r = await fetch(`${GEOCODER}/api/?q=${encodeURIComponent(q)}&limit=5&lang=en&bbox=${AU_BBOX}&lat=${c.lat}&lon=${c.lng}`, { signal });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return (await r.json()).features.map(placeFromFeature);
+}
+async function reverseLabel(pt) {
+  try {
+    const r = await fetch(`${GEOCODER}/reverse?lat=${pt.lat}&lon=${pt.lon}&lang=en`);
+    const f = (await r.json()).features[0];
+    return f ? placeFromFeature(f).title : null;
+  } catch (e) { return null; }
+}
+
+function setupPlaceInput(input) {
+  const which = input.dataset.which;
+  const list = document.getElementById(`${which}-list`);
+  let items = [], active = -1, timer = null, ctrl = null;
+
+  const fixedItems = () => [
+    { icon: 'gps', title: 'My Location', run: () => useMyLocation(which) },
+    ...(which === 'end' && S.start ? [{ icon: 'loop', title: 'Same as Start', run: () => setEndpoint('end', { ...S.start }) }] : []),
+    { icon: 'pin', title: 'Choose on Map', run: () => startPicking(which) },
+  ];
+  function show(next) {
+    items = next; active = -1;
+    list.replaceChildren(...items.map((it, i) => {
+      const li = document.createElement('li');
+      li.id = `${which}-opt-${i}`;
+      if (it.msg) { li.className = 'msg'; li.textContent = it.msg; return li; }
+      li.setAttribute('role', 'option');
+      const icon = document.createElement('span'); icon.className = `icon icon-${it.icon}`; icon.setAttribute('aria-hidden', 'true');
+      const text = document.createElement('span');
+      const t = document.createElement('span'); t.className = 't'; t.textContent = it.title;
+      text.append(t);
+      if (it.sub) { const s = document.createElement('span'); s.className = 's'; s.textContent = it.sub; text.append(s); }
+      li.append(icon, text);
+      li.onclick = () => choose(i);
+      return li;
+    }));
+    list.hidden = !items.length;
+    input.setAttribute('aria-expanded', String(!list.hidden));
+    input.removeAttribute('aria-activedescendant');
+  }
+  function hide() { list.hidden = true; input.setAttribute('aria-expanded', 'false'); input.value = S[which]?.label || ''; }
+  function choose(i) { const it = items[i]; if (!it || it.msg) return; hide(); input.blur(); it.run(); }
+  function setActive(step) {
+    const opts = items.map((it, k) => it.msg ? -1 : k).filter(k => k >= 0);
+    if (!opts.length) return;
+    const at = opts.indexOf(active);
+    active = at < 0 ? opts[step > 0 ? 0 : opts.length - 1] : opts[(at + step + opts.length) % opts.length];
+    list.querySelectorAll('li').forEach((li, k) => li.setAttribute('aria-selected', String(k === active)));
+    input.setAttribute('aria-activedescendant', `${which}-opt-${active}`);
+  }
+
+  input.addEventListener('focus', () => { input.select(); show(fixedItems()); if (innerWidth < 640) setSheetFull(true); });
+  // Delay so a tap on a suggestion lands before the list disappears
+  input.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== input) hide(); }, 150));
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    clearTimeout(timer); ctrl?.abort();
+    if (q.length < 3) return show(fixedItems());
+    timer = setTimeout(async () => {
+      ctrl = new AbortController();
+      show([{ msg: 'Searching…' }]);
+      try {
+        const places = await geocode(q, ctrl.signal);
+        show(places.length
+          ? [...places.map(p => ({ icon: 'pin', title: p.title, sub: p.sub, run: () => setEndpoint(which, { lat: p.lat, lon: p.lon, label: p.title }) })),
+             { icon: 'pin', title: 'Choose on Map', run: () => startPicking(which) }]
+          : [{ msg: 'No matches in Australia' }, ...fixedItems()]);
+      } catch (e) {
+        if (e.name !== 'AbortError') show([{ msg: 'Search unavailable — choose on the map instead' }, ...fixedItems()]);
+      }
+    }, 250);
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setActive(e.key === 'ArrowDown' ? 1 : -1); }
+    else if (e.key === 'Enter') { e.preventDefault(); choose(active >= 0 ? active : items.findIndex(it => !it.msg)); }
+    else if (e.key === 'Escape') { e.stopPropagation(); hide(); input.blur(); }
+  });
+}
+document.querySelectorAll('[role=combobox]').forEach(setupPlaceInput);
+
+function useMyLocation(which) {
+  if (!navigator.geolocation) return toast("Location isn't available on this device");
+  navigator.geolocation.getCurrentPosition(
+    pos => setEndpoint(which, { lat: pos.coords.latitude, lon: pos.coords.longitude, label: 'My Location' }),
+    () => toast("Couldn't get your location — check location permissions"),
+    { enableHighAccuracy: true, timeout: 10000 });
+}
 
 // ── Endpoints ─────────────────────────────────────────────────────────────
 function endpointIcon(which) {
@@ -496,26 +631,30 @@ function drawEndpoints() {
   startMarker = S.start && L.marker([S.start.lat, S.start.lon], { icon: endpointIcon('start'), zIndexOffset: 500 }).addTo(map);
   endMarker = S.end && L.marker([S.end.lat, S.end.lon], { icon: endpointIcon('end'), zIndexOffset: 400 }).addTo(map);
 }
+function setEndpoint(which, pt) {
+  const wasPicking = !!S.picking;
+  S[which] = pt; drawEndpoints();
+  if (wasPicking) stopPicking();
+  renderPlan();
+  if (!wasPicking && !map.getBounds().contains([pt.lat, pt.lon])) map.panTo([pt.lat, pt.lon]);
+}
+function pickOnMap(which, latlng) {
+  const pt = { lat: latlng.lat, lon: latlng.lng, label: 'Dropped Pin' };
+  setEndpoint(which, pt);
+  reverseLabel(pt).then(label => { if (label && S[which] === pt) { pt.label = label; renderPlan(); } });
+}
 function startPicking(which) {
   if (S.lasso) setLasso(S.lasso);
-  S.pickBackup = { start: S.start, end: S.end, both: which === 'start' };
+  S.pickBackup = { start: S.start, end: S.end };
   S.picking = which;
   document.body.classList.add('picking'); syncSheetH();
-  document.getElementById('pick-banner').hidden = false;
+  const banner = document.getElementById('pick-banner');
+  banner.innerHTML = which === 'start'
+    ? 'Tap the map to set your <b style="color:#2ecc71">start</b>'
+    : 'Tap the map to set your <b style="color:#e74c3c">end</b>';
+  banner.hidden = false;
   document.getElementById('pick-actions').hidden = false;
-  renderPick();
 }
-function renderPick() {
-  document.getElementById('pick-banner').innerHTML = S.picking === 'start'
-    ? 'Tap your <b style="color:#2ecc71">start</b> on the map'
-    : 'Tap your <b style="color:#e74c3c">end</b> on the map';
-}
-function setEndpoint(which, pt) { S[which] = pt; drawEndpoints(); advancePick(); }
-function advancePick() {
-  if (S.picking === 'start' && S.pickBackup.both) { S.picking = 'end'; return renderPick(); }
-  stopPicking();
-}
-function pickSkip() { advancePick(); }
 function pickCancel() { S.start = S.pickBackup.start; S.end = S.pickBackup.end; drawEndpoints(); stopPicking(); }
 function stopPicking() {
   S.picking = null;
@@ -528,11 +667,6 @@ function clearEnds() {
   const prev = { start: S.start, end: S.end };
   S.start = S.end = null; drawEndpoints(); renderPlan();
   toast('Start and end cleared', () => { Object.assign(S, prev); drawEndpoints(); renderPlan(); });
-}
-function clearSelection() {
-  const prev = new Set(S.sel);
-  S.sel.clear(); restyle(); renderPlan();
-  toast(`${prev.size} phones cleared`, () => { S.sel = prev; restyle(); renderPlan(); });
 }
 
 // ── Sheet ─────────────────────────────────────────────────────────────────
@@ -553,7 +687,7 @@ function syncSheetH() {
 new ResizeObserver(syncSheetH).observe(sheet);
 addEventListener('resize', syncSheetH);
 
-// Swipe the grabber/summary to open or close
+// Swipe the grabber/summary up or down to open or close the plan
 {
   let y0 = null;
   for (const el of [document.getElementById('grabber'), document.getElementById('plan-summary')]) {
@@ -566,45 +700,41 @@ addEventListener('resize', syncSheetH);
 }
 
 // ── Plan ──────────────────────────────────────────────────────────────────
-function fmtPt(p) { return p ? `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}` : 'Tap to set'; }
-function sameSpot(a, b) { return a && b && Math.abs(a.lat - b.lat) < 1e-5 && Math.abs(a.lon - b.lon) < 1e-5; }
 function fmtTime(d) { return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
-const PROFILE_LABEL = { foot: 'Foot', bicycle: 'Bike', car: 'Car' };
-
 function planProblem() {
   if (!S.start || !S.end) return 'Set a start and end';
   if (S.mode === 'pick' && !S.sel.size) return 'Select phones on the map';
-  if (S.mode === 'auto' && !S.name) return 'Add your name to use Pick for me';
+  if (S.mode === 'auto' && !S.name) return 'Add your name to use orienteering';
   return null;
 }
 function renderPlan() {
   const auto = S.mode === 'auto';
   const t = document.getElementById('arrive-by').value;
-  const ends = !S.start || !S.end ? 'No start/end' : sameSpot(S.start, S.end) ? 'Round trip' : 'Start → End';
-  const what = auto ? `Pick for me by ${t ? fmtTime(new Date(`1970-01-01T${t}`)) : '—'}` : `${S.sel.size} phones`;
-  document.getElementById('summary-line').textContent = `${what} · ${PROFILE_LABEL[S.profile]} · ${ends}`;
+  const n = S.sel.size;
+  document.getElementById('summary-line').textContent = auto
+    ? `Orienteering ${BY[S.profile]}, arrive by ${t ? fmtTime(new Date(`1970-01-01T${t}`)) : '—'}`
+    : `Routing ${n} phone${n === 1 ? '' : 's'} ${BY[S.profile]}`;
   const problem = planProblem();
-  document.getElementById('summary-hint').textContent = problem || 'Tap to edit the plan';
+  document.getElementById('summary-hint').textContent = problem || 'Tap to edit';
 
   document.querySelectorAll('#mode-switch button').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === S.mode));
   document.querySelectorAll('#profile-switch button').forEach(b => b.setAttribute('aria-pressed', b.dataset.profile === S.profile));
   document.getElementById('sel-field').hidden = auto;
   document.getElementById('arrive-field').hidden = !auto;
   document.getElementById('auto-note').textContent = S.name
-    ? 'Picks the most phones you can capture before then.'
-    : 'Needs your name, so it can skip phones you already hold.';
-  document.getElementById('sel-count').textContent = S.sel.size ? `${S.sel.size} phones selected` : 'None selected';
-  document.getElementById('clear-sel').hidden = !S.sel.size;
+    ? 'Optimises for the most phones within your given time window'
+    : 'Needs your name, so it can skip phones you already hold';
+  document.getElementById('sel-count').textContent = n ? `${n} phone${n === 1 ? '' : 's'} selected` : 'No phones selected';
+  document.getElementById('dock-clear').hidden = !n;
   document.getElementById('clear-ends').hidden = !S.start && !S.end;
   for (const k of ['start', 'end']) {
-    const v = document.getElementById(`${k}-v`);
-    v.textContent = k === 'end' && sameSpot(S.start, S.end) ? 'Same as start' : fmtPt(S[k]);
-    v.classList.toggle('unset', !S[k]);
+    const input = document.getElementById(`${k}-input`);
+    if (document.activeElement !== input) input.value = S[k]?.label || '';
   }
   const find = document.getElementById('find-btn');
-  find.innerHTML = `${auto ? 'Find best route' : 'Find optimal route'} <span class="icon icon-arrow-right" aria-hidden="true"></span>`;
+  find.innerHTML = `${auto ? 'Find Best Route' : 'Find Optimal Route'} <span class="icon icon-arrow-right" aria-hidden="true"></span>`;
   find.disabled = !!problem;
-  document.getElementById('share-btn').disabled = !S.sel.size && !S.start;
+  document.getElementById('share-btn').disabled = !n && !S.start;
   document.getElementById('tool-dock').hidden = !!S.route || auto;
 }
 document.querySelectorAll('#mode-switch button').forEach(b => b.onclick = () => { S.mode = b.dataset.mode; if (S.mode === 'auto' && S.lasso) setLasso(S.lasso); renderPlan(); });
@@ -631,7 +761,7 @@ function nearestOrder(from, pool) {
 }
 function findRoute() {
   const btn = document.getElementById('find-btn');
-  btn.disabled = true; btn.textContent = 'Finding route…';
+  btn.disabled = true; btn.textContent = 'Finding Route…';
   setTimeout(() => {
     const speed = SPEED_KMH[S.profile];
     let stops;
@@ -692,17 +822,33 @@ function renderNav() {
   if (!inNav) return;
   const n = S.route.ids.length, done = S.progress >= n;
   document.getElementById('nav-badge').textContent = done ? '✓' : S.progress + 1;
-  document.getElementById('nav-title').textContent = done ? 'All stops visited' : `Stop ${S.progress + 1} of ${n}`;
+  document.getElementById('nav-title').textContent = done ? 'All Stops Visited' : `Stop ${S.progress + 1} of ${n}`;
   const eta = new Date(Date.now() + S.route.mins * 60000);
   document.getElementById('nav-stats').textContent =
     `${S.route.dist.toFixed(1)} km · ${Math.round(S.route.mins)} min · arrive ${fmtTime(eta)}`;
   const legs = legCount();
   document.getElementById('leg-row').hidden = legs < 2;
   const a = S.leg * LEG_SIZE + 1, b = Math.min(n, a + LEG_SIZE - 1);
-  document.getElementById('leg-label').textContent = `Leg ${S.leg + 1} of ${legs} · stops ${a}–${b}`;
+  document.getElementById('leg-label').textContent = `Leg ${S.leg + 1} of ${legs} · Stops ${a}–${b}`;
+  document.getElementById('leg-prev').disabled = S.leg === 0;
+  document.getElementById('leg-next').disabled = S.leg >= legs - 1;
   document.getElementById('undo-stop-btn').disabled = S.progress === 0;
+  document.getElementById('skip-stop-btn').disabled = done;
 }
 function changeLeg(d) { S.leg = Math.min(legCount() - 1, Math.max(0, S.leg + d)); renderNav(); }
+// Swipe left/right anywhere on the Navigate card to change leg
+{
+  let x0 = null, y0 = null;
+  const el = document.getElementById('nav-view');
+  el.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+  el.addEventListener('touchend', e => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+    x0 = y0 = null;
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) || legCount() < 2) return;
+    changeLeg(dx < 0 ? 1 : -1);  // swipe left → next leg
+  }, { passive: true });
+}
 function skipStop() {
   if (S.progress >= S.route.ids.length) return;
   S.skipped.add(S.route.ids[S.progress]); S.progress++;
