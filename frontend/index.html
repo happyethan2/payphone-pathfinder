@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Payphone Pathfinder</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.min.css">
@@ -14,202 +14,171 @@
 
 <div id="map"></div>
 
-<!-- ── Control panel (bottom sheet) ──────────────────────────── -->
-<div id="panel">
-  <div id="panel-handle">
-    <button id="panel-handle-pill" type="button" onclick="togglePanel()" aria-label="Open panel" aria-expanded="false" aria-controls="panel-tab-bar panel-body"></button>
-    <div id="panel-tab-bar">
-      <button id="btn-panel-tab-route"     class="panel-tab active" onclick="setPanelTab('route')">Route</button>
-      <button id="btn-panel-tab-orienteer" class="panel-tab"        onclick="setPanelTab('orienteer')">Orienteer</button>
-      <button id="btn-panel-tab-settings"  class="panel-tab"        onclick="setPanelTab('settings')">Settings</button>
-    </div>
+<!-- ── Top-right: you, map layers, compass ─────────────────────── -->
+<div id="top-right">
+  <button id="avatar-btn" class="map-btn" onclick="openPopover('avatar')" aria-label="Profile and settings"><span id="avatar-face"></span><span id="avatar-dot" class="status-dot" hidden></span></button>
+  <button id="layers-btn" class="map-btn" onclick="openPopover('layers')" aria-label="Map layers and legend"><span class="icon icon-layers" aria-hidden="true"></span></button>
+  <button id="fab-centre" class="map-btn" onclick="handleCompassTap()" aria-label="Centre on me" title="Tap: centre + lock heading  ·  Tap again: reset north">
+    <svg id="compass-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" style="transition:transform 0.15s;" aria-hidden="true">
+      <path d="M12 4 L14.5 13 L12 11.5 L9.5 13 Z" fill="#e74c3c"/>
+      <path d="M12 20 L9.5 13 L12 14.5 L14.5 13 Z" fill="#a8afb5"/>
+    </svg>
+  </button>
+  <div id="loc-badge">no GPS</div>
+</div>
+
+<!-- ── Selection tools: picking phones happens on the map ──────── -->
+<div id="tool-dock">
+  <div id="lasso-chips" class="chips" hidden>
+    <button class="chip" data-filter="lassoOnlyNew" aria-pressed="false" title="Lasso only picks phones you have never captured"><span class="icon icon-check" aria-hidden="true"></span>Only New</button>
+    <button class="chip" data-filter="lassoExcludeOwned" aria-pressed="false" title="Lasso skips phones you already own"><span class="icon icon-check" aria-hidden="true"></span>Skip Owned</button>
+    <button class="chip" data-filter="lassoExcludeCellmates" aria-pressed="false" title="Lasso skips phones held by your cellmates"><span class="icon icon-check" aria-hidden="true"></span>Skip Cellmates</button>
   </div>
-
-  <div id="panel-body">
-
-    <!-- Identity — visible on Route/Orienteer, hidden on Settings -->
-    <div id="section-identity">
-      <div class="sec-title">Identity</div>
-      <div class="btn-row">
-        <input type="text" id="username" aria-label="Username" placeholder="Username" autocomplete="off" autocorrect="off" autocapitalize="off" class="identity-input">
-        <button id="btn-load" onclick="loadPhones()" class="load-button">Load phones</button>
-      </div>
-      <div class="refresh-row">
-        <span id="refresh-dot" class="refresh-dot-base"></span>
-        <div id="load-status" class="load-status-base sub-text"></div>
-      </div>
+  <div id="lasso-hint" hidden></div>
+  <div class="dock-row">
+    <div class="segmented" role="group" aria-label="Map selection tools">
+      <button id="lasso-add" aria-pressed="false" onclick="toggleLasso('lasso')"><span class="icon icon-lasso" aria-hidden="true"></span>Lasso</button>
+      <button id="lasso-remove" aria-pressed="false" onclick="toggleLasso('lasso-deselect')"><span class="icon icon-deselect" aria-hidden="true"></span>Deselect</button>
     </div>
-
-    <!-- Hidden on Settings tab -->
-    <div id="section-route-common">
-
-    <!-- Legend -->
-    <div>
-      <div class="sec-title">Legend</div>
-      <div class="legend">
-        <div class="legend-item"><span class="legend-uncaptured dot"></span>Uncaptured</div>
-        <div class="legend-item"><span class="legend-mine dot"></span>Mine</div>
-        <div class="legend-item"><span class="legend-cellmate dot"></span>Cellmate</div>
-        <div class="legend-item"><span class="legend-hostile dot"></span>Hostile</div>
-        <div class="legend-item">
-          <span class="legend-photo dot"></span>Wiki photo
-        </div>
-        <div class="legend-item">
-          <span class="legend-new dot"></span>New
-        </div>
-      </div>
-    </div>
-
-    <!-- Transport -->
-    <div>
-      <div class="sec-title">Transport</div>
-      <div class="btn-row">
-        <button id="btn-foot"    onclick="setProfile('foot')"><span class="icon icon-walk" aria-hidden="true"></span><span class="button-label">Foot</span></button>
-        <button id="btn-bicycle" onclick="setProfile('bicycle')"><span class="icon icon-bike" aria-hidden="true"></span><span class="button-label">Bike</span></button>
-        <button id="btn-car"     onclick="setProfile('car')"     class="active"><span class="icon icon-car" aria-hidden="true"></span><span class="button-label">Car</span></button>
-      </div>
-    </div>
-
-    <!-- Start & End -->
-    <div>
-      <div class="sec-title">Start &amp; end</div>
-      <div class="btn-row">
-        <button id="btn-set-endpoints" onclick="startSetEndpoints()"><span class="icon icon-location" aria-hidden="true"></span><span class="button-label">Set start &amp; end</span></button>
-        <button id="btn-clear-endpoints" onclick="flashDanger('btn-clear-endpoints');clearEndpoints()"
-                class="danger icon-only" aria-label="Clear start and end"><span class="icon icon-close" aria-hidden="true"></span></button>
-      </div>
-    </div>
-
-    </div><!-- /#section-route-common -->
-
-    <!-- Route tab -->
-    <div id="panel-tab-route">
-
-      <!-- Selection -->
-      <div id="section-selection">
-        <div class="sec-title">Selection</div>
-        <div class="selection-grid">
-          <button id="btn-lasso" onclick="cycleLasso()" class="select-lasso">Lasso</button>
-          <button id="btn-only-new" onclick="toggleOnlyNew()" title="When active, lasso only selects phones you have never captured" class="select-new">Only new phones</button>
-          <button id="btn-exclude-owned" onclick="toggleExcludeOwned()" title="When active, lasso skips phones you already own" class="select-owned">Skip owned</button>
-          <button id="btn-exclude-cellmates" onclick="toggleExcludeCellmates()" title="When active, lasso skips phones held by your cellmates" class="select-cellmates">Skip cellmates</button>
-          <button id="btn-clear-sel" onclick="flashDanger('btn-clear-sel');clearSelection()" class="select-clear danger icon-only" aria-label="Clear selection"><span class="icon icon-close" aria-hidden="true"></span></button>
-        </div>
-        <div id="sel-count" class="sub-text">0 selected</div>
-      </div>
-
-      <!-- Optimal route -->
-      <div>
-        <div class="sec-title">Route</div>
-        <div class="btn-row">
-          <button onclick="findRoute()" id="btn-route" class="go">Find optimal route <span class="icon icon-arrow-right" aria-hidden="true"></span></button>
-          <button id="btn-share" onclick="shareSelection()" class="icon-only" aria-label="Copy share link" title="Copy a link to this selection"><span class="icon icon-link" aria-hidden="true"></span></button>
-          <button id="btn-clear-route" onclick="flashDanger('btn-clear-route');clearRoute()" class="danger icon-only" aria-label="Clear route"><span class="icon icon-close" aria-hidden="true"></span></button>
-        </div>
-        <div id="share-status" class="share-status-base sub-text"></div>
-        <div id="spinner"></div>
-      </div>
-
-    </div><!-- /#panel-tab-route -->
-
-    <!-- Orienteer tab -->
-    <div id="panel-tab-orienteer" class="orienteer-tab-base">
-
-      <div>
-        <div class="sec-title">Arrive by</div>
-        <div class="arrive-field time-field">
-          <input type="time" id="orienteer-arrive-by" aria-label="Arrive by">
-        </div>
-        <div class="sec-title">Route</div>
-        <div class="btn-row">
-          <button onclick="findOrienteerRoute()" id="btn-orienteer" class="go">Find best route <span class="icon icon-arrow-right" aria-hidden="true"></span></button>
-          <button id="btn-clear-route-orienteer" onclick="flashDanger('btn-clear-route-orienteer');clearRoute()" class="danger icon-only" aria-label="Clear route"><span class="icon icon-close" aria-hidden="true"></span></button>
-        </div>
-        <div id="spinner-orienteer"></div>
-      </div>
-
-    </div><!-- /#panel-tab-orienteer -->
-
-    <!-- Settings tab -->
-    <div id="panel-tab-settings" class="settings-tab-base">
-
-      <div>
-        <div class="sec-title">Map theme</div>
-        <div class="btn-row">
-          <button id="btn-theme-dark"  onclick="setMapTheme('dark')"  class="active">Dark</button>
-          <button id="btn-theme-light" onclick="setMapTheme('light')">Light</button>
-        </div>
-      </div>
-
-      <div>
-        <div class="sec-title">Auto-rotate map</div>
-        <div class="btn-row">
-          <button id="btn-autorotate-on"  onclick="setAutoRotate(true)" class="active">On</button>
-          <button id="btn-autorotate-off" onclick="setAutoRotate(false)">Off</button>
-        </div>
-        <div id="autorotate-note" class="sub-text">
-          Compass button locks the map to your facing direction (needs a device
-          compass). A two-finger twist rotates the map manually any time.
-        </div>
-      </div>
-
-    </div><!-- /#panel-tab-settings -->
-
-    <!-- Shared route result (always visible once solved) -->
-    <div id="route-result" class="route-result-base">
-      <div id="route-stats"></div>
-      <div id="maps-nav" class="maps-nav-base">
-        <!-- Stop indicator (LHS) + leg switcher (RHS) — card header -->
-        <div class="route-progress">
-          <!-- LHS: stop indicator (shown when route active) -->
-          <div id="stop-indicator" class="stop-indicator-base">
-            <div class="progress-caption">Targeting</div>
-            <div class="stop-count">
-              <div id="stop-badge" class="stop-badge-base wp wp-active"></div>
-              <span class="stop-total">/<span id="stop-total-label" class="stop-total-label-base"></span></span>
-            </div>
-          </div>
-          <!-- RHS: leg switcher (expands to fill when stop-indicator hidden) -->
-          <div class="leg-switcher">
-            <div class="leg-caption">Leg</div>
-            <div class="leg-controls">
-              <span id="leg-prev-hint" onclick="changeLeg(-1)" role="button" tabindex="0"
-                    aria-label="Previous leg"
-                    onkeydown="if(event.key==='Enter'||event.key===' '){changeLeg(-1);event.preventDefault();}"
-                    class="leg-prev"><span class="icon icon-chevron-left" aria-hidden="true"></span></span>
-              <span id="leg-label" class="leg-label-base"></span>
-              <span id="leg-next-hint" onclick="changeLeg(1)" role="button" tabindex="0"
-                    aria-label="Next leg"
-                    onkeydown="if(event.key==='Enter'||event.key===' '){changeLeg(1);event.preventDefault();}"
-                    class="leg-next"><span class="icon icon-chevron-right" aria-hidden="true"></span></span>
-            </div>
-          </div>
-        </div>
-        <!-- UNDO + SKIP -->
-        <div id="tag-row" class="tag-row-base btn-row">
-          <button id="btn-revert" onclick="revertLeg()" class="danger" disabled><span class="icon icon-undo" aria-hidden="true"></span>Undo</button>
-          <button onclick="tagCurrentLeg('skipped')" class="skipped"><span class="icon icon-close" aria-hidden="true"></span><span class="button-label">Skip</span></button>
-        </div>
-        <button onclick="openCurrentLeg()" class="maps-button maps">
-          Open in Google Maps <span class="icon icon-external" aria-hidden="true"></span>
-        </button>
-      </div>
-    </div>
-
+    <button id="dock-clear" class="dock-btn" onclick="clearSelection()" hidden>Clear <span class="badge" id="sel-badge"></span></button>
   </div>
 </div>
 
-<!-- ── Status bar (set-endpoint prompts) ──────────────────────── -->
-<div id="status-bar" style="
-  display:none; position:fixed; top:0; left:0; right:0; z-index:1002;
-  background:var(--surface); border-bottom:1px solid var(--border);
-  padding:10px 16px; padding-top:max(10px, env(safe-area-inset-top));
-  text-align:center; font-size:13px; color:#c3d7ee; letter-spacing:0.2px;">
-  <span id="status-bar-msg"></span>
+<!-- ── Sheet: plan a route, then navigate it ───────────────────── -->
+<div id="sheet">
+  <button id="grabber" aria-label="Expand plan" onclick="toggleSheet()"></button>
+
+  <section id="plan-view">
+    <button id="plan-summary" onclick="toggleSheet()" aria-expanded="false" aria-controls="plan-details">
+      <span><span class="line" id="summary-line"></span><span class="hint" id="summary-hint"></span></span>
+      <span class="icon icon-chevron-down" aria-hidden="true"></span>
+    </button>
+    <div id="plan-details">
+      <div class="field">
+        <div class="segmented" id="mode-switch" role="group" aria-label="Planning mode">
+          <button data-mode="route" aria-pressed="true">Routing</button>
+          <button data-mode="orienteer" aria-pressed="false">Orienteering</button>
+        </div>
+      </div>
+      <div class="field">
+        <div class="segmented" id="profile-switch" role="group" aria-label="Transport">
+          <button data-profile="foot" aria-pressed="false"><span class="icon icon-walk" aria-hidden="true"></span>Foot</button>
+          <button data-profile="bicycle" aria-pressed="false"><span class="icon icon-bike" aria-hidden="true"></span>Bike</button>
+          <button data-profile="car" aria-pressed="true"><span class="icon icon-car" aria-hidden="true"></span>Car</button>
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-head"><div class="sec-title">Start &amp; End</div>
+          <button class="text-btn" id="clear-ends" onclick="clearEnds()" hidden>Clear</button></div>
+        <button class="place-field" id="start-field" onclick="openSearch('start')"><span class="pin-dot" style="background:#2ecc71"></span><span class="pf-text" id="start-text"></span></button>
+        <button class="place-field" id="end-field" onclick="openSearch('end')"><span class="pin-dot" style="background:#e74c3c"></span><span class="pf-text" id="end-text"></span></button>
+      </div>
+      <div class="field" id="sel-field">
+        <div class="field-head"><div class="sec-title">Phones</div></div>
+        <div class="count" id="sel-count"></div>
+        <div class="note">Recommended to use lasso for selecting phones</div>
+      </div>
+      <div class="field" id="arrive-field" hidden>
+        <div class="field-head"><div class="sec-title">Arrive By</div></div>
+        <div class="time-field"><span class="icon icon-clock" aria-hidden="true" style="color:var(--muted)"></span>
+          <input type="time" id="orienteer-arrive-by" aria-label="Arrive by"></div>
+        <div class="note" id="auto-note"></div>
+      </div>
+    </div>
+    <div class="cta-row">
+      <button class="go" id="find-btn" onclick="findPlannedRoute()"></button>
+      <button id="share-btn" onclick="shareSelection()" aria-label="Copy share link" title="Copy Share Link"><span class="icon icon-share" aria-hidden="true"></span></button>
+    </div>
+  </section>
+
+  <section id="nav-view" hidden>
+    <div class="nav-head">
+      <div class="wp wp-active" id="nav-badge"></div>
+      <div><div class="nav-title" id="nav-title"></div><div class="nav-stats" id="route-stats"></div></div>
+    </div>
+    <div class="leg-row" id="leg-row">
+      <button id="leg-prev" aria-label="Previous leg" onclick="changeLeg(-1)"><span class="icon icon-chevron-left" aria-hidden="true"></span></button>
+      <span id="leg-label"></span>
+      <button id="leg-next" aria-label="Next leg" onclick="changeLeg(1)"><span class="icon icon-chevron-right" aria-hidden="true"></span></button>
+    </div>
+    <button class="go" id="maps-btn" onclick="openCurrentLeg()">Open in Google Maps <span class="icon icon-external" aria-hidden="true"></span></button>
+    <div class="nav-actions">
+      <button id="skip-stop-btn" onclick="tagCurrentLeg('skipped')"><span class="icon icon-arrow-right" aria-hidden="true"></span>Skip</button>
+      <button id="btn-revert" onclick="revertLeg()"><span class="icon icon-undo" aria-hidden="true"></span>Undo</button>
+      <button id="end-route-btn" onclick="endRoute()">End Route</button>
+    </div>
+  </section>
 </div>
+
+<!-- ── Popovers ─────────────────────────────────────────────────── -->
+<div class="scrim" id="scrim" hidden onclick="closePopover()"></div>
+
+<div class="popover" id="pop-avatar" role="dialog" aria-modal="true" aria-labelledby="pop-avatar-h" hidden>
+  <div class="popover-head"><h2 id="pop-avatar-h">You</h2><button class="text-btn" onclick="closePopover()">Done</button></div>
+  <div class="field">
+    <div class="sec-title">Payphone Tag Name</div>
+    <div class="name-row">
+      <input type="text" id="name-input" placeholder="Your in-game name" aria-label="Payphone Tag name" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">
+      <button onclick="saveName(document.getElementById('name-input').value)">Save</button>
+    </div>
+    <div class="status-line"><span id="refresh-dot" class="status-dot" hidden></span><span id="load-status"></span></div>
+    <div class="note">Your name colours phones by who holds them. Without it, phones load uncoloured.</div>
+  </div>
+  <div class="field">
+    <button style="width:100%" onclick="reloadPhones()">Reload Phones</button>
+  </div>
+  <div class="field">
+    <label class="switch-row"><span class="label">Auto-Rotate Map</span><input type="checkbox" role="switch" id="autorotate" checked></label>
+    <div class="note" id="autorotate-note">The compass button locks the map to the direction you're facing. A two-finger twist rotates the map any time.</div>
+  </div>
+</div>
+
+<div class="popover" id="pop-layers" role="dialog" aria-modal="true" aria-labelledby="pop-layers-h" hidden>
+  <div class="popover-head"><h2 id="pop-layers-h">Map</h2><button class="text-btn" onclick="closePopover()">Done</button></div>
+  <div class="field">
+    <div class="sec-title">Highlight</div>
+    <label class="switch-row"><span class="label"><span class="icon icon-camera" aria-hidden="true"></span>Phones with a Wiki Photo</span><input type="checkbox" role="switch" id="hl-photo"></label>
+    <label class="switch-row"><span class="label"><span class="icon icon-magic" aria-hidden="true"></span>Phones You've Never Captured</span><input type="checkbox" role="switch" id="hl-new"></label>
+  </div>
+  <div class="field">
+    <div class="sec-title">Legend</div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-uncaptured dot"></span>Uncaptured</div>
+      <div class="legend-item"><span class="legend-mine dot"></span>Mine</div>
+      <div class="legend-item"><span class="legend-cellmate dot"></span>Cellmate</div>
+      <div class="legend-item"><span class="legend-hostile dot"></span>Hostile</div>
+      <div class="legend-item"><span class="legend-photo dot"></span>Wiki Photo</div>
+      <div class="legend-item"><span class="legend-new dot"></span>New</div>
+    </div>
+  </div>
+  <div class="field">
+    <div class="sec-title">Map Style</div>
+    <div class="segmented" id="theme-switch" role="group" aria-label="Map style">
+      <button data-theme="dark" aria-pressed="true" style="flex:1">Dark</button>
+      <button data-theme="light" aria-pressed="false" style="flex:1">Light</button>
+    </div>
+    <label class="switch-row" style="margin-top:8px"><span class="label">Mini-Map</span><input type="checkbox" role="switch" id="minimap"></label>
+  </div>
+</div>
+
+<!-- ── Start/end search (full screen on mobile, over the panel on desktop) ── -->
+<div id="search-screen" role="dialog" aria-modal="true" aria-label="Search for a place" hidden>
+  <div class="search-head">
+    <button aria-label="Back" onclick="closeSearch()"><span class="icon icon-chevron-left" aria-hidden="true"></span></button>
+    <input type="text" id="search-input" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="search-list"
+           autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search">
+  </div>
+  <ul id="search-list" role="listbox" aria-label="Suggestions"></ul>
+</div>
+
+<!-- ── Choosing a start/end on the map ─────────────────────────── -->
+<div id="pick-banner" hidden></div>
+<div id="pick-actions" hidden><button onclick="pickCancel()">Cancel</button></div>
+
+<div id="toast" role="status" hidden><span id="toast-msg"></span><button id="toast-undo" hidden>Undo</button></div>
 
 <!-- ── CARTO basemap key notice (host-facing, dismissible) ─────── -->
-<!-- Sits below #status-bar's z-index so a transient endpoint prompt wins. -->
+<!-- Sits below the pick banner's z-index so a transient endpoint prompt wins. -->
 <div id="carto-notice" style="
   display:none; position:fixed; top:0; left:0; right:0; z-index:1001;
   background:rgba(40,28,10,0.96); border-bottom:1px solid rgba(230,126,34,0.4);
@@ -227,32 +196,15 @@
                  color:#f0d5ac; border-radius:4px; padding:2px 8px; cursor:pointer;">Dismiss</button>
 </div>
 
-<!-- Endpoint selection actions — bottom of screen, in thumb range -->
-<div id="endpoint-actions">
-  <button onclick="skipEndpointStep()"
-          title="Keep the current point and move to the next step">Skip</button>
-  <button class="danger" onclick="cancelSetEndpoints()"
-          title="Exit and restore the previous start/end">Cancel</button>
-</div>
-
-<!-- ── Floating GPS button ─────────────────────────────────────── -->
-<!-- Filter buttons (top-right of map) -->
-<div id="filter-stack">
-  <button id="btn-photo-filter" onclick="togglePhotoFilter()"
-          title="Highlight phones that have a wiki photo"><span class="icon icon-camera" aria-hidden="true"></span><span class="button-label">Wiki photos</span></button>
-  <button id="btn-capture-filter" onclick="toggleNewPhoneFilter()"
-          title="Highlight phones you have never captured"><span class="icon icon-magic" aria-hidden="true"></span><span class="button-label">New phones</span></button>
-</div>
-
-<div id="fab-stack">
-  <div id="loc-badge">no GPS</div>
-  <button id="btn-minimap" onclick="toggleMiniMap()" title="Toggle mini-map" aria-label="Toggle mini-map"><span class="icon icon-map" aria-hidden="true"></span></button>
-  <button id="fab-centre" onclick="handleCompassTap()" title="Tap: centre + lock heading  ·  Tap again: reset north">
-    <svg id="compass-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" style="transition:transform 0.15s;">
-      <path d="M12 4 L14.5 13 L12 11.5 L9.5 13 Z" fill="#e74c3c"/>
-      <path d="M12 20 L9.5 13 L12 14.5 L14.5 13 Z" fill="#a8afb5"/>
-    </svg>
-  </button>
+<!-- ── First run: optional name ────────────────────────────────── -->
+<div id="onboard" role="dialog" aria-modal="true" aria-labelledby="onboard-h" hidden>
+  <div class="card">
+    <h1 id="onboard-h">Welcome to Pathfinder</h1>
+    <p>Enter your Payphone Tag name to colour phones by who holds them. You can add or change it later from the button in the top corner.</p>
+    <input type="text" id="onboard-name" placeholder="Your in-game name" aria-label="Payphone Tag name" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go">
+    <button class="go" onclick="finishOnboarding(document.getElementById('onboard-name').value)">Continue</button>
+    <button class="text-btn" onclick="finishOnboarding('')">Browse Without a Name</button>
+  </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -268,7 +220,8 @@ const state = {
   phones:          [],
   markers:         {},
   selectedIds:     new Set(),
-  mode:            'click',
+  username:        '',      // optional Payphone Tag name
+  mode:            'click',  // 'click' | 'lasso' | 'lasso-deselect' | 'setStart' | 'setEnd'
   profile:         'car',
   start:           null,
   end:             null,
@@ -294,7 +247,8 @@ const state = {
   currentLeg:      0,
   routeProgress:   0,   // index into routeOrderedIds (current stop being visited)
   routeOrderedIds: [],  // ordered_ids of active route (set at display time, separate from lastRoute)
-  routeMode:              'route',  // 'route' | 'orienteer' | 'settings'
+  routeMode:              'route',  // 'route' | 'orienteer'
+  lastRouteExtraS:        0,        // orienteer buffer added to the displayed duration
   orienteerArriveBy:      '',       // HH:MM string for orienteer arrive-by time
   lastOrienteerBufferS:   0,        // buffer used for the last orienteer solve
   mapTheme:               'dark',   // 'dark' | 'light'
@@ -307,22 +261,25 @@ let _lastRefreshAt    = 0;
 let _refreshFailCount = 0;
 let _dataStale        = false;  // backend reported it is serving cached data (game API down)
 
+// Data freshness shows as a dot on the avatar and in its popover.
 function updateRefreshDot() {
-  const dot = document.getElementById('refresh-dot');
-  if (!dot) return '#a8afb5';
-  if (!_lastRefreshAt) { dot.style.display = 'none'; return '#a8afb5'; }
-  dot.style.display = 'inline-block';
+  const dots = [document.getElementById('refresh-dot'), document.getElementById('avatar-dot')];
+  if (!_lastRefreshAt) { dots.forEach(d => { d.hidden = true; }); return '#a8afb5'; }
   const age = Date.now() - _lastRefreshAt;
-  let color;
+  let color, title;
   if (_refreshFailCount >= 2 || age > 120_000) {
-    color = '#e74c3c'; dot.title = 'Data feed down';
+    color = '#e74c3c'; title = 'Data feed down';
   } else if (_dataStale || age > 45_000) {
-    color = '#e67e22'; dot.title = 'Game API degraded — showing cached data';
+    color = '#e67e22'; title = 'Game API degraded — showing cached data';
   } else {
-    color = '#2ecc71'; dot.title = 'Data feed healthy';
+    color = '#2ecc71'; title = 'Data feed healthy';
   }
-  dot.style.background = color;
-  dot.classList.toggle('stale', _dataStale || age > 45_000 || _refreshFailCount >= 2);
+  for (const d of dots) {
+    d.hidden = false;
+    d.style.background = color;
+    d.title = title;
+    d.classList.toggle('stale', _dataStale || age > 45_000 || _refreshFailCount >= 2);
+  }
   return color;
 }
 
@@ -439,83 +396,260 @@ let tileLayer = L.tileLayer(TILE_URLS.dark, {
   attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19,
 }).addTo(map);
 
-// Zoom control at bottom-left so it doesn't clash with panel
-L.control.zoom({ position: 'bottomleft' }).addTo(map);
+// Zoom buttons bottom-right (desktop only — hidden on phones, which pinch);
+// bottom-left belongs to the selection dock
+L.control.zoom({ position: 'bottomright' }).addTo(map);
 
 // Layer group for phone markers — no clustering, all dots always visible
 const markerLayer = L.layerGroup().addTo(map);
 
-// Mini-map (toggleable) — shares the same tile layer
+// Single breakpoint: bottom sheet below, side panel at and above
+const desktopPanel = window.matchMedia('(min-width: 640px)');
+
+// Mini-map (toggleable) — shares the same tile layer. Bottom-right on desktop;
+// top-left on phones, where the bottom edge belongs to the sheet and dock.
 let miniMap = null;
 function toggleMiniMap() {
   if (miniMap) {
     miniMap.remove();
     miniMap = null;
-    document.getElementById('btn-minimap').classList.remove('active');
   } else {
     const tiles = L.tileLayer(TILE_URLS[state.mapTheme] || TILE_URLS.dark,
       { attribution: '', maxZoom: 19 });
     miniMap = new L.Control.MiniMap(tiles, {
-      position: 'bottomleft', width: 130, height: 100,
+      position: desktopPanel.matches ? 'bottomright' : 'topleft', width: 130, height: 100,
       zoomLevelOffset: -4, toggleDisplay: false,
     }).addTo(map);
-    document.getElementById('btn-minimap').classList.add('active');
   }
+  document.getElementById('minimap').checked = !!miniMap;
 }
 
 const mapEl = map.getContainer();
 
-// ── Panel (bottom sheet) ──────────────────────────────────────────
-let panelOpen = false;
-const desktopPanel = window.matchMedia('(min-width: 640px)');
-function syncPanelAccessibility() {
-  const expanded = desktopPanel.matches || panelOpen;
-  const handle = document.getElementById('panel-handle-pill');
-  handle.setAttribute('aria-expanded', String(expanded));
-  handle.setAttribute('aria-label', expanded ? 'Close panel' : 'Open panel');
-  document.getElementById('panel-tab-bar').inert = !expanded;
-  document.getElementById('panel-body').inert = !expanded;
+// ── Sheet (plan / navigate) ───────────────────────────────────────
+const sheet = document.getElementById('sheet');
+let sheetFull = false;
+function inNav() { return state.routeOrderedIds.length > 0; }
+function setSheetFull(full) {
+  sheetFull = full;
+  sheet.classList.toggle('full', full);
+  document.body.classList.toggle('sheet-full', full);
+  document.getElementById('plan-summary').setAttribute('aria-expanded', String(full));
+  document.getElementById('grabber').setAttribute('aria-label', full ? 'Collapse plan' : 'Expand plan');
 }
-function setPanelOpen(open) {
-  panelOpen = open;
-  if (!open && !desktopPanel.matches && document.getElementById('panel-body').contains(document.activeElement)) {
-    document.getElementById('panel-handle-pill').focus();
-  }
-  document.getElementById('panel').classList.toggle('open', open);
-  syncPanelAccessibility();
+function toggleSheet() { if (!inNav()) setSheetFull(!sheetFull); }
+// Floating controls (dock, toast, Leaflet attribution) sit just above the sheet
+function syncSheetH() {
+  const h = !desktopPanel.matches && !document.body.classList.contains('picking') ? sheet.offsetHeight : 0;
+  document.documentElement.style.setProperty('--sheet-h', `${h}px`);
 }
-function togglePanel() {
-  setPanelOpen(!panelOpen);
-}
-desktopPanel.addEventListener('change', syncPanelAccessibility);
-syncPanelAccessibility();
+new ResizeObserver(syncSheetH).observe(sheet);
+desktopPanel.addEventListener('change', syncSheetH);
 
-// Swipe up on handle → open; swipe down → close
+// Swipe the grabber/summary up or down to open or close the plan
 {
-  let _sheetStartY = null;
-  const handleEl = document.getElementById('panel-handle');
-  handleEl.addEventListener('touchstart', e => {
-    _sheetStartY = e.touches[0].clientY;
-  }, { passive: true });
-  handleEl.addEventListener('touchend', e => {
-    if (_sheetStartY === null) return;
-    const dy = e.changedTouches[0].clientY - _sheetStartY;
-    _sheetStartY = null;
-    if (Math.abs(dy) < 20) return; // tiny movement = tap, handled by onclick
-    if (dy < 0 && !panelOpen) setPanelOpen(true);
-    else if (dy > 0 && panelOpen) setPanelOpen(false);
-  }, { passive: true });
+  let y0 = null;
+  for (const el of [document.getElementById('grabber'), document.getElementById('plan-summary')]) {
+    el.addEventListener('touchstart', e => { y0 = e.touches[0].clientY; }, { passive: true });
+    el.addEventListener('touchend', e => {
+      if (y0 === null) return;
+      const dy = e.changedTouches[0].clientY - y0;
+      y0 = null;
+      if (Math.abs(dy) > 24 && !inNav()) { setSheetFull(dy < 0); e.preventDefault(); }
+    });
+  }
 }
 
-function updatePanelPeek() { /* panel-peek removed; handle bar now shows tabs */ }
+// ── Plan ──────────────────────────────────────────────────────────
+let routeBusy = false;
+
+function endpointLabel(pt) {
+  return pt.label || (pt.phone_id != null ? `Phone #${pt.phone_id}` : 'Dropped Pin');
+}
+
+function planProblem() {
+  if (!state.start || !state.end) return 'Set a start and end';
+  if (state.routeMode === 'route' && !state.selectedIds.size) return 'Select phones on the map';
+  if (state.routeMode === 'orienteer' && !state.username) return 'Add your name to use orienteering';
+  return null;
+}
+
+function renderPlan() {
+  const orienteer = state.routeMode === 'orienteer';
+  const n = state.selectedIds.size;
+  const problem = planProblem();
+  document.getElementById('summary-line').textContent = orienteer ? 'Orienteering' : 'Routing';
+  document.getElementById('summary-hint').textContent = problem || 'Tap to edit';
+  document.querySelectorAll('#mode-switch button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === state.routeMode)));
+  document.querySelectorAll('#profile-switch button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.profile === state.profile)));
+  document.getElementById('sel-field').hidden = orienteer;
+  document.getElementById('arrive-field').hidden = !orienteer;
+  document.getElementById('auto-note').textContent = state.username
+    ? 'Optimises for the most phones within your given time window'
+    : 'Needs your name, so it can skip phones you already hold';
+  document.getElementById('sel-count').textContent = n ? `${n} phone${n === 1 ? '' : 's'} selected` : 'No phones selected';
+
+  const clear = document.getElementById('dock-clear');
+  clear.hidden = !n;
+  clear.setAttribute('aria-label', `Clear ${n} selected phone${n === 1 ? '' : 's'}`);
+  const badge = document.getElementById('sel-badge');
+  if (badge.textContent !== String(n)) {
+    badge.textContent = n;
+    badge.classList.remove('bump'); void badge.offsetWidth; badge.classList.add('bump');  // restart the pulse
+  }
+
+  document.getElementById('clear-ends').hidden = !state.start && !state.end;
+  for (const which of ['start', 'end']) {
+    const el = document.getElementById(`${which}-text`);
+    const pt = state[which];
+    el.textContent = pt ? endpointLabel(pt) : (which === 'start' ? 'Search for a start' : 'Search for an end');
+    el.classList.toggle('unset', !pt);
+  }
+
+  const find = document.getElementById('find-btn');
+  if (!routeBusy) find.innerHTML = `${orienteer ? 'Find Best Route' : 'Find Optimal Route'} <span class="icon icon-arrow-right" aria-hidden="true"></span>`;
+  find.disabled = routeBusy || !!problem;
+  document.getElementById('share-btn').disabled = !n && !state.start && !state.end;
+  document.getElementById('tool-dock').hidden = inNav() || orienteer;
+}
+
+function setPlanMode(mode) {
+  state.routeMode = mode === 'orienteer' ? 'orienteer' : 'route';
+  if (state.routeMode === 'orienteer' && isLassoMode()) setMode('click');
+  renderPlan();
+  saveSession();
+}
+document.querySelectorAll('#mode-switch button').forEach(b => b.onclick = () => setPlanMode(b.dataset.mode));
+document.querySelectorAll('#profile-switch button').forEach(b => b.onclick = () => setProfile(b.dataset.profile));
+document.getElementById('orienteer-arrive-by').addEventListener('change', () => { renderPlan(); saveSession(); });
+
+function findPlannedRoute() {
+  return state.routeMode === 'orienteer' ? findOrienteerRoute() : findRoute();
+}
+function setRouteBusy(busy) {
+  routeBusy = busy;
+  const find = document.getElementById('find-btn');
+  find.setAttribute('aria-busy', String(busy));
+  if (busy) find.innerHTML = 'Finding Route… <span class="icon icon-arrow-right" aria-hidden="true"></span>';
+  renderPlan();
+}
+
+// ── Toast (top of screen; swipe up to dismiss) ───────────────────
+let toastTimer = null;
+const toastEl = document.getElementById('toast');
+function hideToast() { clearTimeout(toastTimer); toastEl.hidden = true; toastEl.style.translate = ''; }
+function toast(msg, undo) {
+  const btn = document.getElementById('toast-undo');
+  hideToast();
+  document.getElementById('toast-msg').textContent = msg;
+  btn.hidden = !undo;
+  btn.onclick = () => { hideToast(); undo(); };
+  toastEl.hidden = false;
+  toastTimer = setTimeout(hideToast, undo ? 6000 : 3000);
+}
+{
+  let y0 = null;
+  toastEl.addEventListener('touchstart', e => { y0 = e.touches[0].clientY; toastEl.style.transition = 'none'; }, { passive: true });
+  toastEl.addEventListener('touchmove', e => {
+    if (y0 !== null) toastEl.style.translate = `0 ${Math.min(0, e.touches[0].clientY - y0)}px`;
+  }, { passive: true });
+  toastEl.addEventListener('touchend', e => {
+    if (y0 === null) return;
+    const dy = e.changedTouches[0].clientY - y0;
+    y0 = null;
+    toastEl.style.transition = '';
+    if (dy < -24) hideToast(); else toastEl.style.translate = '';
+  });
+}
+
+// ── Popovers (avatar, layers) ─────────────────────────────────────
+let openPop = null, popReturn = null;
+function openPopover(which) {
+  closePopover();
+  openPop = document.getElementById(`pop-${which}`);
+  popReturn = document.activeElement;
+  if (which === 'avatar') document.getElementById('name-input').value = state.username;
+  document.getElementById('scrim').hidden = false;
+  openPop.hidden = false;
+  openPop.querySelector('input, button').focus();
+}
+function closePopover() {
+  if (!openPop) return;
+  openPop.hidden = true;
+  document.getElementById('scrim').hidden = true;
+  openPop = null;
+  if (popReturn) popReturn.focus();
+}
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (!document.getElementById('search-screen').hidden) closeSearch();
+  else if (openPop) closePopover();
+  else if (state.mode === 'setStart' || state.mode === 'setEnd') pickCancel();
+  else if (isLassoMode()) setMode('click');
+});
+
+// ── Identity ──────────────────────────────────────────────────────
+const ONBOARDED_KEY = 'payphone_pathfinder_onboarded';
+function markOnboarded() { try { localStorage.setItem(ONBOARDED_KEY, '1'); } catch (e) {} }
+
+function renderAvatar() {
+  const face = document.getElementById('avatar-face');
+  if (state.username) {
+    face.className = '';
+    face.textContent = state.username[0].toUpperCase();
+  } else {
+    face.textContent = '';
+    face.className = 'icon icon-user';
+  }
+  document.getElementById('avatar-btn').setAttribute('aria-label',
+    state.username ? `${state.username}: profile and settings` : 'Add your name: profile and settings');
+}
+
+function saveName(value) {
+  const name = value.trim();
+  const changed = name !== state.username;
+  state.username = name;
+  markOnboarded();
+  renderAvatar(); renderPlan(); saveSession();
+  if (!changed) return;
+  // Capture history and "mine" colouring belong to the old identity
+  state.pastCaptureIds = null;
+  if (state.newPhoneFilter) setNewPhoneFilter(false);
+  if (state.lassoOnlyNew) setChip('lassoOnlyNew', false);
+  toast(name ? `Phones coloured for ${name}` : 'Name removed — phones uncoloured');
+  loadPhones();
+}
+document.getElementById('name-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); saveName(e.target.value); closePopover(); }
+});
+
+function reloadPhones() {
+  if (state.phones.length) manualRefreshPhones().then(() => toast('Phones updated'));
+  else loadPhones();
+}
+
+function showOnboarding() {
+  document.getElementById('onboard').hidden = false;
+  document.getElementById('onboard-name').focus();
+}
+function finishOnboarding(value) {
+  document.getElementById('onboard').hidden = true;
+  markOnboarded();
+  state.username = value.trim();
+  renderAvatar(); renderPlan(); saveSession();
+  if (!state.username) toast('Browsing without a name. Add it any time from the top corner.');
+  loadPhones();
+}
+document.getElementById('onboard-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); finishOnboarding(e.target.value); }
+});
 
 // ── Load phones ───────────────────────────────────────────────────
 async function loadPhones() {
   // Username is optional — a shared link has to render for someone who has never
   // used this instance. Without one, phones load uncoloured (nothing is "mine").
-  const username = document.getElementById('username').value.trim();
+  const username = state.username;
   setStatus('Loading…', '#a8afb5');
-  document.getElementById('btn-load').disabled = true;
   try {
     const qs   = new URLSearchParams(username ? { username } : {});
     const res  = await fetch(`/api/phones?${qs}`);
@@ -534,17 +668,17 @@ async function loadPhones() {
     } else {
       setStatus(`${state.phones.length} phones loaded`, '#2ecc71');
     }
-    document.getElementById('btn-load').textContent = 'Reload';
-    updatePanelPeek();
-    restoreEndpointMarkers();
+    drawEndpoints();
+    // Redraw a saved route on first load only — redrawing an active one would
+    // throw away the stops already visited (e.g. after a name change).
     const routeData = state.lastRoute;
-    if (routeData) { displayRoute(routeData); state.lastRoute = routeData; }
+    if (routeData && !inNav()) { displayRoute(routeData, state.lastRouteExtraS); state.lastRoute = routeData; }
+    renderPlan();
     saveSession();
     startBackgroundRefresh();
   } catch (e) {
     setStatus(`Error: ${e.message}`, '#e74c3c');
-  } finally {
-    document.getElementById('btn-load').disabled = false;
+    toast(`Couldn't load phones: ${e.message}`);
   }
 }
 
@@ -642,228 +776,181 @@ map.on('zoomend', () => {
   }
 });
 
-function updateSelCount() {
-  document.getElementById('sel-count').textContent =
-    `${state.selectedIds.size} phone${state.selectedIds.size !== 1 ? 's' : ''} selected`;
-  updatePanelPeek();
-}
+function updateSelCount() { renderPlan(); }
 
 // ── Selection mode ────────────────────────────────────────────────
+function isLassoMode() { return state.mode === 'lasso' || state.mode === 'lasso-deselect'; }
+
 function setMode(mode) {
-  mapEl.removeEventListener('touchstart', onLassoTouchStart);
-  mapEl.removeEventListener('touchmove',  onLassoTouchMove);
-  mapEl.removeEventListener('touchend',   onLassoTouchEnd);
-
+  const wasLasso = isLassoMode();
   state.mode = mode;
-  const lassoActive = mode === 'lasso' || mode === 'lasso-deselect';
-  document.getElementById('btn-lasso').classList.toggle('active', lassoActive);
-  document.getElementById('btn-lasso').textContent =
-    mode === 'lasso-deselect' ? 'Deselect' : 'Lasso';
-
-  if (lassoActive) {
+  const lasso = isLassoMode();
+  document.getElementById('lasso-add').setAttribute('aria-pressed', String(mode === 'lasso'));
+  document.getElementById('lasso-remove').setAttribute('aria-pressed', String(mode === 'lasso-deselect'));
+  document.getElementById('lasso-chips').hidden = mode !== 'lasso';
+  const hint = document.getElementById('lasso-hint');
+  hint.hidden = !lasso;
+  hint.textContent = matchMedia('(pointer: coarse)').matches
+    ? 'One finger to draw · Two fingers to move the map'
+    : 'Drag to draw · Scroll to zoom';
+  if (lasso && !wasLasso) {
     map.dragging.disable();
     if (map.tap) map.tap.disable();
-    map.on('mousedown', onLassoStart);
-    mapEl.addEventListener('touchstart', onLassoTouchStart, { passive: false });
-    mapEl.addEventListener('touchmove',  onLassoTouchMove,  { passive: false });
-    mapEl.addEventListener('touchend',   onLassoTouchEnd,   { passive: false });
-  } else {
+    mapEl.style.touchAction = 'none';
+    if (!desktopPanel.matches) setSheetFull(false);
+  } else if (!lasso && wasLasso) {
     map.dragging.enable();
     if (map.tap) map.tap.enable();
-    map.off('mousedown', onLassoStart);
-    cleanupLasso();
+    mapEl.style.touchAction = '';
+    cancelLassoStroke();
   }
 }
 
-function flashDanger(id) {
-  const btn = document.getElementById(id);
-  if (!btn) return;
-  btn.classList.remove('flash-danger');
-  void btn.offsetWidth;  // force reflow so animation restarts if tapped again mid-flash
-  btn.classList.add('flash-danger');
-}
-
-function toggleClickMode() {
-  // Leaving endpoint selection via a mode button = cancel, so the banner
-  // and Set Start & End highlight don't linger
-  if (state.mode === 'setStart' || state.mode === 'setEnd') cancelSetEndpoints();
-  setMode(state.mode === 'click' ? 'navigate' : 'click');
-}
-
-function cycleLasso() {
-  if (state.mode === 'setStart' || state.mode === 'setEnd') cancelSetEndpoints();
-  if      (state.mode === 'lasso')         setMode('lasso-deselect');
-  else if (state.mode === 'lasso-deselect') setMode('navigate');
-  else                                      setMode('lasso');
+function toggleLasso(kind) {
+  if (state.mode === 'setStart' || state.mode === 'setEnd') pickCancel();
+  setMode(state.mode === kind ? 'click' : kind);
 }
 
 function clearSelection() {
+  const prev = new Set(state.selectedIds);
+  if (!prev.size) return;
+  const byId = new Map(state.phones.map(p => [p.id, p]));
+  const restyle = () => prev.forEach(id => { const p = byId.get(id); if (p) refreshMarker(p); });
   state.selectedIds.clear();
-  state.phones.forEach(p => refreshMarker(p));
-  updateSelCount();
+  restyle(); updateSelCount(); saveSession();
+  toast(`${prev.size} phone${prev.size === 1 ? '' : 's'} cleared`, () => {
+    prev.forEach(id => state.selectedIds.add(id));
+    restyle(); updateSelCount(); saveSession();
+  });
 }
 
-function toggleExcludeOwned() {
-  state.lassoExcludeOwned = !state.lassoExcludeOwned;
-  document.getElementById('btn-exclude-owned').classList.toggle('active', state.lassoExcludeOwned);
+// Lasso filter chips (only shown while lasso is on)
+function setChip(key, on) {
+  state[key] = on;
+  document.querySelector(`#lasso-chips [data-filter="${key}"]`).setAttribute('aria-pressed', String(on));
 }
+document.querySelectorAll('#lasso-chips .chip').forEach(chip => chip.onclick = async () => {
+  const key = chip.dataset.filter, on = !state[key];
+  // "Only New" needs the capture history; without it every phone looks captured
+  if (on && key === 'lassoOnlyNew' && !(await ensurePastCaptures())) return;
+  setChip(key, on);
+});
 
-function toggleExcludeCellmates() {
-  state.lassoExcludeCellmates = !state.lassoExcludeCellmates;
-  document.getElementById('btn-exclude-cellmates').classList.toggle('active', state.lassoExcludeCellmates);
-}
-
-function toggleOnlyNew() {
-  state.lassoOnlyNew = !state.lassoOnlyNew;
-  document.getElementById('btn-only-new').classList.toggle('active', state.lassoOnlyNew);
-}
-
-async function togglePhotoFilter() {
-  state.photoFilter = !state.photoFilter;
-  const btn = document.getElementById('btn-photo-filter');
-  btn.classList.toggle('active', state.photoFilter);
-
-  if (state.photoFilter && state.newPhoneFilter) {
-    state.newPhoneFilter = false;
-    document.getElementById('btn-capture-filter').classList.remove('active');
+// Capture history for "never captured" checks (Only New chip, New highlight)
+async function ensurePastCaptures() {
+  if (state.pastCaptureIds !== null) return true;
+  const username = state.username;
+  if (!username) { toast('Add your name first so we can look up your capture history'); return false; }
+  try {
+    const res = await fetch(`/api/past-captures?username=${encodeURIComponent(username)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (username !== state.username) return false;  // name changed mid-request
+    state.pastCaptureIds = new Set((data.captured || []).map(Number));
+    return true;
+  } catch (_) {
+    toast("Couldn't load your capture history — try again shortly");
+    return false;
   }
+}
 
-  if (!state.photoFilter) {
-    state.phones.forEach(p => refreshMarker(p));
-    return;
-  }
+// Highlights (Layers popover). Mutually exclusive: both recolour the dot outline.
+const hlPhoto = document.getElementById('hl-photo');
+const hlNew   = document.getElementById('hl-new');
 
-  if (state.wikiPhotoIds === null) {
-    btn.querySelector('.button-label').textContent = 'Loading…';
-    btn.setAttribute('aria-busy', 'true');
-    btn.disabled = true;
+async function setPhotoFilter(on) {
+  if (on && state.wikiPhotoIds === null) {
+    hlPhoto.disabled = true;
     try {
-      const res  = await fetch('/api/photo-coverage');
+      const res = await fetch('/api/photo-coverage');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       state.wikiPhotoIds = new Set((data.has_photo || []).map(Number));
     } catch (_) {
-      state.photoFilter = false;
-      btn.classList.remove('active');
-      btn.disabled = false;
-      btn.querySelector('.button-label').textContent = 'Wiki photos';
-      btn.removeAttribute('aria-busy');
-      return;
+      on = false;
+      toast("Couldn't load wiki photo coverage — try again shortly");
+    } finally {
+      hlPhoto.disabled = false;
     }
-    btn.disabled = false;
-    btn.querySelector('.button-label').textContent = 'Wiki photos';
-    btn.removeAttribute('aria-busy');
   }
-
+  state.photoFilter = on;
+  hlPhoto.checked = on;
+  if (on && state.newPhoneFilter) { state.newPhoneFilter = false; hlNew.checked = false; }
   state.phones.forEach(p => refreshMarker(p));
 }
 
-async function toggleNewPhoneFilter() {
-  state.newPhoneFilter = !state.newPhoneFilter;
-  const btn = document.getElementById('btn-capture-filter');
-  btn.classList.toggle('active', state.newPhoneFilter);
-
-  if (state.newPhoneFilter && state.photoFilter) {
-    state.photoFilter = false;
-    document.getElementById('btn-photo-filter').classList.remove('active');
+async function setNewPhoneFilter(on) {
+  if (on) {
+    hlNew.disabled = true;
+    on = await ensurePastCaptures();
+    hlNew.disabled = false;
   }
-
-  if (!state.newPhoneFilter) {
-    state.phones.forEach(p => refreshMarker(p));
-    return;
-  }
-
-  const username = document.getElementById('username').value.trim();
-  if (!username) {
-    alert('Enter your username first so we can look up your capture history.');
-    state.newPhoneFilter = false;
-    btn.classList.remove('active');
-    return;
-  }
-
-  if (state.pastCaptureIds === null) {
-    btn.querySelector('.button-label').textContent = 'Loading…';
-    btn.setAttribute('aria-busy', 'true');
-    btn.disabled = true;
-    try {
-      const res  = await fetch(`/api/past-captures?username=${encodeURIComponent(username)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      state.pastCaptureIds = new Set((data.captured || []).map(Number));
-    } catch (_) {
-      state.newPhoneFilter = false;
-      btn.classList.remove('active');
-      btn.disabled = false;
-      btn.querySelector('.button-label').textContent = 'New phones';
-      btn.removeAttribute('aria-busy');
-      return;
-    }
-    btn.disabled = false;
-    btn.querySelector('.button-label').textContent = 'New phones';
-    btn.removeAttribute('aria-busy');
-  }
-
+  state.newPhoneFilter = on;
+  hlNew.checked = on;
+  if (on && state.photoFilter) { state.photoFilter = false; hlPhoto.checked = false; }
   state.phones.forEach(p => refreshMarker(p));
 }
+hlPhoto.onchange = () => setPhotoFilter(hlPhoto.checked);
+hlNew.onchange   = () => setNewPhoneFilter(hlNew.checked);
 
-// ── Lasso (mouse) ─────────────────────────────────────────────────
-function onLassoStart(e) {
-  if (e.originalEvent.button !== 0) return;
-  state.lassoPoints = [[e.latlng.lat, e.latlng.lng]];
+// ── Lasso input ───────────────────────────────────────────────────
+// One pointer draws. A second finger means pan/pinch rather than a lasso: the
+// stroke is dropped and Leaflet's own two-finger handling moves the map.
+const _lassoPointers = new Set();
+mapEl.addEventListener('pointerdown', e => {
+  if (!isLassoMode()) return;
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  _lassoPointers.add(e.pointerId);
+  if (_lassoPointers.size > 1) { cancelLassoStroke(); return; }
+  mapEl.setPointerCapture(e.pointerId);
+  const ll = map.mouseEventToLatLng(e);
+  state.lassoPoints   = [[ll.lat, ll.lng]];
   state.lassoDragging = true;
-  map.on('mousemove', onLassoMove);
-  map.on('mouseup',   onLassoEnd);
-}
-function onLassoMove(e) {
-  if (!state.lassoDragging) return;
-  state.lassoPoints.push([e.latlng.lat, e.latlng.lng]);
-  drawLassoPreview();
-}
-function onLassoEnd() {
-  state.lassoDragging = false;
-  map.off('mousemove', onLassoMove);
-  map.off('mouseup',   onLassoEnd);
-  finishLasso();
-}
-
-// ── Lasso (touch — native DOM so passive:false works) ─────────────
-function touchLatLng(e) {
-  const t = e.touches[0];
-  const r = mapEl.getBoundingClientRect();
-  return map.containerPointToLatLng(L.point(t.clientX - r.left, t.clientY - r.top));
-}
-function onLassoTouchStart(e) {
-  e.preventDefault();
-  const ll = touchLatLng(e);
-  state.lassoPoints  = [[ll.lat, ll.lng]];
-  state.lassoDragging = true;
-}
-function onLassoTouchMove(e) {
-  if (!state.lassoDragging) return;
-  e.preventDefault();
-  const ll = touchLatLng(e);
+});
+mapEl.addEventListener('pointermove', e => {
+  if (!state.lassoDragging || _lassoPointers.size > 1) return;
+  const ll = map.mouseEventToLatLng(e);
   state.lassoPoints.push([ll.lat, ll.lng]);
   drawLassoPreview();
-}
-function onLassoTouchEnd(e) {
+});
+mapEl.addEventListener('pointerup', e => {
+  _lassoPointers.delete(e.pointerId);
   if (!state.lassoDragging) return;
   state.lassoDragging = false;
   finishLasso();
+});
+mapEl.addEventListener('pointercancel', e => {
+  _lassoPointers.delete(e.pointerId);
+  cancelLassoStroke();
+});
+function cancelLassoStroke() {
+  state.lassoDragging = false;
+  state.lassoPoints = [];
+  cleanupLasso();
+}
+// While lassoing the map owns its touches. Without this the browser reads a
+// stroke as a gesture and swallows the next tap (e.g. turning Lasso off).
+// Leaflet's own two-finger listeners still run; this only blocks browser defaults.
+for (const type of ['touchstart', 'touchmove']) {
+  mapEl.addEventListener(type, e => { if (isLassoMode()) e.preventDefault(); }, { passive: false });
 }
 
 function drawLassoPreview() {
   if (state.lassoLayer) map.removeLayer(state.lassoLayer);
   if (state.lassoPoints.length < 2) return;
   state.lassoLayer = L.polygon(state.lassoPoints, {
-    color: '#6677ff', fillColor: '#6677ff', fillOpacity: 0.08,
+    color: state.mode === 'lasso-deselect' ? '#efa29a' : '#9bbce0',
+    fillColor: state.mode === 'lasso-deselect' ? '#efa29a' : '#9bbce0', fillOpacity: 0.08,
     weight: 1.5, dashArray: '5 4',
   }).addTo(map);
 }
 function finishLasso() {
   cleanupLasso();
-  if (state.lassoPoints.length < 3) return;
   const poly = state.lassoPoints;
+  state.lassoPoints = [];
+  if (poly.length < 3) return;
   const deselecting = state.mode === 'lasso-deselect';
+  let changed = 0;
   state.phones.forEach(phone => {
     if (!deselecting && state.lassoExcludeOwned && phone.status === 'mine') return;
     if (!deselecting && state.lassoExcludeCellmates && phone.status === 'cellmate') return;
@@ -871,13 +958,18 @@ function finishLasso() {
       const isNew = state.pastCaptureIds !== null && !state.pastCaptureIds.has(Number(phone.id));
       if (!isNew) return;
     }
-    if (pointInPolygon([phone.lat, phone.lon], poly)) {
-      deselecting ? state.selectedIds.delete(phone.id) : state.selectedIds.add(phone.id);
+    if (!pointInPolygon([phone.lat, phone.lon], poly)) return;
+    if (deselecting ? state.selectedIds.delete(phone.id)
+                    : !state.selectedIds.has(phone.id) && state.selectedIds.add(phone.id)) {
+      changed++;
       refreshMarker(phone);
     }
   });
-  state.lassoPoints = [];
+  // The count badge on Clear is the feedback; only say something when nothing happened
+  if (!changed) toast(deselecting ? 'No selected phones in that area' : 'No phones in that area');
+  else if (navigator.vibrate) navigator.vibrate(18);
   updateSelCount();
+  saveSession();
 }
 function cleanupLasso() {
   if (state.lassoLayer) { map.removeLayer(state.lassoLayer); state.lassoLayer = null; }
@@ -895,15 +987,13 @@ function pointInPolygon(pt, poly) {
 
 // ── Marker click ──────────────────────────────────────────────────
 function onMarkerClick(phone) {
-  if (state.mode === 'setStart') {
-    setEndpoint('start', { lat: phone.lat, lon: phone.lon, phone_id: phone.id });
+  if (state.mode === 'setStart' || state.mode === 'setEnd') {
+    setEndpoint(state.mode === 'setStart' ? 'start' : 'end',
+      { lat: phone.lat, lon: phone.lon, phone_id: phone.id, label: `Phone #${phone.id}` });
     return;
   }
-  if (state.mode === 'setEnd') {
-    setEndpoint('end', { lat: phone.lat, lon: phone.lon, phone_id: phone.id });
-    return;
-  }
-  if (state.mode === 'navigate') return;
+  if (inNav()) return;  // the plan is hidden while navigating
+  if (state.routeMode === 'orienteer') return;  // orienteering picks its own phones
   const adding = !state.selectedIds.has(phone.id);
   adding ? state.selectedIds.add(phone.id) : state.selectedIds.delete(phone.id);
   if (adding && navigator.vibrate) navigator.vibrate(18);
@@ -912,74 +1002,188 @@ function onMarkerClick(phone) {
 }
 
 // ── Endpoints ─────────────────────────────────────────────────────
-function showStatusBar(msg) {
-  const bar = document.getElementById('status-bar');
-  document.getElementById('status-bar-msg').innerHTML = msg;
-  bar.style.display = 'block';
-  document.getElementById('endpoint-actions').style.display = 'flex';
-  // Nudge the filter buttons below the banner so it doesn't cover them
-  document.getElementById('filter-stack').style.top = (bar.offsetHeight + 8) + 'px';
-}
-function hideStatusBar() {
-  document.getElementById('status-bar').style.display = 'none';
-  document.getElementById('endpoint-actions').style.display = 'none';
-  document.getElementById('filter-stack').style.top = '';
-}
+let _pickBackup = null;  // start/end as they were when map picking began
 
-let _endpointBackup = null;  // start/end as they were when selection began
-
-function startSetEndpoints() {
-  if (state.mode === 'setStart' || state.mode === 'setEnd') {
-    cancelSetEndpoints();
-    return;
-  }
-  _endpointBackup = { start: state.start, end: state.end };
-  document.getElementById('btn-set-endpoints').classList.add('active');
-  setMode('setStart');
-  showStatusBar('Tap your <span class="ep-start">starting</span> location on the map');
+function startPicking(which) {
+  if (isLassoMode()) setMode('click');
+  _pickBackup = { start: state.start, end: state.end };
+  setMode(which === 'start' ? 'setStart' : 'setEnd');
+  document.body.classList.add('picking');
+  syncSheetH();
+  document.getElementById('pick-banner').innerHTML = which === 'start'
+    ? 'Tap the map to set your <b class="start">start</b>'
+    : 'Tap the map to set your <b class="end">end</b>';
+  document.getElementById('pick-banner').hidden = false;
+  document.getElementById('pick-actions').hidden = false;
 }
-
-// Keep the current point untouched and move to the next step
-function skipEndpointStep() {
-  if (state.mode === 'setStart') {
-    setMode('setEnd');
-    showStatusBar('Now tap your <span class="ep-end">ending</span> location on the map');
-  } else {
-    finishSetEndpoints();
-  }
-}
-
-// Exit selection and put back whatever start/end existed before it began
-function cancelSetEndpoints() {
-  if (_endpointBackup) {
-    state.start = _endpointBackup.start;
-    state.end   = _endpointBackup.end;
-    ['start', 'end'].forEach(which => {
-      const key = `${which}Marker`;
-      if (!state[which] && state[key]) { map.removeLayer(state[key]); state[key] = null; }
-    });
-    restoreEndpointMarkers();
-  }
-  finishSetEndpoints();
-}
-
-function finishSetEndpoints() {
+function stopPicking() {
   setMode('click');
-  hideStatusBar();
-  document.getElementById('btn-set-endpoints').classList.remove('active');
+  document.body.classList.remove('picking');
+  syncSheetH();
+  document.getElementById('pick-banner').hidden = true;
+  document.getElementById('pick-actions').hidden = true;
+  renderPlan();
+}
+function pickCancel() {
+  if (_pickBackup) { state.start = _pickBackup.start; state.end = _pickBackup.end; drawEndpoints(); }
+  stopPicking();
 }
 
-// Remove the start/end waypoints and their markers. Deliberately leaves any
-// active route alone — its layers, waypoints and progress live separately,
-// so a route being followed keeps working.
-function clearEndpoints() {
-  if (state.mode === 'setStart' || state.mode === 'setEnd') finishSetEndpoints();
+function pickOnMap(which, latlng) {
+  const pt = snapPoint(latlng);
+  if (pt.phone_id != null) { pt.label = `Phone #${pt.phone_id}`; setEndpoint(which, pt); return; }
+  const w = map.wrapLatLng([pt.lat, pt.lon]);
+  pt.lat = w.lat; pt.lon = w.lng;
+  pt.label = 'Dropped Pin';
+  setEndpoint(which, pt);
+  reverseLabel(pt).then(label => {
+    if (!label || state[which] !== pt) return;  // a newer point replaced it meanwhile
+    pt.label = label;
+    renderPlan(); saveSession();
+  });
+}
+
+function clearEnds() {
+  const prev = { start: state.start, end: state.end };
+  if (!prev.start && !prev.end) return;
+  state.start = state.end = null;
+  drawEndpoints(); renderPlan(); saveSession();
+  toast('Start and end cleared', () => {
+    state.start = prev.start; state.end = prev.end;
+    drawEndpoints(); renderPlan(); saveSession();
+  });
+}
+
+function useMyLocation(which) {
+  const set = (lat, lon) => setEndpoint(which, { lat, lon, label: 'My Location' });
+  if (lastLatLng) { set(lastLatLng[0], lastLatLng[1]); return; }
+  if (!navigator.geolocation) { toast("Location isn't available on this device"); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => set(pos.coords.latitude, pos.coords.longitude),
+    () => toast("Couldn't get your location — check location permissions"),
+    { enableHighAccuracy: true, timeout: 10000 });
+}
+
+// ── Address search (backend proxies Photon) ──────────────────────
+function placeFromFeature(f) {
+  const p = f.properties || {}, [lon, lat] = f.geometry.coordinates;
+  const street = [p.housenumber, p.street].filter(Boolean).join(' ');
+  const title = p.name || street || p.city || 'Unnamed place';
+  const sub = [p.name ? street : '', p.city || p.locality || p.district, p.state].filter(Boolean).join(', ');
+  return { lat, lon, title, sub };
+}
+async function geocode(q, signal) {
+  const c = map.wrapLatLng(map.getCenter());
+  const qs = new URLSearchParams({ q, lat: c.lat.toFixed(4), lon: c.lng.toFixed(4) });
+  const res = await fetch(`/api/geocode?${qs}`, { signal });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()).features.map(placeFromFeature);
+}
+async function reverseLabel(pt) {
+  try {
+    const res = await fetch(`/api/reverse?lat=${pt.lat}&lon=${pt.lon}`);
+    if (!res.ok) return null;
+    const f = (await res.json()).features[0];
+    return f ? placeFromFeature(f).title : null;
+  } catch (_) { return null; }
+}
+
+const searchScreen = document.getElementById('search-screen');
+const searchInput  = document.getElementById('search-input');
+const searchList   = document.getElementById('search-list');
+let searchWhich = null, searchItems = [], searchActive = -1, searchTimer = null, searchCtrl = null;
+
+function searchFixedItems() {
+  const which = searchWhich;
+  return [
+    { icon: 'gps', title: 'My Location', run: () => useMyLocation(which) },
+    ...(which === 'end' && state.start
+      ? [{ icon: 'loop', title: 'Same as Start', run: () => setEndpoint('end', { ...state.start }) }] : []),
+    { icon: 'pin', title: 'Choose on Map', run: () => startPicking(which) },
+  ];
+}
+function openSearch(which) {
+  searchWhich = which;
+  searchInput.placeholder = which === 'start' ? 'Search for a start' : 'Search for an end';
+  searchInput.value = '';
+  showSearchItems(searchFixedItems());
+  // Desktop: cover the whole side panel so the fields underneath don't show through
+  searchScreen.style.minHeight = desktopPanel.matches ? `${sheet.offsetHeight}px` : '';
+  searchScreen.hidden = false;
+  searchInput.focus();  // inside the tap handler, so mobile keyboards open
+}
+function closeSearch() {
+  clearTimeout(searchTimer);
+  if (searchCtrl) searchCtrl.abort();
+  searchScreen.hidden = true;
+  document.getElementById(`${searchWhich}-field`).focus();
+}
+function showSearchItems(items) {
+  searchItems = items; searchActive = -1;
+  searchList.replaceChildren(...items.map((it, i) => {
+    const li = document.createElement('li');
+    li.id = `search-opt-${i}`;
+    if (it.msg) { li.className = 'msg'; li.textContent = it.msg; return li; }
+    li.setAttribute('role', 'option');
+    const icon = document.createElement('span');
+    icon.className = `icon icon-${it.icon}`; icon.setAttribute('aria-hidden', 'true');
+    const text = document.createElement('span');
+    const t = document.createElement('span'); t.className = 't'; t.textContent = it.title;
+    text.append(t);
+    if (it.sub) { const sub = document.createElement('span'); sub.className = 's'; sub.textContent = it.sub; text.append(sub); }
+    li.append(icon, text);
+    li.onclick = () => chooseSearchItem(i);
+    return li;
+  }));
+  searchInput.removeAttribute('aria-activedescendant');
+}
+function chooseSearchItem(i) {
+  const it = searchItems[i];
+  if (!it || it.msg) return;
+  closeSearch();
+  it.run();
+}
+function moveSearchActive(step) {
+  const opts = searchItems.map((it, k) => it.msg ? -1 : k).filter(k => k >= 0);
+  if (!opts.length) return;
+  const at = opts.indexOf(searchActive);
+  searchActive = at < 0 ? opts[step > 0 ? 0 : opts.length - 1] : opts[(at + step + opts.length) % opts.length];
+  searchList.querySelectorAll('li').forEach((li, k) => li.setAttribute('aria-selected', String(k === searchActive)));
+  searchInput.setAttribute('aria-activedescendant', `search-opt-${searchActive}`);
+}
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.trim(), which = searchWhich;
+  clearTimeout(searchTimer);
+  if (searchCtrl) searchCtrl.abort();
+  if (q.length < 3) { showSearchItems(searchFixedItems()); return; }
+  searchTimer = setTimeout(async () => {
+    searchCtrl = new AbortController();
+    showSearchItems([{ msg: 'Searching…' }]);
+    try {
+      const places = await geocode(q, searchCtrl.signal);
+      showSearchItems(places.length
+        ? [...places.map(p => ({ icon: 'pin', title: p.title, sub: p.sub,
+              run: () => setEndpoint(which, { lat: p.lat, lon: p.lon, label: p.title }) })),
+           { icon: 'pin', title: 'Choose on Map', run: () => startPicking(which) }]
+        : [{ msg: 'No matches in Australia' }, ...searchFixedItems()]);
+    } catch (e) {
+      if (e.name !== 'AbortError') showSearchItems([{ msg: 'Search unavailable — choose on the map instead' }, ...searchFixedItems()]);
+    }
+  }, 250);
+});
+searchInput.addEventListener('keydown', e => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); moveSearchActive(e.key === 'ArrowDown' ? 1 : -1); }
+  else if (e.key === 'Enter') { e.preventDefault(); chooseSearchItem(searchActive >= 0 ? searchActive : searchItems.findIndex(it => !it.msg)); }
+  else if (e.key === 'Escape') { e.stopPropagation(); closeSearch(); }
+});
+
+function drawEndpoints() {
   ['start', 'end'].forEach(which => {
-    state[which] = null;
     const key = `${which}Marker`;
     if (state[key]) { map.removeLayer(state[key]); state[key] = null; }
+    const pt = state[which];
+    if (pt) state[key] = L.marker([pt.lat, pt.lon], { icon: makeEndpointIcon(which, pt), zIndexOffset: 500 }).addTo(map);
   });
-  saveSession();
 }
 
 // Snap to nearest phone within SNAP_PX pixels, otherwise raw coords
@@ -1022,26 +1226,20 @@ function makeEndpointIcon(which, point) {
 }
 
 function setEndpoint(which, point) {
+  const picking = state.mode === 'setStart' || state.mode === 'setEnd';
   state[which] = point;
-  const oldKey = `${which}Marker`;
-  if (state[oldKey]) map.removeLayer(state[oldKey]);
-  const icon = makeEndpointIcon(which, point);
-  state[oldKey] = L.marker([point.lat, point.lon], { icon, zIndexOffset: 500 }).addTo(map);
-
-  // Sequential flow: after start is set, automatically prompt for end
-  if (which === 'start') {
-    setMode('setEnd');
-    showStatusBar('Now tap your <span class="ep-end">ending</span> location on the map');
-  } else {
-    finishSetEndpoints();
-  }
+  drawEndpoints();
+  if (picking) stopPicking(); else renderPlan();
+  saveSession();
+  // A searched place may be off-screen; bring it into view
+  if (!picking && !map.getBounds().contains([point.lat, point.lon])) map.panTo([point.lat, point.lon]);
 }
 
 // ── Transport ─────────────────────────────────────────────────────
 function setProfile(p) {
   state.profile = p;
-  ['foot','bicycle','car'].forEach(n =>
-    document.getElementById(`btn-${n}`).classList.toggle('active', n === p));
+  renderPlan();
+  saveSession();
 }
 
 // ── Share links ───────────────────────────────────────────────────
@@ -1084,18 +1282,9 @@ function buildShareUrl() {
   return `${location.origin}${location.pathname}?${p}`.replace(/%2C/g, ',');
 }
 
-function showShareStatus(msg, color) {
-  const el = document.getElementById('share-status');
-  el.textContent = msg;
-  el.style.color = color || '#a8afb5';
-  el.style.display = 'block';
-  clearTimeout(el._t);
-  el._t = setTimeout(() => { el.style.display = 'none'; }, 6000);
-}
-
 async function shareSelection() {
   if (!state.selectedIds.size && !state.start && !state.end) {
-    showShareStatus('Nothing to share yet — select some phones first.', '#e67e22');
+    toast('Nothing to share yet — select some phones first');
     return;
   }
   const url = buildShareUrl();
@@ -1104,7 +1293,7 @@ async function shareSelection() {
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(url);
-      showShareStatus('Share link copied to clipboard.', '#2ecc71');
+      toast('Share link copied');
       return;
     }
   } catch (err) { /* fall through to the legacy path */ }
@@ -1117,7 +1306,7 @@ async function shareSelection() {
     ta.select();
     const ok = document.execCommand('copy');
     document.body.removeChild(ta);
-    if (ok) { showShareStatus('Share link copied to clipboard.', '#2ecc71'); return; }
+    if (ok) { toast('Share link copied'); return; }
   } catch (err) { /* fall through to manual copy */ }
   window.prompt('Copy this share link:', url);
 }
@@ -1153,23 +1342,15 @@ function applyShareParams(p) {
 
 // ── Map click: endpoint setting with snap ─────────────────────────
 map.on('click', (e) => {
-  if (state.mode === 'setStart') {
-    setEndpoint('start', snapPoint(e.latlng));
-  } else if (state.mode === 'setEnd') {
-    setEndpoint('end', snapPoint(e.latlng));
-  }
+  if (state.mode === 'setStart') pickOnMap('start', e.latlng);
+  else if (state.mode === 'setEnd') pickOnMap('end', e.latlng);
+  else if (sheetFull && !desktopPanel.matches) setSheetFull(false);  // tap the map to get it back
 });
 
 // ── Route ─────────────────────────────────────────────────────────
 async function findRoute() {
-  if (!state.selectedIds.size) { alert('Select at least one phone first.'); return; }
-  if (!state.start) { alert('Set a start point first.'); return; }
-  if (!state.end)   { alert('Set an end point first.'); return; }
-
-  document.getElementById('btn-route').disabled = true;
-  document.getElementById('spinner').style.display = 'block';
-  document.getElementById('route-result').style.display = 'none';
-
+  if (routeBusy || planProblem()) return;  // the button explains what's missing
+  setRouteBusy(true);
   try {
     const res = await fetch('/api/route', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1180,35 +1361,15 @@ async function findRoute() {
     });
     if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || `HTTP ${res.status}`); }
     const data = await res.json();
+    if (isLassoMode()) setMode('click');
     displayRoute(data);
     state.lastRoute = data;
-    setMode('click');
-    updatePanelPeek();
     saveSession();
   } catch (e) {
-    alert(`Route error: ${e.message}`);
+    toast(`Route error: ${e.message}`);
   } finally {
-    document.getElementById('btn-route').disabled = false;
-    document.getElementById('spinner').style.display = 'none';
+    setRouteBusy(false);
   }
-}
-
-// ── Panel tab switching (Route / Orienteer / Settings) ───────────
-function setPanelTab(tab) {
-  state.routeMode = tab;
-  const isSettings = tab === 'settings';
-  document.getElementById('panel-tab-route').style.display      = tab === 'route'     ? '' : 'none';
-  document.getElementById('panel-tab-orienteer').style.display  = tab === 'orienteer' ? 'block' : 'none';
-  document.getElementById('panel-tab-settings').style.display   = isSettings ? 'block' : 'none';
-  document.getElementById('section-route-common').style.display = isSettings ? 'none' : '';
-  document.getElementById('section-identity').style.display     = isSettings ? 'none' : '';
-  const routeResult = document.getElementById('route-result');
-  if (routeResult) routeResult.style.display = !isSettings && state.routeOrderedIds.length ? 'block' : 'none';
-  document.getElementById('btn-panel-tab-route').classList.toggle('active',     tab === 'route');
-  document.getElementById('btn-panel-tab-orienteer').classList.toggle('active', tab === 'orienteer');
-  document.getElementById('btn-panel-tab-settings').classList.toggle('active',  tab === 'settings');
-  if (!panelOpen) setPanelOpen(true);
-  saveSession();
 }
 
 // ── Orienteer controls ────────────────────────────────────────────
@@ -1239,14 +1400,9 @@ function computeOrienteerBudget() {
 
 
 async function findOrienteerRoute() {
-  if (!state.start) { alert('Set a start point first.'); return; }
-  if (!state.end)   { alert('Set an end point first.'); return; }
-  const username = document.getElementById('username').value.trim();
-  if (!username) { alert('Enter username first.'); return; }
-
-  document.getElementById('btn-orienteer').disabled = true;
-  document.getElementById('spinner-orienteer').style.display = 'block';
-  document.getElementById('route-result').style.display = 'none';
+  if (routeBusy || planProblem()) return;  // the button explains what's missing
+  const username = state.username;
+  setRouteBusy(true);
 
   const bufferS = computeOrienteerBuffer();
   state.lastOrienteerBufferS = bufferS;
@@ -1273,13 +1429,11 @@ async function findOrienteerRoute() {
     const data = await res.json();
     displayRoute(data, bufferS);
     state.lastRoute = data;
-    updatePanelPeek();
     saveSession();
   } catch (e) {
-    alert(`Orienteer error: ${e.message}`);
+    toast(`Orienteer error: ${e.message}`);
   } finally {
-    document.getElementById('btn-orienteer').disabled = false;
-    document.getElementById('spinner-orienteer').style.display = 'none';
+    setRouteBusy(false);
   }
 }
 
@@ -1296,6 +1450,7 @@ function rainbowColors(n) {
 
 function displayRoute(data, extraS = 0) {
   clearRoute();
+  state.lastRouteExtraS = extraS;
   const { ordered_ids, path, total_distance_m, total_duration_s } = data;
   state.routeOrderedIds = ordered_ids;   // available before state.lastRoute is set
 
@@ -1334,9 +1489,9 @@ function displayRoute(data, extraS = 0) {
     : `${totalMins}m`;
   const arriveAt = new Date(Date.now() + totalS * 1000);
   const timeStr  = arriveAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
-  document.getElementById('route-stats').textContent = `${km} km · ${durStr} · ${timeStr} · ${ordered_ids.length} stops`;
-  document.getElementById('route-result').style.display = 'block';
+  document.getElementById('route-stats').textContent = `${km} km · ${durStr} · arrive ${timeStr}`;
   updateMapsLink(data);
+  renderNav();
   startBackgroundRefresh();  // switch to active polling while navigating a route
 }
 
@@ -1349,9 +1504,7 @@ function clearRoute() {
   state.routeProgress = 0; state.routeOrderedIds = [];
   state.lastRoute = null;
   updateMapsLink(null);
-  document.getElementById('route-result').style.display   = 'none';
-  document.getElementById('stop-indicator').style.display = 'none';
-  updatePanelPeek();
+  renderNav();
   saveSession();
   startBackgroundRefresh();  // switch back to idle polling when route is cleared
 }
@@ -1402,13 +1555,40 @@ function buildLegs(data) {
 }
 
 function updateMapsLink(data) {
-  const nav = document.getElementById('maps-nav');
-  if (!data) { nav.style.display = 'none'; return; }
-
-  state.mapsLegs   = buildLegs(data);
+  state.mapsLegs   = data ? buildLegs(data) : [];
   state.currentLeg = 0;
-  nav.style.display = state.mapsLegs.length ? 'block' : 'none';
-  renderLeg();
+}
+
+// Plan ↔ Navigate: the sheet shows the navigate card while a route exists
+function renderNav() {
+  const active = inNav();
+  document.getElementById('plan-view').hidden = active;
+  document.getElementById('nav-view').hidden  = !active;
+  document.getElementById('grabber').hidden   = active;
+  if (active) setSheetFull(false);
+  renderPlan();
+  if (active) renderLeg();
+}
+
+// End the route (Undo brings it back with progress intact)
+function endRoute() {
+  const snap = { data: state.lastRoute, extraS: state.lastRouteExtraS, progress: state.routeProgress,
+                 nodeStates: { ...state.nodeStates }, leg: state.currentLeg,
+                 start: state.start, end: state.end };
+  clearRoute();
+  if (!snap.data) return;
+  toast('Route ended', () => {
+    state.start = snap.start; state.end = snap.end;  // legs are built from these
+    drawEndpoints();
+    displayRoute(snap.data, snap.extraS);
+    state.lastRoute     = snap.data;
+    state.routeProgress = snap.progress;
+    state.nodeStates    = snap.nodeStates;
+    state.currentLeg    = snap.leg;
+    renderLeg();
+    startBackgroundRefresh();
+    saveSession();
+  });
 }
 
 // Map a routeProgress index → the appropriate mapsLegs index.
@@ -1424,48 +1604,37 @@ function legForProgress(prog) {
 }
 
 function renderLeg() {
-  const legs = state.mapsLegs;
-  if (!legs.length) return;
+  const legs       = state.mapsLegs;
+  const orderedIds = state.routeOrderedIds;
+  const prog       = state.routeProgress;
+  const n          = orderedIds.length;
+  const done       = prog >= n;
 
   // Auto-advance currentLeg to follow the current target stop (never retreat it here)
-  const prog = state.routeProgress;
-  if (state.routeOrderedIds.length && prog < state.routeOrderedIds.length) {
+  if (legs.length && !done) {
     const correctLeg = legForProgress(prog);
     if (correctLeg > state.currentLeg) state.currentLeg = correctLeg;
   }
 
-  const i    = state.currentLeg;
-  const leg  = legs[i];
-  const total = legs.length;
+  document.getElementById('nav-badge').textContent = done ? '✓' : prog + 1;
+  document.getElementById('nav-title').textContent = done ? 'All Stops Visited' : `Stop ${prog + 1} of ${n}`;
+  document.getElementById('btn-revert').disabled    = prog === 0;
+  document.getElementById('skip-stop-btn').disabled = done;
+  document.getElementById('maps-btn').disabled      = !legs.length;
 
-  // Human-readable label: "Leg 2 of 7"  or just "All stops" if only 1 leg
-  const label = total === 1
-    ? 'All stops'
-    : `Leg ${i + 1} of ${total}`;
-  document.getElementById('leg-label').textContent = label;
-
-  // Chevron state: dim when navigation in that direction is locked/unavailable
-  const minLeg = (state.routeOrderedIds.length && prog < state.routeOrderedIds.length)
-    ? legForProgress(prog) : 0;
-  const canBack = i > minLeg;
-  const canFwd  = i < total - 1;
-  document.getElementById('leg-prev-hint').style.opacity = canBack ? '0.65' : '0.18';
-  document.getElementById('leg-next-hint').style.opacity = canFwd  ? '0.65' : '0.18';
-
-  // Stop indicator + SKIP row — visible while there are still phones to visit
-  const tagRow  = document.getElementById('tag-row');
-  const stopInd = document.getElementById('stop-indicator');
-  const orderedIds = state.routeOrderedIds;
-  if (orderedIds.length && prog < orderedIds.length) {
-    stopInd.style.display = 'flex';
-    document.getElementById('stop-badge').textContent       = prog + 1;
-    document.getElementById('stop-total-label').textContent = orderedIds.length;
-    tagRow.style.display = 'flex';
-    document.getElementById('btn-revert').disabled = prog === 0;
-    tagRow.children[1].querySelector('.button-label').textContent = 'Skip';
-  } else {
-    stopInd.style.display = 'none';
-    tagRow.style.display  = 'none';
+  // Leg switcher only when Google Maps needs more than one leg
+  document.getElementById('leg-row').hidden = legs.length < 2;
+  if (legs.length) {
+    const i   = state.currentLeg;
+    const leg = legs[i];
+    // all[] = [start, phone_1 … phone_n, end]. A leg starts where the last one
+    // ended, so it travels to stops firstStop+1 … lastStop (lastStop n+1 = the end).
+    const a = leg.firstStop + 1, b = Math.min(n, leg.lastStop);
+    const stops = a > b ? 'To End' : a === b ? `Stop ${a}` : `Stops ${a}–${b}`;
+    document.getElementById('leg-label').textContent = `Leg ${i + 1} of ${legs.length} · ${stops}`;
+    const minLeg = !done ? legForProgress(prog) : 0;
+    document.getElementById('leg-prev').disabled = i <= minLeg;
+    document.getElementById('leg-next').disabled = i >= legs.length - 1;
   }
 
   // Refresh waypoint marker classes: active pulse on current target, correct state on others
@@ -1530,10 +1699,10 @@ function revertLeg() {
   renderLeg();
 }
 
-// ── Swipe gesture on #maps-nav ────────────────────────────────────
+// ── Swipe left/right anywhere on the navigate card to change leg ─
 {
   let _swipeX = null, _swipeY = null;
-  const navEl = document.getElementById('maps-nav');
+  const navEl = document.getElementById('nav-view');
   navEl.addEventListener('touchstart', e => {
     const t = e.touches[0];
     _swipeX = t.clientX; _swipeY = t.clientY;
@@ -1545,7 +1714,7 @@ function revertLeg() {
     const dy = t.clientY - _swipeY;
     _swipeX = _swipeY = null;
     // Require horizontal displacement ≥ 40px, more horizontal than vertical
-    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) || state.mapsLegs.length < 2) return;
     changeLeg(dx < 0 ? 1 : -1);   // swipe left → next, swipe right → prev
   }, { passive: true });
 }
@@ -1614,25 +1783,27 @@ function setMapTheme(theme) {
   tileLayer.bringToBack();
   if (miniMap) {
     miniMap.remove(); miniMap = null;
-    document.getElementById('btn-minimap').classList.remove('active');
     toggleMiniMap();
   }
-  document.getElementById('btn-theme-dark').classList.toggle('active', theme === 'dark');
-  document.getElementById('btn-theme-light').classList.toggle('active', theme === 'light');
+  document.querySelectorAll('#theme-switch button').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.theme === theme)));
   saveSession();
 }
+document.querySelectorAll('#theme-switch button').forEach(b => b.onclick = () => setMapTheme(b.dataset.theme));
+document.getElementById('minimap').onchange = toggleMiniMap;
 
 // ── Auto-rotate setting ───────────────────────────────────────────
 function setAutoRotate(on) {
   state.autoRotate = on;
   if (!on && state.headingLocked) _releaseHeadingLock(true);
-  document.getElementById('btn-autorotate-on').classList.toggle('active', on);
-  document.getElementById('btn-autorotate-off').classList.toggle('active', !on);
+  document.getElementById('autorotate').checked = on;
   document.getElementById('fab-centre').title = on
     ? 'Tap: centre + lock heading · Tap again: reset north'
     : 'Tap: centre + reset north';
   saveSession();
 }
+
+document.getElementById('autorotate').onchange = e => setAutoRotate(e.target.checked);
 
 // ── Compass / heading lock ────────────────────────────────────────
 let _compassHeading  = 0;   // device compass heading, degrees clockwise from north
@@ -1760,13 +1931,14 @@ const SESSION_KEY = 'payphone_pathfinder_session';
 function saveSession() {
   try {
     localStorage.setItem(SESSION_KEY, JSON.stringify({
-      username:            document.getElementById('username').value.trim(),
+      username:            state.username,
       profile:             state.profile,
       selectedIds:         Array.from(state.selectedIds),
       start:               state.start,
       end:                 state.end,
       lastRoute:           state.lastRoute,
       routeMode:           state.routeMode,
+      lastRouteExtraS:     state.lastRouteExtraS,
       mapTheme:            state.mapTheme,
       autoRotate:          state.autoRotate,
       orienteerArriveBy: document.getElementById('orienteer-arrive-by')?.value || '',
@@ -1779,12 +1951,13 @@ function restoreSession() {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return false;
     const s = JSON.parse(raw);
-    if (s.username)    document.getElementById('username').value = s.username;
+    if (s.username)    state.username = s.username;
     if (s.profile)     setProfile(s.profile);
     if (s.selectedIds) s.selectedIds.forEach(id => state.selectedIds.add(id));
     if (s.start)       state.start     = s.start;
     if (s.end)         state.end       = s.end;
     if (s.lastRoute)   state.lastRoute = s.lastRoute;
+    if (typeof s.lastRouteExtraS === 'number') state.lastRouteExtraS = s.lastRouteExtraS;
     if (s.mapTheme && TILE_URLS[s.mapTheme]) setMapTheme(s.mapTheme);
     if (typeof s.autoRotate === 'boolean') setAutoRotate(s.autoRotate);
     // Restore arrive-by time (or let IIFE set default if absent)
@@ -1793,24 +1966,13 @@ function restoreSession() {
       if (el) el.value = s.orienteerArriveBy;
       state.orienteerArriveBy = s.orienteerArriveBy;
     }
-    // setPanelTab called last so its saveSession() captures all fully-restored values.
-    // Map legacy 'optimal' value to 'route'.
-    const savedTab = s.routeMode === 'orienteer' ? 'orienteer' : s.routeMode === 'settings' ? 'settings' : 'route';
-    setPanelTab(savedTab);
+    // setPlanMode called last so its saveSession() captures all fully-restored values.
+    // Anything but 'orienteer' (incl. legacy 'optimal' and the old 'settings' tab) is routing.
+    setPlanMode(s.routeMode === 'orienteer' ? 'orienteer' : 'route');
     return !!s.username;
   } catch (_) {
     return false;
   }
-}
-
-function restoreEndpointMarkers() {
-  ['start', 'end'].forEach(which => {
-    const point = state[which];
-    if (!point) return;
-    const markerKey = `${which}Marker`;
-    if (state[markerKey]) map.removeLayer(state[markerKey]);
-    state[markerKey] = L.marker([point.lat, point.lon], { icon: makeEndpointIcon(which, point), zIndexOffset: 500 }).addTo(map);
-  });
 }
 
 // ── Background phone refresh ──────────────────────────────────────
@@ -1819,7 +1981,7 @@ const REFRESH_INTERVAL_ACTIVE_MS = 4_000;   // navigating a route — faster upd
 const REFRESH_INTERVAL_IDLE_MS   = 10_000;  // no active route — relaxed polling
 
 async function refreshPhones() {
-  const username = document.getElementById('username').value.trim();
+  const username = state.username;
   if (!state.phones.length) return;   // username optional — see loadPhones()
   try {
     const qs  = new URLSearchParams(username ? { username } : {});
@@ -1832,6 +1994,7 @@ async function refreshPhones() {
       return;
     }
     const data   = await res.json();
+    if (username !== state.username) return;  // name changed mid-flight; loadPhones has it
     const newMap = Object.fromEntries(data.phones.map(p => [p.id, p]));
     let changed  = 0;
     for (const phone of state.phones) {
@@ -1928,7 +2091,7 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// ── URL prefill ───────────────────────────────────────────────────
+// ── Startup ───────────────────────────────────────────────────────
 (function() {
   restoreSession();
   // No orientation API at all → auto-rotate can never work; grey the setting
@@ -1936,14 +2099,14 @@ document.addEventListener('visibilitychange', () => {
   // clobber the stored session with unrestored values.)
   if (typeof DeviceOrientationEvent === 'undefined') {
     setAutoRotate(false);
-    document.getElementById('btn-autorotate-on').disabled = true;
-    document.getElementById('btn-autorotate-off').disabled = true;
+    document.getElementById('autorotate').disabled = true;
     document.getElementById('autorotate-note').textContent =
       'This device has no compass. Use a two-finger twist to rotate the map manually.';
   }
   maybeShowCartoNotice();
   const p = new URLSearchParams(location.search);
-  if (p.get('username')) document.getElementById('username').value = p.get('username');
+  const urlName = (p.get('username') || '').trim();
+  if (urlName) state.username = urlName;
 
   // Share link: applied *after* restoreSession so it replaces the recipient's
   // stored selection rather than merging with it.
@@ -1951,23 +2114,17 @@ document.addEventListener('visibilitychange', () => {
   if (shared) {
     // Drop the share params from the address bar. Otherwise a later reload — or
     // saveSession() writing the restored copy back — would re-apply this link on
-    // top of whatever the recipient has since changed. The 🔗 button regenerates
+    // top of whatever the recipient has since changed. The share button regenerates
     // a link on demand, so nothing is lost. Keep ?username=, which is theirs.
     const keep = new URLSearchParams();
-    if (p.get('username')) keep.set('username', p.get('username'));
+    if (urlName) keep.set('username', urlName);
     const qs = keep.toString();
     history.replaceState(null, '', location.pathname + (qs ? `?${qs}` : ''));
   }
 
-  const hasUsername = document.getElementById('username').value.trim();
-  if (hasUsername || shared) {
-    setPanelOpen(true);
-    loadPhones();
-  }
-  // Set default arrive-by to now+2h rounded up to the nearest 15 min,
-  // but only if the session restore didn't already set a value.
+  // Default arrive-by: now + 2h rounded up to the nearest 15 min, unless restored
   const arriveEl = document.getElementById('orienteer-arrive-by');
-  if (arriveEl && !arriveEl.value) {
+  if (!arriveEl.value) {
     const def  = new Date(Date.now() + 2 * 3600_000);
     const mins = def.getMinutes();
     const rounded = Math.ceil(mins / 15) * 15;
@@ -1975,6 +2132,26 @@ document.addEventListener('visibilitychange', () => {
     if (rounded >= 60) def.setHours(def.getHours() + 1);
     arriveEl.value = def.toTimeString().slice(0, 5);
   }
+
+  drawEndpoints();
+  renderAvatar();
+  renderNav();
+  for (const which of ['start', 'end']) {
+    const pt = state[which];
+    if (!pt || pt.label || pt.phone_id != null) continue;
+    reverseLabel(pt).then(label => {
+      if (!label || state[which] !== pt) return;
+      pt.label = label;
+      renderPlan(); saveSession();
+    });
+  }
+  // The name is optional: ask once on first visit, skippable. A share link goes
+  // straight to the map; the avatar is there to add a name later.
+  let onboarded = false;
+  try { onboarded = localStorage.getItem(ONBOARDED_KEY) === '1'; } catch (e) {}
+  if (state.username) markOnboarded();
+  if (!state.username && !shared && !onboarded) showOnboarding();
+  else loadPhones();
 })();
 </script>
 </body>
