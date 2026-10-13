@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Pathfinder redesign mockup</title>
 <!-- Throwaway design mockup (direction B: map-first, Plan → Navigate).
      Fake phone data and a fake solver. Address search uses the public Photon API;
@@ -81,19 +81,25 @@
   .note { font-size: 12px; color: var(--muted); line-height: 1.5; margin-top: 6px; }
   #mode-switch button, #profile-switch button { flex: 1; }
 
-  /* From / To search */
-  .place { display: flex; align-items: center; gap: 10px; }
-  .place + .place, .suggest + .place { margin-top: 8px; }
-  .place .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-  .place input { flex: 1; min-width: 0; }
-  .suggest { list-style: none; margin: 6px 0 0 20px; background: var(--raised); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-  .suggest li { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px 12px; cursor: pointer; }
-  .suggest li + li { border-top: 1px solid var(--divider); }
-  .suggest li[aria-selected=true] { background: var(--hover); }
-  .suggest .icon { color: var(--muted); }
-  .suggest .t { display: block; font-size: 14px; color: var(--text); }
-  .suggest .s { display: block; font-size: 12px; color: var(--muted); margin-top: 1px; }
-  .suggest .msg { color: var(--muted); font-size: 13px; cursor: default; }
+  /* From / To: tapping a field opens a full-screen search with the input pinned to the top,
+     so the on-screen keyboard can never cover the suggestions */
+  .place-field { width: 100%; justify-content: flex-start; gap: 10px; text-align: left; font-size: 16px; font-weight: 400; color: var(--text); }
+  .place-field + .place-field { margin-top: 8px; }
+  .place-field .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .place-field .pf-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .place-field .pf-text.unset { color: var(--muted); }
+  #search-screen { position: fixed; inset: 0; z-index: 1250; background: var(--surface); display: flex; flex-direction: column;
+    padding-top: env(safe-area-inset-top); }
+  .search-head { display: flex; align-items: center; gap: 4px; padding: 12px 16px 8px 4px; }
+  .search-head button { flex: none; width: 44px; padding: 0; border: 0; background: transparent; }
+  .search-head input { flex: 1; min-width: 0; }
+  #search-list { list-style: none; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px max(16px, env(safe-area-inset-bottom)); }
+  #search-list li { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 4px; cursor: pointer; border-bottom: 1px solid var(--divider); }
+  #search-list li[aria-selected=true] { background: var(--hover); }
+  #search-list .icon { color: var(--muted); }
+  #search-list .t { display: block; font-size: 15px; color: var(--text); }
+  #search-list .s { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+  #search-list .msg { color: var(--muted); font-size: 13px; cursor: default; }
 
   .cta-row { display: flex; gap: 8px; padding-top: 4px; }
   .go { flex: 1; }
@@ -167,7 +173,7 @@
     .text-btn:hover:not(:disabled) { background: var(--raised); border: 0; color: var(--accent); }
     #plan-summary:hover { background: transparent; }
     #end-route-btn:hover:not(:disabled) { background: #35211f; border-color: var(--danger); }
-    .suggest li:not(.msg):hover { background: var(--hover); }
+    #search-list li:not(.msg):hover { background: var(--hover); }
   }
 
   @media (min-width: 640px) {
@@ -182,6 +188,8 @@
     #toast { left: 50%; right: auto; transform: translateX(-50%); width: 420px; bottom: 20px; }
     .scrim { background: transparent; }
     .popover { left: auto; right: 72px; top: 16px; bottom: auto; width: 320px; border-radius: 12px; border: 1px solid var(--divider); }
+    #search-screen { top: 16px; left: 16px; right: auto; bottom: auto; width: 360px; max-height: calc(100dvh - 32px);
+      border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.3); }
   }
 </style>
 </head>
@@ -202,7 +210,7 @@
     <button class="chip" data-filter="skipOwned" aria-pressed="false"><span class="icon icon-check" aria-hidden="true"></span>Skip Owned</button>
     <button class="chip" data-filter="skipCell" aria-pressed="false"><span class="icon icon-check" aria-hidden="true"></span>Skip Cellmates</button>
   </div>
-  <div id="lasso-hint" hidden>Draw around phones</div>
+  <div id="lasso-hint" hidden></div>
   <div class="dock-row">
     <div class="segmented" role="group" aria-label="Map selection tools">
       <button id="lasso-add" aria-pressed="false" onclick="setLasso('add')"><span class="icon icon-lasso" aria-hidden="true"></span>Lasso</button>
@@ -244,14 +252,8 @@
       <div class="field">
         <div class="field-head"><div class="sec-title">Start &amp; End</div>
           <button class="text-btn" id="clear-ends" onclick="clearEnds()">Clear</button></div>
-        <div class="place"><span class="dot" style="background:#2ecc71"></span>
-          <input type="text" id="start-input" data-which="start" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="start-list"
-                 aria-label="Start" placeholder="Search for a start" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
-        <ul class="suggest" id="start-list" role="listbox" aria-label="Start suggestions" hidden></ul>
-        <div class="place"><span class="dot" style="background:#e74c3c"></span>
-          <input type="text" id="end-input" data-which="end" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="end-list"
-                 aria-label="End" placeholder="Search for an end" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
-        <ul class="suggest" id="end-list" role="listbox" aria-label="End suggestions" hidden></ul>
+        <button class="place-field" id="start-field" onclick="openSearch('start')"><span class="dot" style="background:#2ecc71"></span><span class="pf-text" id="start-text"></span></button>
+        <button class="place-field" id="end-field" onclick="openSearch('end')"><span class="dot" style="background:#e74c3c"></span><span class="pf-text" id="end-text"></span></button>
       </div>
       <div class="field" id="sel-field">
         <div class="field-head"><div class="sec-title">Phones</div></div>
@@ -340,6 +342,16 @@
     </div>
     <label class="switch-row" style="margin-top:8px"><span class="label">Mini-Map</span><input type="checkbox" role="switch" id="minimap"></label>
   </div>
+</div>
+
+<!-- Start/end search (full screen on mobile, over the panel on desktop) -->
+<div id="search-screen" role="dialog" aria-modal="true" aria-label="Search for a place" hidden>
+  <div class="search-head">
+    <button aria-label="Back" onclick="closeSearch()"><span class="icon icon-chevron-left" aria-hidden="true"></span></button>
+    <input type="text" id="search-input" role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="search-list"
+           autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="search">
+  </div>
+  <ul id="search-list" role="listbox" aria-label="Suggestions"></ul>
 </div>
 
 <!-- Endpoint picking on the map -->
@@ -466,7 +478,11 @@ function setLasso(kind) {
   document.getElementById('lasso-add').setAttribute('aria-pressed', S.lasso === 'add');
   document.getElementById('lasso-remove').setAttribute('aria-pressed', S.lasso === 'remove');
   document.getElementById('lasso-chips').hidden = S.lasso !== 'add';
-  document.getElementById('lasso-hint').hidden = !S.lasso;
+  const hint = document.getElementById('lasso-hint');
+  hint.hidden = !S.lasso;
+  hint.textContent = matchMedia('(pointer: coarse)').matches
+    ? 'One finger to draw · Two fingers to move the map'
+    : 'Drag to draw · Scroll to zoom';
   if (S.lasso) { map.dragging.disable(); mapEl.style.touchAction = 'none'; if (innerWidth < 640) setSheetFull(false); }
   else { map.dragging.enable(); mapEl.style.touchAction = ''; }
 }
@@ -474,17 +490,25 @@ document.querySelectorAll('#lasso-chips .chip').forEach(c => c.onclick = () => {
   const k = c.dataset.filter; S.filters[k] = !S.filters[k];
   c.setAttribute('aria-pressed', S.filters[k]);
 });
+const fingers = new Set();
+function cancelLasso() { if (lassoLine) map.removeLayer(lassoLine); lassoPts = lassoLine = null; }
 mapEl.addEventListener('pointerdown', e => {
   if (!S.lasso) return;
+  fingers.add(e.pointerId);
+  // A second finger means pan/pinch, not a lasso: drop the stroke and let Leaflet's
+  // two-finger handling (touchZoom pans with the pinch midpoint) move the map.
+  if (fingers.size > 1) return cancelLasso();
   mapEl.setPointerCapture(e.pointerId);
   lassoPts = [map.mouseEventToLatLng(e)];
   lassoLine = L.polyline(lassoPts, { color: S.lasso === 'add' ? '#9bbce0' : '#efa29a', weight: 2, dashArray: '6 6' }).addTo(map);
 });
 mapEl.addEventListener('pointermove', e => {
-  if (!lassoPts) return;
+  if (!lassoPts || fingers.size > 1) return;
   lassoPts.push(map.mouseEventToLatLng(e)); lassoLine.setLatLngs(lassoPts);
 });
-mapEl.addEventListener('pointerup', () => {
+mapEl.addEventListener('pointercancel', e => { fingers.delete(e.pointerId); cancelLasso(); });
+mapEl.addEventListener('pointerup', e => {
+  fingers.delete(e.pointerId);
   if (!lassoPts) return;
   const poly = lassoPts.map(ll => map.latLngToContainerPoint(ll));
   map.removeLayer(lassoLine); lassoPts = null;
@@ -542,75 +566,84 @@ async function reverseLabel(pt) {
   } catch (e) { return null; }
 }
 
-function setupPlaceInput(input) {
-  const which = input.dataset.which;
-  const list = document.getElementById(`${which}-list`);
-  let items = [], active = -1, timer = null, ctrl = null;
+const searchScreen = document.getElementById('search-screen');
+const searchInput = document.getElementById('search-input');
+const searchList = document.getElementById('search-list');
+let searchWhich = null, items = [], active = -1, searchTimer = null, searchCtrl = null;
 
-  const fixedItems = () => [
+function fixedItems() {
+  const which = searchWhich;
+  return [
     { icon: 'gps', title: 'My Location', run: () => useMyLocation(which) },
     ...(which === 'end' && S.start ? [{ icon: 'loop', title: 'Same as Start', run: () => setEndpoint('end', { ...S.start }) }] : []),
     { icon: 'pin', title: 'Choose on Map', run: () => startPicking(which) },
   ];
-  function show(next) {
-    items = next; active = -1;
-    list.replaceChildren(...items.map((it, i) => {
-      const li = document.createElement('li');
-      li.id = `${which}-opt-${i}`;
-      if (it.msg) { li.className = 'msg'; li.textContent = it.msg; return li; }
-      li.setAttribute('role', 'option');
-      const icon = document.createElement('span'); icon.className = `icon icon-${it.icon}`; icon.setAttribute('aria-hidden', 'true');
-      const text = document.createElement('span');
-      const t = document.createElement('span'); t.className = 't'; t.textContent = it.title;
-      text.append(t);
-      if (it.sub) { const s = document.createElement('span'); s.className = 's'; s.textContent = it.sub; text.append(s); }
-      li.append(icon, text);
-      li.onclick = () => choose(i);
-      return li;
-    }));
-    list.hidden = !items.length;
-    input.setAttribute('aria-expanded', String(!list.hidden));
-    input.removeAttribute('aria-activedescendant');
-  }
-  function hide() { list.hidden = true; input.setAttribute('aria-expanded', 'false'); input.value = S[which]?.label || ''; }
-  function choose(i) { const it = items[i]; if (!it || it.msg) return; hide(); input.blur(); it.run(); }
-  function setActive(step) {
-    const opts = items.map((it, k) => it.msg ? -1 : k).filter(k => k >= 0);
-    if (!opts.length) return;
-    const at = opts.indexOf(active);
-    active = at < 0 ? opts[step > 0 ? 0 : opts.length - 1] : opts[(at + step + opts.length) % opts.length];
-    list.querySelectorAll('li').forEach((li, k) => li.setAttribute('aria-selected', String(k === active)));
-    input.setAttribute('aria-activedescendant', `${which}-opt-${active}`);
-  }
-
-  input.addEventListener('focus', () => { input.select(); show(fixedItems()); if (innerWidth < 640) setSheetFull(true); });
-  // Delay so a tap on a suggestion lands before the list disappears
-  input.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== input) hide(); }, 150));
-  input.addEventListener('input', () => {
-    const q = input.value.trim();
-    clearTimeout(timer); ctrl?.abort();
-    if (q.length < 3) return show(fixedItems());
-    timer = setTimeout(async () => {
-      ctrl = new AbortController();
-      show([{ msg: 'Searching…' }]);
-      try {
-        const places = await geocode(q, ctrl.signal);
-        show(places.length
-          ? [...places.map(p => ({ icon: 'pin', title: p.title, sub: p.sub, run: () => setEndpoint(which, { lat: p.lat, lon: p.lon, label: p.title }) })),
-             { icon: 'pin', title: 'Choose on Map', run: () => startPicking(which) }]
-          : [{ msg: 'No matches in Australia' }, ...fixedItems()]);
-      } catch (e) {
-        if (e.name !== 'AbortError') show([{ msg: 'Search unavailable — choose on the map instead' }, ...fixedItems()]);
-      }
-    }, 250);
-  });
-  input.addEventListener('keydown', e => {
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setActive(e.key === 'ArrowDown' ? 1 : -1); }
-    else if (e.key === 'Enter') { e.preventDefault(); choose(active >= 0 ? active : items.findIndex(it => !it.msg)); }
-    else if (e.key === 'Escape') { e.stopPropagation(); hide(); input.blur(); }
-  });
 }
-document.querySelectorAll('[role=combobox]').forEach(setupPlaceInput);
+function openSearch(which) {
+  searchWhich = which;
+  searchInput.placeholder = which === 'start' ? 'Search for a start' : 'Search for an end';
+  searchInput.value = '';
+  showItems(fixedItems());
+  // Desktop: cover the whole side panel so the fields underneath don't show through
+  searchScreen.style.minHeight = innerWidth >= 640 ? `${sheet.offsetHeight}px` : '';
+  searchScreen.hidden = false;
+  searchInput.focus();  // inside the tap handler, so mobile keyboards open
+}
+function closeSearch() {
+  clearTimeout(searchTimer); searchCtrl?.abort();
+  searchScreen.hidden = true;
+  document.getElementById(`${searchWhich}-field`).focus();
+}
+function showItems(next) {
+  items = next; active = -1;
+  searchList.replaceChildren(...items.map((it, i) => {
+    const li = document.createElement('li');
+    li.id = `search-opt-${i}`;
+    if (it.msg) { li.className = 'msg'; li.textContent = it.msg; return li; }
+    li.setAttribute('role', 'option');
+    const icon = document.createElement('span'); icon.className = `icon icon-${it.icon}`; icon.setAttribute('aria-hidden', 'true');
+    const text = document.createElement('span');
+    const t = document.createElement('span'); t.className = 't'; t.textContent = it.title;
+    text.append(t);
+    if (it.sub) { const sub = document.createElement('span'); sub.className = 's'; sub.textContent = it.sub; text.append(sub); }
+    li.append(icon, text);
+    li.onclick = () => choose(i);
+    return li;
+  }));
+  searchInput.removeAttribute('aria-activedescendant');
+}
+function choose(i) { const it = items[i]; if (!it || it.msg) return; closeSearch(); it.run(); }
+function setActive(step) {
+  const opts = items.map((it, k) => it.msg ? -1 : k).filter(k => k >= 0);
+  if (!opts.length) return;
+  const at = opts.indexOf(active);
+  active = at < 0 ? opts[step > 0 ? 0 : opts.length - 1] : opts[(at + step + opts.length) % opts.length];
+  searchList.querySelectorAll('li').forEach((li, k) => li.setAttribute('aria-selected', String(k === active)));
+  searchInput.setAttribute('aria-activedescendant', `search-opt-${active}`);
+}
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.trim(), which = searchWhich;
+  clearTimeout(searchTimer); searchCtrl?.abort();
+  if (q.length < 3) return showItems(fixedItems());
+  searchTimer = setTimeout(async () => {
+    searchCtrl = new AbortController();
+    showItems([{ msg: 'Searching…' }]);
+    try {
+      const places = await geocode(q, searchCtrl.signal);
+      showItems(places.length
+        ? [...places.map(p => ({ icon: 'pin', title: p.title, sub: p.sub, run: () => setEndpoint(which, { lat: p.lat, lon: p.lon, label: p.title }) })),
+           { icon: 'pin', title: 'Choose on Map', run: () => startPicking(which) }]
+        : [{ msg: 'No matches in Australia' }, ...fixedItems()]);
+    } catch (e) {
+      if (e.name !== 'AbortError') showItems([{ msg: 'Search unavailable — choose on the map instead' }, ...fixedItems()]);
+    }
+  }, 250);
+});
+searchInput.addEventListener('keydown', e => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setActive(e.key === 'ArrowDown' ? 1 : -1); }
+  else if (e.key === 'Enter') { e.preventDefault(); choose(active >= 0 ? active : items.findIndex(it => !it.msg)); }
+  else if (e.key === 'Escape') { e.stopPropagation(); closeSearch(); }
+});
 
 function useMyLocation(which) {
   if (!navigator.geolocation) return toast("Location isn't available on this device");
@@ -728,8 +761,9 @@ function renderPlan() {
   document.getElementById('dock-clear').hidden = !n;
   document.getElementById('clear-ends').hidden = !S.start && !S.end;
   for (const k of ['start', 'end']) {
-    const input = document.getElementById(`${k}-input`);
-    if (document.activeElement !== input) input.value = S[k]?.label || '';
+    const el = document.getElementById(`${k}-text`);
+    el.textContent = S[k]?.label || (k === 'start' ? 'Search for a start' : 'Search for an end');
+    el.classList.toggle('unset', !S[k]);
   }
   const find = document.getElementById('find-btn');
   find.innerHTML = `${auto ? 'Find Best Route' : 'Find Optimal Route'} <span class="icon icon-arrow-right" aria-hidden="true"></span>`;
