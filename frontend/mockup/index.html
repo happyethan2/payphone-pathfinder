@@ -35,17 +35,20 @@
   #avatar-btn { font-weight: 700; font-size: 16px; color: var(--text); }
   #avatar-btn .status-dot { position: absolute; right: 1px; bottom: 1px; width: 11px; height: 11px;
     border-radius: 50%; background: var(--success); border: 2px solid var(--surface); }
-  #compass-btn { position: fixed; z-index: 900; right: 16px; bottom: calc(var(--sheet-h, 160px) + 12px); }
 
   #tool-dock { position: fixed; z-index: 900; left: 16px; bottom: calc(var(--sheet-h, 160px) + 12px);
     display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-  .dock-row { display: flex; align-items: center; gap: 12px; }
+  .dock-row { display: flex; align-items: center; gap: 8px; }
   .segmented { display: flex; padding: 3px; gap: 3px; background: var(--raised); border: 1px solid var(--border); border-radius: 12px; }
   .segmented button { border: 0; background: transparent; min-height: 38px; padding: 8px 12px; border-radius: 9px; color: var(--muted); }
   .segmented button[aria-pressed=true] { background: var(--accent-surface); color: #d5e5f7; }
   #tool-dock .segmented { background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.3); border-radius: 22px; }
   #tool-dock .segmented button { flex: none; border-radius: 18px; padding: 8px 14px; }
-  .dock-btn { flex: none; min-height: 44px; padding: 8px 16px; border-radius: 22px; background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.3); }
+  .dock-btn { flex: none; min-height: 44px; padding: 8px 10px 8px 16px; border-radius: 22px; background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.3); }
+  .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 7px;
+    border-radius: 12px; background: var(--accent); color: var(--surface); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  @keyframes bump { 40% { transform: scale(1.3); } }
+  .badge.bump { animation: bump .35s ease-out; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip { flex: none; min-height: 34px; padding: 6px 12px; border-radius: 17px; font-size: 13px;
     background: var(--surface); color: var(--muted); box-shadow: 0 3px 12px rgba(0,0,0,.25); }
@@ -146,9 +149,11 @@
   .name-row input { flex: 1; min-width: 0; }
 
   /* ── Toast, endpoint prompt, onboarding ────────────────────── */
-  #toast { position: fixed; z-index: 1100; left: 16px; right: 16px; bottom: calc(var(--sheet-h, 160px) + 12px);
-    display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 16px; border-radius: 10px;
-    background: #e8eaec; color: #101112; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+  #toast { position: fixed; z-index: 1100; left: 16px; right: 72px; top: max(16px, env(safe-area-inset-top));
+    display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 4px 6px 4px 16px; border-radius: 10px;
+    background: #e8eaec; color: #101112; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.4);
+    animation: toast-in .2s ease-out; transition: translate .2s ease-out; touch-action: none; }
+  @keyframes toast-in { from { opacity: 0; translate: 0 -12px; } }
   #toast span { flex: 1; }
   #toast button { flex: none; min-height: 36px; border: 0; background: transparent; color: #1d4f80; font-weight: 700; }
   #pick-banner { position: fixed; z-index: 1100; top: 0; left: 0; right: 0; text-align: center;
@@ -164,8 +169,8 @@
   #onboard p { font-size: 14px; color: var(--muted); line-height: 1.5; margin-bottom: 16px; }
   #onboard .go { width: 100%; margin-top: 12px; }
   #onboard .text-btn { width: 100%; margin: 8px 0 0; justify-content: center; }
-  body.picking #tool-dock, body.picking #compass-btn { display: none; }
-  @media (max-width: 639px) { body.sheet-full #tool-dock, body.sheet-full #compass-btn { display: none; } }
+  body.picking #tool-dock { display: none; }
+  @media (max-width: 639px) { body.sheet-full #tool-dock { display: none; } }
   .mock-tag { position: fixed; z-index: 800; left: 50%; top: max(16px, env(safe-area-inset-top)); transform: translateX(-50%);
     font-size: 11px; color: var(--muted); background: var(--surface); padding: 3px 8px; border-radius: 8px; opacity: .85; pointer-events: none; }
 
@@ -184,8 +189,7 @@
     #plan-details { display: block; }
     #plan-details > .field:first-child { border-top: 0; padding-top: 0; }
     #tool-dock { left: 392px; bottom: 20px; }
-    #compass-btn { bottom: 20px; }
-    #toast { left: 50%; right: auto; transform: translateX(-50%); width: 420px; bottom: 20px; }
+    #toast { left: 50%; right: auto; transform: translateX(-50%); width: 420px; }
     .scrim { background: transparent; }
     .popover { left: auto; right: 72px; top: 16px; bottom: auto; width: 320px; border-radius: 12px; border: 1px solid var(--divider); }
     #search-screen { top: 16px; left: 16px; right: auto; bottom: auto; width: 360px; max-height: calc(100dvh - 32px);
@@ -197,10 +201,13 @@
 <div id="map"></div>
 <div class="mock-tag">Mockup · Fake Data</div>
 
-<!-- Top-right: identity + layers (Google Maps-style corner) -->
+<!-- Top-right: identity, layers and compass (keeps the bottom row free for the lasso tools) -->
 <div id="top-right">
   <button id="avatar-btn" class="map-btn" aria-label="Your profile and settings" onclick="openPopover('avatar')"></button>
   <button id="layers-btn" class="map-btn" aria-label="Map layers and legend" onclick="openPopover('layers')"><span class="icon icon-layers" aria-hidden="true"></span></button>
+  <button id="compass-btn" class="map-btn" aria-label="Centre on me" onclick="toast('Centred on your location (mockup)')">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 4 L14.5 13 L12 11.5 L9.5 13 Z" fill="#e74c3c"/><path d="M12 20 L9.5 13 L12 14.5 L14.5 13 Z" fill="#a8afb5"/></svg>
+  </button>
 </div>
 
 <!-- Map tools: selection lives on the map, not in the panel -->
@@ -216,13 +223,10 @@
       <button id="lasso-add" aria-pressed="false" onclick="setLasso('add')"><span class="icon icon-lasso" aria-hidden="true"></span>Lasso</button>
       <button id="lasso-remove" aria-pressed="false" onclick="setLasso('remove')"><span class="icon icon-deselect" aria-hidden="true"></span>Deselect</button>
     </div>
-    <button id="dock-clear" class="dock-btn" onclick="clearSelection()" hidden>Clear</button>
+    <button id="dock-clear" class="dock-btn" onclick="clearSelection()" hidden>Clear <span class="badge" id="sel-badge"></span></button>
   </div>
 </div>
 
-<button id="compass-btn" class="map-btn" aria-label="Centre on me" onclick="toast('Centred on your location (mockup)')">
-  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 4 L14.5 13 L12 11.5 L9.5 13 Z" fill="#e74c3c"/><path d="M12 20 L9.5 13 L12 14.5 L14.5 13 Z" fill="#a8afb5"/></svg>
-</button>
 
 <!-- Sheet -->
 <div id="sheet">
@@ -398,7 +402,6 @@
 const STORE = 'pp_mockup_v1';
 const COLORS = { uncaptured: '#aaaaaa', mine: '#2ecc71', cellmate: '#3498db', hostile: '#e74c3c' };
 const SPEED_KMH = { foot: 5, bicycle: 15, car: 35 };
-const BY = { foot: 'on foot', bicycle: 'by bike', car: 'by car' };
 const LEG_SIZE = 9;  // Google Maps waypoint limit per leg
 const CENTRE = [-38.147, 144.36];  // Geelong
 
@@ -524,7 +527,7 @@ mapEl.addEventListener('pointerup', e => {
     if (!S.sel.has(p.id)) { S.sel.add(p.id); n++; }
   }
   restyle(); renderPlan();
-  toast(S.lasso === 'remove' ? `${n} phones removed` : `${n} phones added`);
+  if (!n) toast(S.lasso === 'remove' ? 'No selected phones in that area' : 'No phones in that area');
 });
 function inPoly(pt, poly) {
   let inside = false;
@@ -742,11 +745,8 @@ function planProblem() {
 }
 function renderPlan() {
   const auto = S.mode === 'auto';
-  const t = document.getElementById('arrive-by').value;
   const n = S.sel.size;
-  document.getElementById('summary-line').textContent = auto
-    ? `Orienteering ${BY[S.profile]}, arrive by ${t ? fmtTime(new Date(`1970-01-01T${t}`)) : '—'}`
-    : `Routing ${n} phone${n === 1 ? '' : 's'} ${BY[S.profile]}`;
+  document.getElementById('summary-line').textContent = auto ? 'Orienteering' : 'Routing';
   const problem = planProblem();
   document.getElementById('summary-hint').textContent = problem || 'Tap to edit';
 
@@ -759,6 +759,12 @@ function renderPlan() {
     : 'Needs your name, so it can skip phones you already hold';
   document.getElementById('sel-count').textContent = n ? `${n} phone${n === 1 ? '' : 's'} selected` : 'No phones selected';
   document.getElementById('dock-clear').hidden = !n;
+  document.getElementById('dock-clear').setAttribute('aria-label', `Clear ${n} selected phone${n === 1 ? '' : 's'}`);
+  const badge = document.getElementById('sel-badge');
+  if (badge.textContent !== String(n)) {
+    badge.textContent = n;
+    badge.classList.remove('bump'); void badge.offsetWidth; badge.classList.add('bump');  // restart the pulse
+  }
   document.getElementById('clear-ends').hidden = !S.start && !S.end;
   for (const k of ['start', 'end']) {
     const el = document.getElementById(`${k}-text`);
@@ -966,14 +972,30 @@ function replayOnboarding() {
 
 // ── Toast with optional undo ──────────────────────────────────────────────
 let toastTimer = null;
+const toastEl = document.getElementById('toast');
+function hideToast() { clearTimeout(toastTimer); toastEl.hidden = true; toastEl.style.translate = ''; }
 function toast(msg, undo) {
-  const el = document.getElementById('toast'), btn = document.getElementById('toast-undo');
+  const btn = document.getElementById('toast-undo');
   document.getElementById('toast-msg').textContent = msg;
   btn.hidden = !undo;
-  btn.onclick = () => { el.hidden = true; undo(); };
-  el.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, undo ? 6000 : 2500);
+  btn.onclick = () => { hideToast(); undo(); };
+  hideToast();
+  toastEl.hidden = false;
+  toastTimer = setTimeout(hideToast, undo ? 6000 : 2500);
+}
+// Swipe the toast up to dismiss it early
+{
+  let y0 = null;
+  toastEl.addEventListener('touchstart', e => { y0 = e.touches[0].clientY; toastEl.style.transition = 'none'; }, { passive: true });
+  toastEl.addEventListener('touchmove', e => {
+    if (y0 !== null) toastEl.style.translate = `0 ${Math.min(0, e.touches[0].clientY - y0)}px`;
+  }, { passive: true });
+  toastEl.addEventListener('touchend', e => {
+    if (y0 === null) return;
+    const dy = e.changedTouches[0].clientY - y0; y0 = null;
+    toastEl.style.transition = '';
+    if (dy < -24) hideToast(); else toastEl.style.translate = '';
+  });
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────
