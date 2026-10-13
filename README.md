@@ -72,9 +72,15 @@ Then, on iOS:
 1. Open `https://YOUR_IP:8000/cert.pem` in Safari and install the profile.
 2. Turn the cert on under **Settings → General → About → Certificate Trust Settings**. This is the step people miss.
 
+### Address search
+
+The start and end fields search addresses with [Photon](https://github.com/komoot/photon), through this app's backend (`/api/geocode`). By default that's komoot's free public instance at photon.komoot.io. It's fine for light use; searches are cached for a day and limited to Australia.
+
+A busy instance should run its own Photon and set `PHOTON_URL` in `.env` (for example `PHOTON_URL=http://photon:2322`). GraphHopper publishes a weekly Photon database for Australia/Oceania (about 2 GB); see Photon's docs for setup. Without address search, tapping **Choose on Map** still works.
+
 ### Share links
 
-The link button next to **Find optimal route** copies a link to your current plan. The link holds the transport mode, start, end, and every selected phone. Opening it replaces the recipient's own selection.
+The share button next to **Find Optimal Route** copies a link to your current plan. The link holds the transport mode, start, end, and every selected phone. Opening it replaces the recipient's own selection.
 
 The recipient doesn't need a username: phones load uncoloured until they enter one. The link leaves out your username and the solved route, so the recipient re-solves it for their own game state. Phone IDs are the same for every player, so a link works on any instance running this version.
 

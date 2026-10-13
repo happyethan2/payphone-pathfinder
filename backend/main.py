@@ -76,6 +76,12 @@ CERT_FILE          = os.getenv("CERT_FILE", "/app/certs/cert.pem")
 # but it is still per-instance: hosts set their own in .env (never in .env.example).
 CARTO_API_KEY      = os.getenv("CARTO_API_KEY", "")
 
+# Address search for the start/end fields. Defaults to komoot's public Photon
+# instance (free, fair use). Busy instances should self-host Photon and point this
+# at it — the request format is identical. A blank value in .env means the default.
+PHOTON_URL = (os.getenv("PHOTON_URL") or "https://photon.komoot.io").rstrip("/")
+AU_BBOX    = "112.9,-43.8,153.7,-10.6"   # minLon,minLat,maxLon,maxLat
+
 # Must match --max-table-size in docker-compose.yml
 MAX_TABLE_COORDS = int(os.getenv("MAX_TABLE_COORDS", "200"))
 
@@ -146,6 +152,16 @@ _CAPTURES_CACHE_MAX: int   = 200    # cap entries on shared instances
 _CAPTURES_LOCK = asyncio.Lock()
 _CAPTURES_FAIL_UNTIL: float = 0.0
 
+# ---------------------------------------------------------------------------
+# Geocode cache — place names barely change, and a shared instance sees the same
+# few searches over and over; caching keeps us polite to the public Photon.
+# ---------------------------------------------------------------------------
+_GEO_CACHE: dict[tuple, tuple[dict, float]] = {}  # key -> (photon response, fetched_at)
+_GEO_CACHE_TTL: float = 24 * 3600
+_GEO_CACHE_MAX: int   = 500
+_GEO_TIMEOUT: float   = 5.0
+_GEO_HEADERS = {"User-Agent": "payphone-pathfinder (self-hosted; https://github.com/happyethan2/payphone-pathfinder)"}
+
 
 def reset_caches() -> None:
     """Reset all module-level cache state. Used by the test suite.
@@ -157,6 +173,7 @@ def reset_caches() -> None:
     global _PHONES_CACHE, _PHONES_CACHE_AT, _PHONES_FETCHED_AT, _PHONES_FAIL_UNTIL, _PHONES_FAILS
     global _PHOTO_CACHE, _PHOTO_CACHE_AT, _PHOTO_FAIL_UNTIL
     global _CAPTURES_CACHE, _CAPTURES_FAIL_UNTIL
+    global _GEO_CACHE
     _HTTP              = None
     _PHONES_CACHE      = None
     _PHONES_CACHE_AT   = 0.0
@@ -168,6 +185,7 @@ def reset_caches() -> None:
     _PHOTO_FAIL_UNTIL  = 0.0
     _CAPTURES_CACHE    = {}
     _CAPTURES_FAIL_UNTIL = 0.0
+    _GEO_CACHE           = {}
 
 
 # ---------------------------------------------------------------------------
@@ -644,6 +662,58 @@ async def get_phones(
         })
 
     return {"phones": result, "stale": stale, "data_age_s": int(age_s)}
+
+
+async def _photon(path: str, params: dict, key: tuple) -> dict:
+    """GET a Photon endpoint, cached. Returns Photon's GeoJSON untouched."""
+    hit = _GEO_CACHE.get(key)
+    if hit is not None and time.monotonic() - hit[1] < _GEO_CACHE_TTL:
+        return hit[0]
+    try:
+        resp = await _http().get(f"{PHOTON_URL}{path}", params=params,
+                                 headers=_GEO_HEADERS, timeout=_GEO_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, dict) or not isinstance(data.get("features"), list):
+            raise ValueError("unexpected payload from Photon")
+    except (httpx.HTTPError, ValueError) as e:
+        # Caught here so the generic handler doesn't blame OSRM/Vroom
+        logger.warning("Geocoder failure on %s: %s: %s", path, type(e).__name__, e)
+        raise HTTPException(502, "Address search is unavailable right now. "
+                                 "Choose the point on the map instead.") from e
+    _GEO_CACHE.pop(key, None)  # re-insert so dict order stays oldest-first
+    if len(_GEO_CACHE) >= _GEO_CACHE_MAX:
+        del _GEO_CACHE[next(iter(_GEO_CACHE))]
+    _GEO_CACHE[key] = (data, time.monotonic())
+    return data
+
+
+@app.get("/api/geocode")
+async def geocode(
+    q:   str             = Query(..., min_length=3, max_length=200),
+    lat: Optional[float] = Query(default=None, ge=-90, le=90),
+    lon: Optional[float] = Query(default=None, ge=-180, le=180),
+):
+    """Address search, limited to Australia. lat/lon bias results toward the map view."""
+    q = " ".join(q.split())
+    if len(q) < 3:
+        raise HTTPException(422, "Search needs at least 3 characters")
+    params: dict = {"q": q, "limit": 5, "lang": "en", "bbox": AU_BBOX}
+    if lat is not None and lon is not None:
+        # ~1 km is plenty for biasing, makes nearby searches share a cache entry,
+        # and avoids handing a third party the user's exact position.
+        params["lat"], params["lon"] = round(lat, 2), round(lon, 2)
+    return await _photon("/api/", params, ("q", q.lower(), params.get("lat"), params.get("lon")))
+
+
+@app.get("/api/reverse")
+async def reverse_geocode(
+    lat: float = Query(..., ge=-90, le=90),
+    lon: float = Query(..., ge=-180, le=180),
+):
+    """Name for a point picked on the map."""
+    lat, lon = round(lat, 5), round(lon, 5)
+    return await _photon("/reverse", {"lat": lat, "lon": lon, "lang": "en", "limit": 1}, ("r", lat, lon))
 
 
 @app.get("/api/health")
