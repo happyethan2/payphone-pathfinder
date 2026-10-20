@@ -803,6 +803,7 @@ function setMode(mode) {
     if (map.tap) map.tap.enable();
     mapEl.style.touchAction = '';
     cancelLassoStroke();
+    _lassoPointers.clear();
   }
 }
 
@@ -900,6 +901,10 @@ const _lassoPointers = new Set();
 mapEl.addEventListener('pointerdown', e => {
   if (!isLassoMode()) return;
   if (e.pointerType === 'mouse' && e.button !== 0) return;
+  // A primary pointer means no other finger is down, so anything still listed
+  // is a lift-off we never saw. Touch ids are never reused, so without this one
+  // stale id made every later stroke look like a second finger until reload.
+  if (e.isPrimary) _lassoPointers.clear();
   _lassoPointers.add(e.pointerId);
   if (_lassoPointers.size > 1) { cancelLassoStroke(); return; }
   mapEl.setPointerCapture(e.pointerId);
@@ -923,6 +928,8 @@ mapEl.addEventListener('pointercancel', e => {
   _lassoPointers.delete(e.pointerId);
   cancelLassoStroke();
 });
+// Capture torn down without an up/cancel (e.g. the page was backgrounded mid-touch)
+mapEl.addEventListener('lostpointercapture', e => _lassoPointers.delete(e.pointerId));
 function cancelLassoStroke() {
   state.lassoDragging = false;
   state.lassoPoints = [];
