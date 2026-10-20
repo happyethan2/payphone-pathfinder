@@ -796,12 +796,14 @@ async def solve_route(req: RouteRequest):
         if pid != snapped_start_id and pid != snapped_end_id
     ]
 
-    # OSRM's table service rejects requests above --max-table-size coordinates
-    if len(job_phone_ids) + 2 > MAX_TABLE_COORDS:
+    # OSRM's table service rejects requests above --max-table-size coordinates:
+    # start + jobs (+ end, unless the route is open)
+    max_jobs = MAX_TABLE_COORDS - 1 - (1 if has_end else 0)
+    if len(job_phone_ids) > max_jobs:
         raise HTTPException(
             400,
             f"Too many phones selected ({len(job_phone_ids)}). The maximum is "
-            f"{MAX_TABLE_COORDS - 2} per route — split the selection into smaller batches.",
+            f"{max_jobs} per route — split the selection into smaller batches.",
         )
 
     # Build ordered coordinate list

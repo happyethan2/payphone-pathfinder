@@ -225,6 +225,21 @@ async def test_route_too_many_phones(client, mock_api):
     assert "Too many phones" in r.json()["detail"]
 
 
+async def test_route_table_limit_counts_actual_coordinates(client, mock_api, monkeypatch):
+    # 4 coordinates allowed: an open route fits 3 phones, a closed one only 2
+    monkeypatch.setattr(main, "MAX_TABLE_COORDS", 4)
+    mock_phones_ok(mock_api)
+    mock_osrm_table(mock_api, "car", _matrix(4))
+    mock_osrm_routes(mock_api, "car")
+    mock_vroom(mock_api, job_order=[1, 2, 3])
+    open_r = await client.post("/api/route", json={"phone_ids": [1, 2, 3], "profile": "car",
+                                                   "start": {"lat": -34.91, "lon": 138.59}})
+    assert open_r.status_code == 200
+    closed_r = await client.post("/api/route", json={"phone_ids": [1, 2, 3], "profile": "car", **ROUTE_START_END})
+    assert closed_r.status_code == 400
+    assert "maximum is 2" in closed_r.json()["detail"]
+
+
 async def test_route_happy_path(client, mock_api):
     mock_phones_ok(mock_api)
     mock_osrm_table(mock_api, "car", _matrix(4))

@@ -547,11 +547,13 @@ async function findPlannedRoute() {
   if (routeBusy || planProblem()) return;
   if (state.start && state.start.live) {
     setRouteBusy(true);
+    const live = state.start;
     const fix = await currentFix();
     setRouteBusy(false);
+    if (state.start !== live) return;  // start changed or cleared while we waited
     if (!fix) { toast("Couldn't get your location — set a start, or allow location access"); return; }
-    state.start.lat = fix[0];
-    state.start.lon = fix[1];
+    live.lat = fix[0];
+    live.lon = fix[1];
   }
   return state.routeMode === 'orienteer' ? findOrienteerRoute() : findRoute();
 }
@@ -1330,10 +1332,10 @@ function setProfile(p) {
 // The username is deliberately *not* included: that's the recipient's own identity.
 
 function _encodeEndpoint(pt) {
-  if (!pt) return null;
-  const [lat, lon] = pt.live && lastLatLng ? lastLatLng : [pt.lat, pt.lon];
-  if (lat == null || lon == null) return null;
-  const base = `${(+lat).toFixed(6)},${(+lon).toFixed(6)}`;
+  // A live My Location start means "wherever you are": leave it out, so the
+  // link doesn't publish the sharer's position and the recipient starts from theirs.
+  if (!pt || pt.live) return null;
+  const base = `${(+pt.lat).toFixed(6)},${(+pt.lon).toFixed(6)}`;
   return pt.phone_id != null ? `${base},${pt.phone_id}` : base;
 }
 
@@ -1431,25 +1433,26 @@ map.on('click', (e) => {
 // ── Route ─────────────────────────────────────────────────────────
 // The endpoints a route was solved with travel with it (and its saved copy), so
 // Google Maps legs don't drift if the plan's start/end change afterwards.
-function stampSolvedEnds(data) {
+function solvedEnds() {
   const pick = pt => pt && { lat: pt.lat, lon: pt.lon, ...(pt.phone_id != null && { phone_id: pt.phone_id }) };
-  data.solved = { start: pick(state.start), end: pick(state.end) };
-  return data;
+  return { start: pick(state.start), end: pick(state.end) };
 }
 
 async function findRoute() {
   if (routeBusy || planProblem()) return;  // the button explains what's missing
   setRouteBusy(true);
+  const ends = solvedEnds();  // a live start keeps moving while we wait for the answer
   try {
     const res = await fetch('/api/route', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         phone_ids: Array.from(state.selectedIds),
-        start: state.start, end: state.end, profile: state.profile,
+        start: ends.start, end: ends.end, profile: state.profile,
       }),
     });
     if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || `HTTP ${res.status}`); }
-    const data = stampSolvedEnds(await res.json());
+    const data = await res.json();
+    data.solved = ends;
     if (isLassoMode()) setMode('click');
     displayRoute(data);
     state.lastRoute = data;
@@ -1497,11 +1500,12 @@ async function findOrienteerRoute() {
   state.lastOrienteerBufferS = bufferS;
 
   try {
+    const ends = solvedEnds();
     const res = await fetch('/api/orienteer', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        start:          state.start,
-        end:            state.end,
+        start:          ends.start,
+        end:            ends.end,
         profile:        state.profile,
         time_budget_s:  computeOrienteerBudget(),
         service_time_s: SERVICE_TIME_S[state.profile] || 60,
@@ -1515,7 +1519,8 @@ async function findOrienteerRoute() {
         : (e.detail || `HTTP ${res.status}`);
       throw new Error(detail);
     }
-    const data = stampSolvedEnds(await res.json());
+    const data = await res.json();
+    data.solved = ends;
     displayRoute(data, bufferS);
     state.lastRoute = data;
     saveSession();
@@ -1855,7 +1860,7 @@ function onPosition(pos) {
     renderPlan(); saveSession();
   }
   _defaultStartPending = false;
-  if (state.follow) {
+  if (state.follow && !_followGesture) {  // never move the map under the user's fingers
     if (_followHoldFrom && _haversineKm(lat, lon, _followHoldFrom[0], _followHoldFrom[1]) * 1000 < FOLLOW_MOVED_M) {
       // still looking at the route overview
     } else {
@@ -1923,6 +1928,7 @@ function followTo(latlng, zoom) {
 }
 
 function centreOnMe() {
+  _followHoldFrom = null;  // asked to centre: stop holding the route overview
   const zoom = Math.max(map.getZoom(), 16);
   if (lastLatLng) { followTo(lastLatLng, zoom); return; }
   navigator.geolocation && navigator.geolocation.getCurrentPosition(
@@ -1955,24 +1961,58 @@ function _haversineKm(lat1, lon1, lat2, lon2) {
 // A drag is the user taking the map; programmatic pans never fire dragstart
 map.on('dragstart', () => { if (state.follow) setFollow(false); });
 
+// Two-finger gestures don't fire dragstart. While fingers are down, fixes don't move
+// the map; when they lift, a pinch that changed zoom keeps following (and re-centres),
+// while a gesture that moved the map without zooming was a pan, so stop following.
+const FOLLOW_PAN_PX = 30;
+let _followGesture = null;
+mapEl.addEventListener('touchstart', () => {
+  if (state.follow && !_followGesture) _followGesture = { center: map.getCenter(), zoom: map.getZoom() };
+}, { passive: true });
+function _endFollowGesture(e) {
+  if (!_followGesture || e.touches.length) return;
+  const g = _followGesture;
+  _followGesture = null;
+  if (!state.follow) return;
+  if (Math.abs(map.getZoom() - g.zoom) > 0.25) {
+    // Leaflet settles the pinch after this event; re-centre once the zoom lands
+    map.once('zoomend', () => { if (state.follow && lastLatLng) followTo(lastLatLng); });
+    return;
+  }
+  const moved = map.latLngToContainerPoint(g.center).distanceTo(map.latLngToContainerPoint(map.getCenter()));
+  if (moved > FOLLOW_PAN_PX) setFollow(false);
+}
+mapEl.addEventListener('touchend', _endFollowGesture, { passive: true });
+mapEl.addEventListener('touchcancel', _endFollowGesture, { passive: true });
+
 // ── Keep the screen on while navigating (where the browser supports it) ──
-let _wakeLock = null, _wakeLockBusy = false;
-async function setWakeLock(on) {
-  if (!('wakeLock' in navigator) || _wakeLockBusy) return;
-  _wakeLockBusy = true;
+let _wakeLock = null, _wakeWanted = false, _wakeSyncing = false;
+function setWakeLock(on) {
+  _wakeWanted = on;
+  syncWakeLock();
+}
+// Calls can land while a request/release is still pending, so keep going until
+// the lock matches the latest wish rather than dropping the newer call.
+async function syncWakeLock() {
+  if (!('wakeLock' in navigator) || _wakeSyncing) return;
+  _wakeSyncing = true;
   try {
-    if (on && !_wakeLock && document.visibilityState === 'visible') {
-      _wakeLock = await navigator.wakeLock.request('screen');
-      _wakeLock.addEventListener('release', () => { _wakeLock = null; });
-    } else if (!on && _wakeLock) {
-      const lock = _wakeLock;
-      _wakeLock = null;
-      await lock.release();
+    for (let i = 0; i < 4; i++) {
+      const want = _wakeWanted && document.visibilityState === 'visible';
+      if (want && !_wakeLock) {
+        const lock = await navigator.wakeLock.request('screen');
+        lock.addEventListener('release', () => { if (_wakeLock === lock) _wakeLock = null; });
+        _wakeLock = lock;
+      } else if (!want && _wakeLock) {
+        const lock = _wakeLock;
+        _wakeLock = null;
+        await lock.release();
+      } else break;
     }
   } catch (_) {
-    _wakeLock = null;  // battery saver or no permission: carry on without it
+    // battery saver or no permission: carry on without it
   } finally {
-    _wakeLockBusy = false;
+    _wakeSyncing = false;
   }
 }
 
@@ -2065,13 +2105,18 @@ map.on('move', updateCompassArrow);
 map.on('rotate', updateCompassArrow);  // fired by setBearing
 
 function handleCompassTap() {
-  if (gpsBlocked) toast('Location is blocked — allow it in your browser settings');
+  if (gpsBlocked) {
+    toast('Location is blocked — allow it in your browser settings');
+    if (state.headingLocked) _releaseHeadingLock(true);
+    else if (typeof map.setBearing === 'function') map.setBearing(0);
+    return;
+  }
   if (state.follow && state.headingLocked) {
     _releaseHeadingLock(true);               // heading-up → north-up, still following
     centreOnMe();
     return;
   }
-  setFollow(!gpsBlocked);
+  setFollow(true);
   if (state.autoRotate) {
     state.headingLocked = true;
     document.getElementById('fab-centre').classList.add('heading-locked');
