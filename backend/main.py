@@ -201,7 +201,7 @@ class StartEnd(BaseModel):
 class RouteRequest(BaseModel):
     phone_ids: list[int]
     start: StartEnd
-    end: StartEnd
+    end: Optional[StartEnd] = None  # None = open route: finish at the last phone
     profile: str  # "foot" | "bicycle" | "car"
 
 
@@ -507,19 +507,20 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 async def _vroom_solve(
     coords: list[tuple[float, float]],
     start_idx: int,
-    end_idx: int,
+    end_idx: int | None,
     job_indices: list[tuple[int, int]],  # [(phone_id, coord_index), ...]
     durations: list[list[int]],
     distances: list[list[int]],
 ) -> list[int]:
-    """Return ordered list of phone_ids as solved by Vroom."""
+    """Return ordered list of phone_ids as solved by Vroom.
+
+    end_idx None solves an open route: Vroom finishes at whichever job is best last.
+    """
+    vehicle = {"id": 0, "start_index": start_idx, "profile": "driving"}
+    if end_idx is not None:
+        vehicle["end_index"] = end_idx
     vroom_req = {
-        "vehicles": [{
-            "id": 0,
-            "start_index": start_idx,
-            "end_index": end_idx,
-            "profile": "driving",
-        }],
+        "vehicles": [vehicle],
         "jobs": [
             {"id": phone_id, "location_index": coord_idx}
             for phone_id, coord_idx in job_indices
@@ -779,15 +780,16 @@ async def solve_route(req: RouteRequest):
             raise HTTPException(400, "start/end must have lat+lon or phone_id")
         return (se.lat, se.lon)
 
+    has_end     = req.end is not None
     start_coord = _resolve_coord(req.start)
-    end_coord   = _resolve_coord(req.end)
+    end_coord   = _resolve_coord(req.end) if has_end else None
 
     # Build the coordinate list and job index mapping
-    # Layout: [start, phone_0, phone_1, ..., phone_N, end]
+    # Layout: [start, phone_0, phone_1, ..., phone_N(, end)] — no end on an open route.
     # If start/end snap to a phone_id, remove that phone from the jobs list
     # (the vehicle's presence at start/end covers the capture).
     snapped_start_id = req.start.phone_id
-    snapped_end_id   = req.end.phone_id
+    snapped_end_id   = req.end.phone_id if has_end else None
 
     job_phone_ids = [
         pid for pid in phone_ids
@@ -814,15 +816,17 @@ async def solve_route(req: RouteRequest):
         all_coords.append(phone_lookup[pid])
         job_indices.append((pid, coord_idx))
 
-    end_idx = len(all_coords)
-    all_coords.append(end_coord)
+    end_idx: int | None = None
+    if has_end:
+        end_idx = len(all_coords)
+        all_coords.append(end_coord)
 
     # OSRM distance/duration matrix
     durations, distances = await _osrm_table(all_coords, req.profile)
 
     # Fail early with a clear message instead of a cryptic error at the
     # geometry stage when the road network can't connect the selection.
-    if durations[0][end_idx] >= UNREACHABLE:
+    if has_end and durations[0][end_idx] >= UNREACHABLE:
         raise HTTPException(
             400,
             f"Start and end are not connected by {req.profile} routing. "
@@ -830,7 +834,8 @@ async def solve_route(req: RouteRequest):
         )
     unreachable = [
         pid for pid, ci in job_indices
-        if durations[0][ci] >= UNREACHABLE or durations[ci][end_idx] >= UNREACHABLE
+        if durations[0][ci] >= UNREACHABLE
+        or (has_end and durations[ci][end_idx] >= UNREACHABLE)
     ]
     if unreachable:
         shown = ", ".join(f"#{pid}" for pid in unreachable[:10])
@@ -874,8 +879,11 @@ async def solve_route(req: RouteRequest):
     # and emit a zero-length leading/trailing leg — two wasted OSRM round-trips per
     # route and junk entries in path.features. The endpoints instead carry their
     # phone id as a label, so legs are still attributed correctly.
-    visit_coords = [start_coord] + [phone_lookup[pid] for pid in ordered_ids] + [end_coord]
-    visit_labels = [snapped_start_id] + ordered_ids + [snapped_end_id]
+    visit_coords = [start_coord] + [phone_lookup[pid] for pid in ordered_ids]
+    visit_labels = [snapped_start_id] + ordered_ids
+    if has_end:  # an open route's geometry simply stops at the last phone
+        visit_coords.append(end_coord)
+        visit_labels.append(snapped_end_id)
 
     features, legs_summary, total_distance, total_duration = \
         await _build_route_geometry(visit_coords, visit_labels, req.profile)

@@ -475,8 +475,14 @@ function endpointLabel(pt) {
   return pt.label || (pt.phone_id != null ? `Phone #${pt.phone_id}` : 'Dropped Pin');
 }
 
+// Routing can finish at the last phone; orienteering needs somewhere to be by the deadline
+function endIsOptional() { return state.routeMode === 'route'; }
+function endPlaceholder() { return endIsOptional() ? 'Search for an end (optional)' : 'Search for an end'; }
+
 function planProblem() {
-  if (!state.start || !state.end) return 'Set a start and end';
+  const needEnd = !endIsOptional() && !state.end;
+  if (!state.start) return needEnd ? 'Set a start and end' : 'Set a start';
+  if (needEnd) return 'Set an end';
   if (state.routeMode === 'route' && !state.selectedIds.size) return 'Select phones on the map';
   if (state.routeMode === 'orienteer' && !state.username) return 'Add your name to use orienteering';
   return null;
@@ -510,7 +516,7 @@ function renderPlan() {
   for (const which of ['start', 'end']) {
     const el = document.getElementById(`${which}-text`);
     const pt = state[which];
-    el.textContent = pt ? endpointLabel(pt) : (which === 'start' ? 'Search for a start' : 'Search for an end');
+    el.textContent = pt ? endpointLabel(pt) : (which === 'start' ? 'Search for a start' : endPlaceholder());
     el.classList.toggle('unset', !pt);
   }
 
@@ -1121,7 +1127,7 @@ function searchFixedItems() {
 }
 function openSearch(which) {
   searchWhich = which;
-  searchInput.placeholder = which === 'start' ? 'Search for a start' : 'Search for an end';
+  searchInput.placeholder = which === 'start' ? 'Search for a start' : endPlaceholder();
   searchInput.value = '';
   showSearchItems(searchFixedItems());
   // Desktop: cover the whole side panel so the fields underneath don't show through
@@ -1365,6 +1371,14 @@ map.on('click', (e) => {
 });
 
 // ── Route ─────────────────────────────────────────────────────────
+// The endpoints a route was solved with travel with it (and its saved copy), so
+// Google Maps legs don't drift if the plan's start/end change afterwards.
+function stampSolvedEnds(data) {
+  const pick = pt => pt && { lat: pt.lat, lon: pt.lon, ...(pt.phone_id != null && { phone_id: pt.phone_id }) };
+  data.solved = { start: pick(state.start), end: pick(state.end) };
+  return data;
+}
+
 async function findRoute() {
   if (routeBusy || planProblem()) return;  // the button explains what's missing
   setRouteBusy(true);
@@ -1377,7 +1391,7 @@ async function findRoute() {
       }),
     });
     if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || `HTTP ${res.status}`); }
-    const data = await res.json();
+    const data = stampSolvedEnds(await res.json());
     if (isLassoMode()) setMode('click');
     displayRoute(data);
     state.lastRoute = data;
@@ -1443,7 +1457,7 @@ async function findOrienteerRoute() {
         : (e.detail || `HTTP ${res.status}`);
       throw new Error(detail);
     }
-    const data = await res.json();
+    const data = stampSolvedEnds(await res.json());
     displayRoute(data, bufferS);
     state.lastRoute = data;
     saveSession();
@@ -1532,18 +1546,20 @@ function clearRoute() {
 const GMAPS_STOPS_PER_LEG = 10; // origin + 8 waypoints + destination
 
 function buildLegs(data) {
-  if (!data || !state.start) return [];
-  const _end = state.end || state.start;  // orienteer mode loops back to start
+  // Routes saved before endpoints travelled with them fall back to the plan's
+  const start = data && data.solved ? data.solved.start : state.start;
+  const end   = data && data.solved ? data.solved.end   : state.end;
+  if (!data || !start) return [];
 
   const phoneLookup = Object.fromEntries(state.phones.map(p => [p.id, p]));
   const mode = { foot: 'walking', bicycle: 'bicycling', car: 'driving' }[state.profile] || 'walking';
 
   // Full ordered stop list as [lat, lon] pairs
   const all = [
-    [state.start.lat, state.start.lon],
+    [start.lat, start.lon],
     ...data.ordered_ids.map(id => { const p = phoneLookup[id]; return p ? [p.lat, p.lon] : null; }).filter(Boolean),
-    [_end.lat, _end.lon],
   ];
+  if (end) all.push([end.lat, end.lon]);  // no end: the last leg finishes at the last phone
 
   if (all.length < 2) return [];
 

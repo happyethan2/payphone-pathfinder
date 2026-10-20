@@ -391,6 +391,60 @@ async def test_route_start_and_end_same_phone_not_duplicated(client, mock_api):
     assert ordered.count(1) == 1
 
 
+# ── Open routes (no end) ────────────────────────────────────────────
+
+OPEN_START = {"start": {"lat": -34.91, "lon": 138.59}}
+
+
+async def test_route_open_finishes_at_last_phone(client, mock_api):
+    mock_phones_ok(mock_api)
+    table = mock_osrm_table(mock_api, "car", _matrix(3))   # start + 2 phones, no end
+    mock_osrm_routes(mock_api, "car")
+    vroom = mock_vroom(mock_api, job_order=[4, 1])
+    r = await client.post("/api/route", json={"phone_ids": [1, 4], "profile": "car", **OPEN_START})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ordered_ids"] == [4, 1]
+    # start→4, 4→1 — no leg back out to an end point
+    assert [(leg["from_id"], leg["to_id"]) for leg in body["legs"]] == [(None, 4), (4, 1)]
+    vehicle = json.loads(vroom.calls.last.request.content)["vehicles"][0]
+    assert "end_index" not in vehicle
+    assert table.calls.last.request.url.path.count(";") == 2   # 3 coordinates
+
+
+async def test_route_explicit_null_end_is_open(client, mock_api):
+    mock_phones_ok(mock_api)
+    mock_osrm_table(mock_api, "car", _matrix(3))
+    mock_osrm_routes(mock_api, "car")
+    mock_vroom(mock_api, job_order=[1, 4])
+    r = await client.post("/api/route", json={"phone_ids": [1, 4], "profile": "car", **OPEN_START, "end": None})
+    assert r.status_code == 200
+    assert len(r.json()["legs"]) == 2
+
+
+async def test_route_open_unreachable_phone_clear_error(client, mock_api):
+    mock_phones_ok(mock_api)
+    durations = _matrix(3)
+    durations[0][1] = UNREACH
+    mock_osrm_table(mock_api, "car", durations)
+    r = await client.post("/api/route", json={"phone_ids": [1, 4], "profile": "car", **OPEN_START})
+    assert r.status_code == 400
+    assert "#1" in r.json()["detail"]
+
+
+async def test_route_open_only_phone_is_start(client, mock_api):
+    # Nothing left to visit: no solve, no legs, still a valid answer
+    mock_phones_ok(mock_api)
+    mock_osrm_table(mock_api, "car", _matrix(1))
+    vroom = mock_vroom(mock_api, job_order=[])
+    r = await client.post("/api/route", json={"phone_ids": [1], "profile": "car", "start": {"phone_id": 1}})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ordered_ids"] == [1]
+    assert body["legs"] == []
+    assert vroom.call_count == 0
+
+
 async def test_route_upstream_failure_returns_502(client, mock_api):
     """OSRM/Vroom falling over must not read as a bare 500 in the frontend."""
     mock_phones_ok(mock_api)
