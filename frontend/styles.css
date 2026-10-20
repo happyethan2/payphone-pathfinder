@@ -63,6 +63,8 @@ button[aria-busy=true] .icon { mask: none; -webkit-mask: none; background: trans
 #top-right { position: fixed; z-index: 900; top: max(16px, env(safe-area-inset-top)); right: 16px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
 #avatar-btn { font-weight: 700; font-size: 16px; color: var(--text); }
 #avatar-dot { position: absolute; right: 1px; bottom: 1px; width: 11px; height: 11px; border: 2px solid var(--surface); }
+/* Compass: plain = free map; ring = following; filled = following, heading up */
+#fab-centre.following { border: 2px solid var(--accent); }
 #fab-centre.heading-locked { background: var(--accent-surface); border-color: var(--accent); }
 #loc-badge { margin-top: -4px; font-size: 11px; color: var(--muted); background: var(--surface); border-radius: 6px; padding: 2px 6px; white-space: nowrap; }
 

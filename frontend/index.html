@@ -18,7 +18,7 @@
 <div id="top-right">
   <button id="avatar-btn" class="map-btn" onclick="openPopover('avatar')" aria-label="Profile and settings"><span id="avatar-face"></span><span id="avatar-dot" class="status-dot" hidden></span></button>
   <button id="layers-btn" class="map-btn" onclick="openPopover('layers')" aria-label="Map layers and legend"><span class="icon icon-layers" aria-hidden="true"></span></button>
-  <button id="fab-centre" class="map-btn" onclick="handleCompassTap()" aria-label="Centre on me" title="Tap: centre + lock heading  ·  Tap again: reset north">
+  <button id="fab-centre" class="map-btn" onclick="handleCompassTap()" aria-label="Follow my location" aria-pressed="false" title="Follow my location">
     <svg id="compass-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" style="transition:transform 0.15s;" aria-hidden="true">
       <path d="M12 4 L14.5 13 L12 11.5 L9.5 13 Z" fill="#e74c3c"/>
       <path d="M12 20 L9.5 13 L12 14.5 L14.5 13 Z" fill="#a8afb5"/>
@@ -256,6 +256,7 @@ const state = {
   mapTheme:               'dark',   // 'dark' | 'light'
   autoRotate:             true,     // settings: compass FAB may rotate the map
   headingLocked:          false,    // compass FAB: locked to device heading
+  follow:                 false,    // map keeps the location dot in view
 };
 
 // ── Refresh health tracking ───────────────────────────────────────
@@ -829,6 +830,7 @@ function setMode(mode) {
   document.getElementById('lasso-add').setAttribute('aria-pressed', String(mode === 'lasso'));
   document.getElementById('lasso-remove').setAttribute('aria-pressed', String(mode === 'lasso-deselect'));
   document.getElementById('lasso-chips').hidden = mode !== 'lasso';
+  if (mode !== 'click' && state.follow) setFollow(false);  // don't move the map under a stroke or a pick
   if (lasso && !wasLasso) {
     maybeShowLassoHint();
     map.dragging.disable();
@@ -1306,7 +1308,10 @@ function setEndpoint(which, point) {
   if (picking) stopPicking(); else renderPlan();
   saveSession();
   // A searched place may be off-screen; bring it into view
-  if (!picking && point.lat != null && !map.getBounds().contains([point.lat, point.lon])) map.panTo([point.lat, point.lon]);
+  if (!picking && point.lat != null && !point.live && !map.getBounds().contains([point.lat, point.lon])) {
+    setFollow(false);
+    map.panTo([point.lat, point.lon]);
+  }
 }
 
 // ── Transport ─────────────────────────────────────────────────────
@@ -1564,6 +1569,7 @@ function displayRoute(data, extraS = 0) {
 
   const allCoords = path.features.flatMap(f => f.geometry.coordinates.map(([lon, lat]) => [lat, lon]));
   if (allCoords.length) map.fitBounds(L.latLngBounds(allCoords), { padding: [50, 50] });
+  armFollowForRoute(allCoords);
 
   const km       = (total_distance_m / 1000).toFixed(1);
   const totalS   = total_duration_s + extraS;
@@ -1588,6 +1594,7 @@ function clearRoute() {
   state.routeProgress = 0; state.routeOrderedIds = [];
   state.lastRoute = null;
   updateMapsLink(null);
+  setFollow(false);
   renderNav();
   saveSession();
   startBackgroundRefresh();  // switch back to idle polling when route is cleared
@@ -1652,6 +1659,7 @@ function renderNav() {
   document.getElementById('nav-view').hidden  = !active;
   document.getElementById('grabber').hidden   = active;
   if (active) setSheetFull(false);
+  setWakeLock(active);
   renderPlan();
   if (active) renderLeg();
 }
@@ -1847,6 +1855,14 @@ function onPosition(pos) {
     renderPlan(); saveSession();
   }
   _defaultStartPending = false;
+  if (state.follow) {
+    if (_followHoldFrom && _haversineKm(lat, lon, _followHoldFrom[0], _followHoldFrom[1]) * 1000 < FOLLOW_MOVED_M) {
+      // still looking at the route overview
+    } else {
+      _followHoldFrom = null;
+      followTo(lastLatLng);
+    }
+  }
   if (!locMarker) locMarker = L.marker([lat, lon], { icon: locIcon, zIndexOffset: 1000 }).addTo(map);
   else locMarker.setLatLng([lat, lon]);
   if (!locCircle) locCircle = L.circle([lat, lon], { radius: accuracy, color: '#4a9eff',
@@ -1871,12 +1887,93 @@ function onPositionError(err) {
 
 function setLocBadge(txt) { document.getElementById('loc-badge').textContent = txt; }
 
+// ── Follow: the map keeps the location dot in view, Google Maps style ──
+// On with the compass button (and automatically when a route starts near you);
+// off as soon as you drag the map yourself, enter lasso or pick a point on the map.
+const FOLLOW_MIN_PX   = 4;     // ignore GPS jitter smaller than this (each pan repaints ~14k dots)
+const FOLLOW_AHEAD    = 0.68;  // heading-up on a phone: dot sits low so more road shows ahead
+const FOLLOW_NEAR_KM  = 2;     // auto-follow a new route only if you're this close to it
+const FOLLOW_MOVED_M  = 25;    // after a solve, keep the route overview until you've moved this far
+let _followHoldFrom = null;    // [lat, lon] where the post-solve overview started
+
+function setFollow(on) {
+  state.follow = on;
+  _followHoldFrom = null;
+  const btn = document.getElementById('fab-centre');
+  btn.classList.toggle('following', on);
+  btn.setAttribute('aria-pressed', String(on));
+}
+
+// Where the dot should sit: the middle of the map that the panel doesn't cover
+function followTarget() {
+  const size = map.getSize();
+  const m = mapEl.getBoundingClientRect(), r = sheet.getBoundingClientRect();
+  let left = 0, bottom = 0;
+  if (desktopPanel.matches) left = Math.max(0, r.right - m.left);
+  else if (!document.body.classList.contains('picking')) bottom = Math.max(0, m.bottom - r.top);
+  const frac = !desktopPanel.matches && state.headingLocked ? FOLLOW_AHEAD : 0.5;
+  return L.point(left + (size.x - left) / 2, (size.y - bottom) * frac);
+}
+
+function followTo(latlng, zoom) {
+  if (zoom != null && zoom !== map.getZoom()) map.setZoom(zoom, { animate: false });
+  const delta = map.latLngToContainerPoint(latlng).subtract(followTarget());
+  if (Math.abs(delta.x) < FOLLOW_MIN_PX && Math.abs(delta.y) < FOLLOW_MIN_PX) return;
+  map.panBy(delta, { animate: true, duration: 0.6 });
+}
+
 function centreOnMe() {
-  if (lastLatLng) { map.setView(lastLatLng, Math.max(map.getZoom(), 16)); return; }
+  const zoom = Math.max(map.getZoom(), 16);
+  if (lastLatLng) { followTo(lastLatLng, zoom); return; }
   navigator.geolocation && navigator.geolocation.getCurrentPosition(
-    pos => map.setView([pos.coords.latitude, pos.coords.longitude], 16),
+    pos => followTo([pos.coords.latitude, pos.coords.longitude], zoom),
     () => {}, { enableHighAccuracy: true, timeout: 10000 }
   );
+}
+
+// After a route is drawn its overview stays up; following starts once you move
+function armFollowForRoute(routeCoords) {
+  if (!lastLatLng) return;
+  const [lat, lon] = lastLatLng;
+  // Sample long routes: closeness only needs to be roughly right
+  const step = Math.max(1, Math.floor(routeCoords.length / 500));
+  let near = false;
+  for (let i = 0; i < routeCoords.length && !near; i += step) {
+    near = _haversineKm(lat, lon, routeCoords[i][0], routeCoords[i][1]) <= FOLLOW_NEAR_KM;
+  }
+  if (!near) return;
+  setFollow(true);
+  _followHoldFrom = lastLatLng;
+}
+
+function _haversineKm(lat1, lon1, lat2, lon2) {
+  const r = Math.PI / 180, dLat = (lat2 - lat1) * r, dLon = (lon2 - lon1) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLon / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(h));
+}
+
+// A drag is the user taking the map; programmatic pans never fire dragstart
+map.on('dragstart', () => { if (state.follow) setFollow(false); });
+
+// ── Keep the screen on while navigating (where the browser supports it) ──
+let _wakeLock = null, _wakeLockBusy = false;
+async function setWakeLock(on) {
+  if (!('wakeLock' in navigator) || _wakeLockBusy) return;
+  _wakeLockBusy = true;
+  try {
+    if (on && !_wakeLock && document.visibilityState === 'visible') {
+      _wakeLock = await navigator.wakeLock.request('screen');
+      _wakeLock.addEventListener('release', () => { _wakeLock = null; });
+    } else if (!on && _wakeLock) {
+      const lock = _wakeLock;
+      _wakeLock = null;
+      await lock.release();
+    }
+  } catch (_) {
+    _wakeLock = null;  // battery saver or no permission: carry on without it
+  } finally {
+    _wakeLockBusy = false;
+  }
 }
 
 // ── Map theme ─────────────────────────────────────────────────────
@@ -1909,8 +2006,8 @@ function setAutoRotate(on) {
   if (!on && state.headingLocked) _releaseHeadingLock(true);
   document.getElementById('autorotate').checked = on;
   document.getElementById('fab-centre').title = on
-    ? 'Tap: centre + lock heading · Tap again: reset north'
-    : 'Tap: centre + reset north';
+    ? 'Follow my location, heading up · Tap again: north up'
+    : 'Follow my location';
   saveSession();
 }
 
@@ -1968,19 +2065,22 @@ map.on('move', updateCompassArrow);
 map.on('rotate', updateCompassArrow);  // fired by setBearing
 
 function handleCompassTap() {
-  if (state.headingLocked) {
-    _releaseHeadingLock(true);
-  } else if (state.autoRotate) {
+  if (gpsBlocked) toast('Location is blocked — allow it in your browser settings');
+  if (state.follow && state.headingLocked) {
+    _releaseHeadingLock(true);               // heading-up → north-up, still following
+    centreOnMe();
+    return;
+  }
+  setFollow(!gpsBlocked);
+  if (state.autoRotate) {
     state.headingLocked = true;
     document.getElementById('fab-centre').classList.add('heading-locked');
-    centreOnMe();
     if (typeof map.setBearing === 'function') map.setBearing(bearingForHeading(_compassHeading));
     _startDeviceOrientation();
-  } else {
-    // Auto-rotate disabled in settings — FAB just centres and squares up north
-    centreOnMe();
-    if (typeof map.setBearing === 'function') map.setBearing(0);
+  } else if (typeof map.setBearing === 'function') {
+    map.setBearing(0);                       // auto-rotate off: north-up
   }
+  centreOnMe();
 }
 
 function _releaseHeadingLock(resetNorth) {
@@ -2198,9 +2298,12 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
     saveSession();
     stopBackgroundRefresh();
-  } else if (state.phones.length) {
-    startBackgroundRefresh();
-    refreshPhones();
+  } else {
+    if (inNav()) setWakeLock(true);  // the browser drops wake locks when the page hides
+    if (state.phones.length) {
+      startBackgroundRefresh();
+      refreshPhones();
+    }
   }
 });
 
