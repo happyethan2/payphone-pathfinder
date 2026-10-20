@@ -34,7 +34,6 @@
     <button class="chip" data-filter="lassoExcludeOwned" aria-pressed="false" title="Lasso skips phones you already own"><span class="icon icon-check" aria-hidden="true"></span>Skip Owned</button>
     <button class="chip" data-filter="lassoExcludeCellmates" aria-pressed="false" title="Lasso skips phones held by your cellmates"><span class="icon icon-check" aria-hidden="true"></span>Skip Cellmates</button>
   </div>
-  <div id="lasso-hint" hidden></div>
   <div class="dock-row">
     <div class="segmented" role="group" aria-label="Map selection tools">
       <button id="lasso-add" aria-pressed="false" onclick="toggleLasso('lasso')"><span class="icon icon-lasso" aria-hidden="true"></span>Lasso</button>
@@ -70,7 +69,10 @@
       <div class="field">
         <div class="field-head"><div class="sec-title">Start &amp; End</div>
           <button class="text-btn" id="clear-ends" onclick="clearEnds()" hidden>Clear</button></div>
-        <button class="place-field" id="start-field" onclick="openSearch('start')"><span class="pin-dot" style="background:#2ecc71"></span><span class="pf-text" id="start-text"></span></button>
+        <div class="place-wrap">
+          <button class="place-field" id="start-field" onclick="openSearch('start')"><span class="pin-dot" style="background:#2ecc71"></span><span class="pf-text" id="start-text"></span></button>
+          <button class="pf-gps" id="start-gps" onclick="useMyLocation('start')" aria-label="Use my location" title="Use My Location" hidden><span class="icon icon-gps" aria-hidden="true"></span></button>
+        </div>
         <button class="place-field" id="end-field" onclick="openSearch('end')"><span class="pin-dot" style="background:#e74c3c"></span><span class="pf-text" id="end-text"></span></button>
       </div>
       <div class="field" id="sel-field">
@@ -513,6 +515,9 @@ function renderPlan() {
   }
 
   document.getElementById('clear-ends').hidden = !state.start && !state.end;
+  // Crosshair: back to the live location (hidden while that's already the start)
+  document.getElementById('start-gps').hidden =
+    !navigator.geolocation || gpsBlocked || !!(state.start && state.start.live);
   for (const which of ['start', 'end']) {
     const el = document.getElementById(`${which}-text`);
     const pt = state[which];
@@ -537,8 +542,28 @@ document.querySelectorAll('#mode-switch button').forEach(b => b.onclick = () => 
 document.querySelectorAll('#profile-switch button').forEach(b => b.onclick = () => setProfile(b.dataset.profile));
 document.getElementById('orienteer-arrive-by').addEventListener('change', () => { renderPlan(); saveSession(); });
 
-function findPlannedRoute() {
+async function findPlannedRoute() {
+  if (routeBusy || planProblem()) return;
+  if (state.start && state.start.live) {
+    setRouteBusy(true);
+    const fix = await currentFix();
+    setRouteBusy(false);
+    if (!fix) { toast("Couldn't get your location — set a start, or allow location access"); return; }
+    state.start.lat = fix[0];
+    state.start.lon = fix[1];
+  }
   return state.routeMode === 'orienteer' ? findOrienteerRoute() : findRoute();
+}
+
+// Best current position: a recent watch fix, else ask once, else the last known one
+const FIX_FRESH_MS = 30_000;
+function currentFix() {
+  if (lastLatLng && Date.now() - lastFixAt < FIX_FRESH_MS) return Promise.resolve(lastLatLng);
+  if (!navigator.geolocation) return Promise.resolve(lastLatLng);
+  return new Promise(done => navigator.geolocation.getCurrentPosition(
+    pos => done([pos.coords.latitude, pos.coords.longitude]),
+    () => done(lastLatLng),
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 10_000 }));
 }
 function setRouteBusy(busy) {
   routeBusy = busy;
@@ -804,12 +829,8 @@ function setMode(mode) {
   document.getElementById('lasso-add').setAttribute('aria-pressed', String(mode === 'lasso'));
   document.getElementById('lasso-remove').setAttribute('aria-pressed', String(mode === 'lasso-deselect'));
   document.getElementById('lasso-chips').hidden = mode !== 'lasso';
-  const hint = document.getElementById('lasso-hint');
-  hint.hidden = !lasso;
-  hint.textContent = matchMedia('(pointer: coarse)').matches
-    ? 'One finger to draw · Two fingers to move the map'
-    : 'Drag to draw · Scroll to zoom';
   if (lasso && !wasLasso) {
+    maybeShowLassoHint();
     map.dragging.disable();
     if (map.tap) map.tap.disable();
     mapEl.style.touchAction = 'none';
@@ -821,6 +842,18 @@ function setMode(mode) {
     cancelLassoStroke();
     _lassoPointers.clear();
   }
+}
+
+// The gesture hint shows the first few times only; after that it's clutter
+const LASSO_HINT_KEY = 'payphone_pathfinder_lasso_hints';
+function maybeShowLassoHint() {
+  let shown = 0;
+  try { shown = Number(localStorage.getItem(LASSO_HINT_KEY)) || 0; } catch (e) {}
+  if (shown >= 3) return;
+  toast(matchMedia('(pointer: coarse)').matches
+    ? 'One finger to draw · Two fingers to move the map'
+    : 'Drag to draw · Scroll to zoom');
+  try { localStorage.setItem(LASSO_HINT_KEY, String(shown + 1)); } catch (e) {}
 }
 
 function toggleLasso(kind) {
@@ -1077,7 +1110,19 @@ function clearEnds() {
   });
 }
 
+// A live start follows the GPS and is pinned to a real position when a route is
+// solved, so a plan made at home starts from wherever you are when you tap Find.
+function liveStart() {
+  return { live: true, label: 'My Location', lat: lastLatLng ? lastLatLng[0] : null, lon: lastLatLng ? lastLatLng[1] : null };
+}
+
 function useMyLocation(which) {
+  if (!navigator.geolocation) { toast("Location isn't available on this device"); return; }
+  if (which === 'start') {
+    if (gpsBlocked) { toast('Location is blocked — allow it in your browser settings'); return; }
+    setEndpoint('start', liveStart());
+    return;
+  }
   const set = (lat, lon) => setEndpoint(which, { lat, lon, label: 'My Location' });
   if (lastLatLng) { set(lastLatLng[0], lastLatLng[1]); return; }
   if (!navigator.geolocation) { toast("Location isn't available on this device"); return; }
@@ -1120,11 +1165,17 @@ function searchFixedItems() {
   const which = searchWhich;
   return [
     { icon: 'gps', title: 'My Location', run: () => useMyLocation(which) },
-    ...(which === 'end' && state.start
-      ? [{ icon: 'loop', title: 'Same as Start', run: () => setEndpoint('end', { ...state.start }) }] : []),
+    ...(which === 'end' && state.start && state.start.lat != null
+      ? [{ icon: 'loop', title: 'Same as Start', run: () => setEndpoint('end', sameAsStart()) }] : []),
     { icon: 'pin', title: 'Choose on Map', run: () => startPicking(which) },
   ];
 }
+function sameAsStart() {
+  const { live, ...snap } = state.start;
+  if (live && lastLatLng) { snap.lat = lastLatLng[0]; snap.lon = lastLatLng[1]; }
+  return snap;
+}
+
 function openSearch(which) {
   searchWhich = which;
   searchInput.placeholder = which === 'start' ? 'Search for a start' : endPlaceholder();
@@ -1205,7 +1256,7 @@ function drawEndpoints() {
     const key = `${which}Marker`;
     if (state[key]) { map.removeLayer(state[key]); state[key] = null; }
     const pt = state[which];
-    if (pt) state[key] = L.marker([pt.lat, pt.lon], { icon: makeEndpointIcon(which, pt), zIndexOffset: 500 }).addTo(map);
+    if (pt && !pt.live) state[key] = L.marker([pt.lat, pt.lon], { icon: makeEndpointIcon(which, pt), zIndexOffset: 500 }).addTo(map);
   });
 }
 
@@ -1255,7 +1306,7 @@ function setEndpoint(which, point) {
   if (picking) stopPicking(); else renderPlan();
   saveSession();
   // A searched place may be off-screen; bring it into view
-  if (!picking && !map.getBounds().contains([point.lat, point.lon])) map.panTo([point.lat, point.lon]);
+  if (!picking && point.lat != null && !map.getBounds().contains([point.lat, point.lon])) map.panTo([point.lat, point.lon]);
 }
 
 // ── Transport ─────────────────────────────────────────────────────
@@ -1275,7 +1326,9 @@ function setProfile(p) {
 
 function _encodeEndpoint(pt) {
   if (!pt) return null;
-  const base = `${(+pt.lat).toFixed(6)},${(+pt.lon).toFixed(6)}`;
+  const [lat, lon] = pt.live && lastLatLng ? lastLatLng : [pt.lat, pt.lon];
+  if (lat == null || lon == null) return null;
+  const base = `${(+lat).toFixed(6)},${(+lon).toFixed(6)}`;
   return pt.phone_id != null ? `${base},${pt.phone_id}` : base;
 }
 
@@ -1770,6 +1823,9 @@ const locIcon = L.divIcon({ html: '<div class="loc-dot"></div>',
   className: '', iconSize: [13, 13], iconAnchor: [6, 6] });
 
 let locMarker = null, locCircle = null, lastLatLng = null;
+let lastFixAt = 0;                 // when lastLatLng arrived
+let gpsBlocked = false;            // location permission denied
+let _defaultStartPending = true;   // offer My Location as the start on the first fix
 
 function startGeolocation() {
   if (!navigator.geolocation) { setLocBadge('no GPS'); return; }
@@ -1780,6 +1836,17 @@ function startGeolocation() {
 function onPosition(pos) {
   const { latitude: lat, longitude: lon, accuracy } = pos.coords;
   lastLatLng = [lat, lon];
+  lastFixAt  = Date.now();
+  if (gpsBlocked) { gpsBlocked = false; renderPlan(); }
+  if (state.start && state.start.live) {
+    state.start.lat = lat; state.start.lon = lon;
+  } else if (_defaultStartPending && !state.start) {
+    // First fix of the visit and no start chosen: start from here. Once only, so
+    // clearing the start sticks; the crosshair brings it back.
+    state.start = liveStart();
+    renderPlan(); saveSession();
+  }
+  _defaultStartPending = false;
   if (!locMarker) locMarker = L.marker([lat, lon], { icon: locIcon, zIndexOffset: 1000 }).addTo(map);
   else locMarker.setLatLng([lat, lon]);
   if (!locCircle) locCircle = L.circle([lat, lon], { radius: accuracy, color: '#4a9eff',
@@ -1789,6 +1856,12 @@ function onPosition(pos) {
 }
 
 function onPositionError(err) {
+  if (err.code === 1) {  // permission denied: a live start can never resolve
+    gpsBlocked = true;
+    _defaultStartPending = false;
+    if (state.start && state.start.live) { state.start = null; saveSession(); }
+    renderPlan();
+  }
   if (err.code === 1 && location.protocol === 'http:' && location.hostname !== 'localhost') {
     setLocBadge('needs HTTPS');
   } else {
@@ -1993,6 +2066,8 @@ function restoreSession() {
     if (s.profile)     setProfile(s.profile);
     if (s.selectedIds) s.selectedIds.forEach(id => state.selectedIds.add(id));
     if (s.start)       state.start     = s.start;
+    // My Location saved as a fixed point (before it was live) means "wherever I am"
+    if (state.start && state.start.label === 'My Location' && state.start.phone_id == null) state.start.live = true;
     if (s.end)         state.end       = s.end;
     if (s.lastRoute)   state.lastRoute = s.lastRoute;
     if (typeof s.lastRouteExtraS === 'number') state.lastRouteExtraS = s.lastRouteExtraS;

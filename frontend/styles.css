@@ -82,7 +82,6 @@ button[aria-busy=true] .icon { mask: none; -webkit-mask: none; background: trans
 .chip .icon { width: 14px; height: 14px; flex-basis: 14px; display: none; }
 .chip[aria-pressed=true] { background: var(--accent-surface); border-color: var(--accent); color: #d5e5f7; }
 .chip[aria-pressed=true] .icon { display: inline-block; }
-#lasso-hint { font-size: 12px; color: var(--text); background: var(--surface); padding: 4px 10px; border-radius: 10px; }
 
 #sheet { position: fixed; z-index: 1000; left: 0; right: 0; bottom: 0; background: var(--surface); border-radius: 16px 16px 0 0; box-shadow: 0 -4px 28px rgba(0,0,0,.35); max-height: 86dvh; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: #4c5359 var(--surface); padding: 0 16px max(16px, env(safe-area-inset-bottom)); transition: transform .25s ease; }
 body.picking #sheet { transform: translateY(110%); }
@@ -104,7 +103,10 @@ body.picking #sheet { transform: translateY(110%); }
 /* Start/End fields open a full-screen search with the input pinned to the top,
    so the on-screen keyboard can never cover the suggestions */
 .place-field { width: 100%; justify-content: flex-start; gap: 10px; text-align: left; font-size: 16px; font-weight: 400; color: var(--text); }
-.place-field + .place-field { margin-top: 8px; }
+#end-field { margin-top: 8px; }
+.place-wrap { position: relative; }
+.place-wrap .place-field { padding-right: 48px; }
+.pf-gps { position: absolute; top: 0; right: 0; width: 44px; height: 100%; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--accent); }
 .place-field .pin-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .place-field .pf-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .place-field .pf-text.unset { color: var(--muted); }
