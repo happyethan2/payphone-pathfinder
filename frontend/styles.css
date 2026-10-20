@@ -49,8 +49,8 @@ button[aria-busy=true] .icon { mask: none; -webkit-mask: none; background: trans
 .legend-mine { background:#2ecc71 }
 .legend-cellmate { background:#3498db }
 .legend-hostile { background:#e74c3c }
-.legend-photo { background:var(--surface);border:2px solid #c084fc; }
-.legend-new { background:var(--surface);border:2px solid #fbbf24; }
+.legend-photo { background:var(--surface);border:2px solid var(--ink-photo, #c084fc); }
+.legend-new { background:var(--surface);border:2px solid var(--ink-new, #fbbf24); }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes dot-stale { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; transition: background .4s; }

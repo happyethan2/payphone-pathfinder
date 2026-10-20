@@ -327,6 +327,14 @@ const STATUS_COLORS = {
   hostile:    '#e74c3c',
 };
 
+// Colours drawn over the basemap, per map style. Light tiles need dark,
+// saturated strokes: white or pastel rings vanish against them.
+const MAP_INK = {
+  dark:  { sel: '#ffffff', isNew: '#fbbf24', photo: '#c084fc', lasso: '#9bbce0', unlasso: '#efa29a' },
+  light: { sel: '#1f2937', isNew: '#b45309', photo: '#9333ea', lasso: '#1d4f80', unlasso: '#b42318' },
+};
+function mapInk() { return MAP_INK[state.mapTheme] || MAP_INK.dark; }
+
 // ── Map init ──────────────────────────────────────────────────────
 // CARTO requires an API key as of Aug 2026 — without one every tile is stamped
 // "API KEY REQUIRED". The host sets CARTO_API_KEY in .env; /api/config.js hands it
@@ -737,8 +745,10 @@ function makeWpIcon(label, extraClass) {
 }
 
 function mkStyle(color, sel, hasPhoto, isNew) {
-  const strokeColor  = isNew ? '#fbbf24' : hasPhoto ? '#c084fc' : (sel ? '#fff' : 'rgba(0,0,0,0.3)');
-  const strokeWeight = (isNew || hasPhoto) ? 2 : (sel ? 2.5 : 1);
+  const ink = mapInk();
+  const strokeColor  = isNew ? ink.isNew : hasPhoto ? ink.photo : (sel ? ink.sel : 'rgba(0,0,0,0.3)');
+  // A highlight owns the ring colour, so selection shows as a thicker ring (and the bigger dot)
+  const strokeWeight = (isNew || hasPhoto) ? (sel ? 4 : 2) : (sel ? 2.5 : 1);
   return { radius: markerRadius(sel), fillColor: color, color: strokeColor,
            weight: strokeWeight, fillOpacity: 0.9, opacity: 1 };
 }
@@ -945,9 +955,9 @@ for (const type of ['touchstart', 'touchmove']) {
 function drawLassoPreview() {
   if (state.lassoLayer) map.removeLayer(state.lassoLayer);
   if (state.lassoPoints.length < 2) return;
+  const ink = state.mode === 'lasso-deselect' ? mapInk().unlasso : mapInk().lasso;
   state.lassoLayer = L.polygon(state.lassoPoints, {
-    color: state.mode === 'lasso-deselect' ? '#efa29a' : '#9bbce0',
-    fillColor: state.mode === 'lasso-deselect' ? '#efa29a' : '#9bbce0', fillOpacity: 0.08,
+    color: ink, fillColor: ink, fillOpacity: 0.08,
     weight: 1.5, dashArray: '5 4',
   }).addTo(map);
 }
@@ -1783,6 +1793,11 @@ function centreOnMe() {
 // ── Map theme ─────────────────────────────────────────────────────
 function setMapTheme(theme) {
   state.mapTheme = theme;
+  // Rings and legend follow the basemap so they stay visible on it
+  const ink = mapInk();
+  document.documentElement.style.setProperty('--ink-new', ink.isNew);
+  document.documentElement.style.setProperty('--ink-photo', ink.photo);
+  state.phones.forEach(p => refreshMarker(p));
   map.removeLayer(tileLayer);
   tileLayer = L.tileLayer(TILE_URLS[theme], {
     attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19,
