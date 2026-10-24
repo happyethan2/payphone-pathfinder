@@ -26,7 +26,7 @@ button, input { font-family: inherit; }
 [hidden] { display: none !important; }
 
 /* Inputs and controls */
-.sec-title { font-size: 13px; font-weight: 700; line-height: 1.4; color: var(--text); margin-bottom: 8px; }
+.sec-title { font-size: 13px; font-weight: 700; line-height: 1.4; color: var(--text); margin-bottom: 12px; }
 input[type=text], .time-field { min-height: 44px; width: 100%; padding: 10px 12px; background: var(--raised); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 16px; caret-color: var(--success); }
 input::placeholder { color: var(--muted); opacity: 1; }
 input[type=text]:focus, .time-field:focus-within { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -57,7 +57,7 @@ button[aria-busy=true] .icon { mask: none; -webkit-mask: none; background: trans
 .status-dot.stale { animation: dot-stale 1.6s ease-in-out infinite; }
 
 /* ── Map-first layout ─────────────────────────────────────────────
-   Top-right: you, layers, compass. Bottom-left: selection tools.
+   Top-right: you, settings, compass. Bottom-left: selection tools.
    Sheet: plan → navigate (bottom sheet on mobile, side panel ≥640px). */
 .map-btn { flex: none; width: 44px; height: 44px; padding: 0; border-radius: 50%; background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.3); position: relative; }
 #top-right { position: fixed; z-index: 900; top: max(16px, env(safe-area-inset-top)); right: 16px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
@@ -95,7 +95,7 @@ body.picking #sheet { transform: translateY(110%); }
 #sheet.full #plan-summary .icon { transform: rotate(180deg); }
 #plan-details { display: none; }
 #sheet.full #plan-details { display: block; }
-.field { padding: 12px 0; border-top: 1px solid var(--divider); }
+.field { padding: 12px 0; }
 .field-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .field-head .sec-title { margin: 0; }
 .text-btn { flex: none; min-height: 32px; padding: 4px 8px; margin-right: -8px; border: 0; background: transparent; color: var(--accent); font-weight: 500; }
@@ -127,7 +127,7 @@ body.picking #sheet { transform: translateY(110%); }
 #share-btn { flex: none; width: 48px; }
 
 /* Navigate card */
-.nav-head { display: flex; align-items: center; gap: 12px; padding: 4px 0 12px; }
+.nav-head { display: flex; align-items: center; gap: 12px; padding: 16px 0 12px; }
 .nav-head .wp { width: 36px; height: 36px; font-size: 15px; flex: none; }
 .nav-title { font-size: 17px; font-weight: 700; color: var(--text); }
 .nav-stats { font-size: 13px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
@@ -145,12 +145,18 @@ body.picking #sheet { transform: translateY(110%); }
 /* Popovers: bottom sheet on mobile, dropdown on desktop */
 .scrim { position: fixed; inset: 0; z-index: 1150; background: rgba(0,0,0,.45); }
 .popover { position: fixed; z-index: 1200; left: 0; right: 0; bottom: 0; background: var(--surface); border-radius: 16px 16px 0 0; padding: 8px 16px max(20px, env(safe-area-inset-bottom)); max-height: 80dvh; overflow-y: auto; box-shadow: 0 -4px 28px rgba(0,0,0,.4); }
-.popover-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 0 4px; }
+.popover-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 0 12px; margin-bottom: 4px; border-bottom: 1px solid var(--divider); }
 .popover-head h2 { font-size: 16px; font-weight: 700; }
-.popover .field:first-of-type { border-top: 0; }
+/* Legend ⓘ beside Done: the pair keeps the single button's flush right edge */
+.head-btns { display: flex; align-items: center; margin-right: -8px; }
+.head-btns .text-btn { margin-right: 0; }
 .switch-row { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; color: var(--text); cursor: pointer; }
 .switch-row .label { flex: 1; display: flex; align-items: center; gap: 8px; }
 .switch-row .icon { color: var(--muted); }
+/* A 44px row centres ~13px of air around its label; cancel it at a section's
+   edges so headings and section gaps match the other content */
+.sec-title + .switch-row { margin-top: -12px; }
+.field > .switch-row:last-child { margin-bottom: -12px; }
 input[type=checkbox][role=switch] { appearance: none; width: 42px; height: 24px; border-radius: 12px; flex: none; background: var(--border); position: relative; cursor: pointer; transition: background .15s; }
 input[type=checkbox][role=switch]::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--text); transition: transform .15s; }
 input[type=checkbox][role=switch]:checked { background: var(--success); }
@@ -199,7 +205,7 @@ body.picking #tool-dock { display: none; }
   body.picking #sheet { transform: none; }
   #grabber, #plan-summary { display: none; }
   #plan-details { display: block; }
-  #plan-details > .field:first-child { border-top: 0; padding-top: 0; }
+  #plan-details > .field:first-child { padding-top: 0; }
   #tool-dock { left: 392px; right: 16px; bottom: 20px; }
   #toast { left: 50%; right: auto; transform: translateX(-50%); width: 420px; }
   .scrim { background: transparent; }
@@ -262,7 +268,6 @@ body.picking #tool-dock { display: none; }
 .icon-chevron-right { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M7%204l5%205-5%205%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-link { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M7%2011l4-4M6%2010l-1%201a2.8%202.8%200%20004%204l2-2a2.8%202.8%200%20000-4M12%208l1-1a2.8%202.8%200%2000-4-4L7%205a2.8%202.8%200%20000%204%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-map { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M2%204l5-2%204%202%205-2v12l-5%202-4-2-5%202V4zM7%202v12M11%204v12%22%2F%3E%3C%2Fsvg%3E"); }
-.icon-layers { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M9%202L1.5%206%209%2010l7.5-4L9%202zM1.5%209.5L9%2013.5l7.5-4M1.5%2013L9%2017l7.5-4%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-user { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%226%22%20r%3D%223.2%22%2F%3E%3Cpath%20d%3D%22M2.8%2016c.8-3.2%203.3-4.8%206.2-4.8s5.4%201.6%206.2%204.8%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-lasso { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cellipse%20cx%3D%229%22%20cy%3D%227.5%22%20rx%3D%226.5%22%20ry%3D%224.5%22%20stroke-dasharray%3D%222.4%202%22%2F%3E%3Cpath%20d%3D%22M5.5%2011.3c-.9%201.5-.4%203.3%201.4%203.9%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-deselect { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%226.5%22%2F%3E%3Cpath%20d%3D%22M6%209h6%22%2F%3E%3C%2Fsvg%3E"); }
@@ -273,3 +278,8 @@ body.picking #tool-dock { display: none; }
 .icon-gps { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%225%22%2F%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%221.5%22%2F%3E%3Cpath%20d%3D%22M9%201.5v2.5M9%2014v2.5M1.5%209h2.5M14%209h2.5%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-pin { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M9%2016s5-4.6%205-8.5a5%205%200%2000-10%200C4%2011.4%209%2016%209%2016z%22%2F%3E%3Ccircle%20cx%3D%229%22%20cy%3D%227.5%22%20r%3D%221.8%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-loop { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M3%209a6%206%200%200110.5-4M15%209a6%206%200%2001-10.5%204M13.5%201.5V5H10M4.5%2016.5V13H8%22%2F%3E%3C%2Fsvg%3E"); }
+.icon-moon { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M15.75%209.6A6.75%206.75%200%201%201%208.4%202.25%205.25%205.25%200%200%200%2015.75%209.6z%22%2F%3E%3C%2Fsvg%3E"); }
+.icon-compass { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%226.5%22%2F%3E%3Cpath%20d%3D%22M11.5%206.5l-1.2%203.8-3.8%201.2%201.2-3.8z%22%2F%3E%3C%2Fsvg%3E"); }
+/* Feather Icons "settings" (MIT) */
+.icon-gear { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222.2%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212%22%20r%3D%223%22%2F%3E%3Cpath%20d%3D%22M19.4%2015a1.65%201.65%200%200%200%20.33%201.82l.06.06a2%202%200%200%201%200%202.83%202%202%200%200%201-2.83%200l-.06-.06a1.65%201.65%200%200%200-1.82-.33%201.65%201.65%200%200%200-1%201.51V21a2%202%200%200%201-2%202%202%202%200%200%201-2-2v-.09A1.65%201.65%200%200%200%209%2019.4a1.65%201.65%200%200%200-1.82.33l-.06.06a2%202%200%200%201-2.83%200%202%202%200%200%201%200-2.83l.06-.06a1.65%201.65%200%200%200%20.33-1.82%201.65%201.65%200%200%200-1.51-1H3a2%202%200%200%201-2-2%202%202%200%200%201%202-2h.09A1.65%201.65%200%200%200%204.6%209a1.65%201.65%200%200%200-.33-1.82l-.06-.06a2%202%200%200%201%200-2.83%202%202%200%200%201%202.83%200l.06.06a1.65%201.65%200%200%200%201.82.33H9a1.65%201.65%200%200%200%201-1.51V3a2%202%200%200%201%202-2%202%202%200%200%201%202%202v.09a1.65%201.65%200%200%200%201%201.51%201.65%201.65%200%200%200%201.82-.33l.06-.06a2%202%200%200%201%202.83%200%202%202%200%200%201%200%202.83l-.06.06a1.65%201.65%200%200%200-.33%201.82V9a1.65%201.65%200%200%200%201.51%201H21a2%202%200%200%201%202%202%202%202%200%200%201-2%202h-.09a1.65%201.65%200%200%200-1.51%201z%22%2F%3E%3C%2Fsvg%3E"); }
+.icon-info { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%226.5%22%2F%3E%3Cpath%20d%3D%22M9%208.3v3.9M9%205.8v.1%22%2F%3E%3C%2Fsvg%3E"); }

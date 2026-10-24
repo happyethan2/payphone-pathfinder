@@ -15,10 +15,10 @@
 
 <div id="map"></div>
 
-<!-- ── Top-right: you, map layers, compass ─────────────────────── -->
+<!-- ── Top-right: you, settings, compass ───────────────────────── -->
 <div id="top-right">
   <button id="avatar-btn" class="map-btn" onclick="openPopover('avatar')" aria-label="Profile and settings"><span id="avatar-face"></span><span id="avatar-dot" class="status-dot" hidden></span></button>
-  <button id="layers-btn" class="map-btn" onclick="openPopover('layers')" aria-label="Map layers and legend"><span class="icon icon-layers" aria-hidden="true"></span></button>
+  <button id="settings-btn" class="map-btn" onclick="openPopover('settings')" aria-label="Settings"><span class="icon icon-gear" aria-hidden="true"></span></button>
   <button id="fab-centre" class="map-btn" onclick="handleCompassTap()" aria-label="Follow my location" aria-pressed="false" title="Follow my location">
     <svg id="compass-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" style="transition:transform 0.15s;" aria-hidden="true">
       <path d="M12 4 L14.5 13 L12 11.5 L9.5 13 Z" fill="#e74c3c"/>
@@ -123,21 +123,34 @@
   <div class="field">
     <button style="width:100%" onclick="reloadPhones()">Reload Phones</button>
   </div>
+</div>
+
+<div class="popover" id="pop-settings" role="dialog" aria-modal="true" aria-labelledby="pop-settings-h" hidden>
+  <div class="popover-head"><h2 id="pop-settings-h">Settings</h2>
+    <span class="head-btns">
+      <button class="text-btn" onclick="openPopover('legend')" aria-label="Legend" title="Legend"><span class="icon icon-info" aria-hidden="true"></span></button>
+      <button class="text-btn" onclick="closePopover()">Done</button>
+    </span></div>
   <div class="field">
-    <label class="switch-row"><span class="label">Auto-Rotate Map</span><input type="checkbox" role="switch" id="autorotate" checked></label>
-    <div class="note" id="autorotate-note">The compass button locks the map to the direction you're facing. A two-finger twist rotates the map any time.</div>
+    <div class="sec-title">Filters</div>
+    <label class="switch-row"><span class="label"><span class="icon icon-camera" aria-hidden="true"></span>Wiki Photo</span><input type="checkbox" role="switch" id="hl-photo"></label>
+    <label class="switch-row"><span class="label"><span class="icon icon-magic" aria-hidden="true"></span>Never Captured</span><input type="checkbox" role="switch" id="hl-new"></label>
+  </div>
+  <div class="field">
+    <div class="sec-title">Display</div>
+    <label class="switch-row"><span class="label"><span class="icon icon-moon" aria-hidden="true"></span>Dark Mode</span><input type="checkbox" role="switch" id="theme-dark" checked></label>
+    <label class="switch-row"><span class="label"><span class="icon icon-map" aria-hidden="true"></span>Mini-Map</span><input type="checkbox" role="switch" id="minimap"></label>
+  </div>
+  <div class="field">
+    <div class="sec-title">Navigation</div>
+    <label class="switch-row"><span class="label"><span class="icon icon-compass" aria-hidden="true"></span>Auto-Rotate Map</span><input type="checkbox" role="switch" id="autorotate" checked></label>
+    <div class="note" id="autorotate-note" hidden></div>
   </div>
 </div>
 
-<div class="popover" id="pop-layers" role="dialog" aria-modal="true" aria-labelledby="pop-layers-h" hidden>
-  <div class="popover-head"><h2 id="pop-layers-h">Map</h2><button class="text-btn" onclick="closePopover()">Done</button></div>
+<div class="popover" id="pop-legend" role="dialog" aria-modal="true" aria-labelledby="pop-legend-h" hidden>
+  <div class="popover-head"><h2 id="pop-legend-h">Legend</h2><button class="text-btn" onclick="openPopover('settings')">Done</button></div>
   <div class="field">
-    <div class="sec-title">Highlight</div>
-    <label class="switch-row"><span class="label"><span class="icon icon-camera" aria-hidden="true"></span>Phones with a Wiki Photo</span><input type="checkbox" role="switch" id="hl-photo"></label>
-    <label class="switch-row"><span class="label"><span class="icon icon-magic" aria-hidden="true"></span>Phones You've Never Captured</span><input type="checkbox" role="switch" id="hl-new"></label>
-  </div>
-  <div class="field">
-    <div class="sec-title">Legend</div>
     <div class="legend">
       <div class="legend-item"><span class="legend-uncaptured dot"></span>Uncaptured</div>
       <div class="legend-item"><span class="legend-mine dot"></span>Mine</div>
@@ -146,14 +159,6 @@
       <div class="legend-item"><span class="legend-photo dot"></span>Wiki Photo</div>
       <div class="legend-item"><span class="legend-new dot"></span>New</div>
     </div>
-  </div>
-  <div class="field">
-    <div class="sec-title">Map Style</div>
-    <div class="segmented" id="theme-switch" role="group" aria-label="Map style">
-      <button data-theme="dark" aria-pressed="true" style="flex:1">Dark</button>
-      <button data-theme="light" aria-pressed="false" style="flex:1">Light</button>
-    </div>
-    <label class="switch-row" style="margin-top:8px"><span class="label">Mini-Map</span><input type="checkbox" role="switch" id="minimap"></label>
   </div>
 </div>
 
@@ -597,14 +602,16 @@ function toast(msg, undo) {
   });
 }
 
-// ── Popovers (avatar, layers) ─────────────────────────────────────
+// ── Popovers (avatar, settings, legend) ───────────────────────────
 let openPop = null, popReturn = null;
 function openPopover(which) {
+  const prevHeight = openPop?.offsetHeight;  // the legend swaps in at the settings sheet's size
   closePopover();
   openPop = document.getElementById(`pop-${which}`);
   popReturn = document.activeElement;
   if (which === 'avatar') document.getElementById('name-input').value = state.username;
   document.getElementById('scrim').hidden = false;
+  openPop.style.minHeight = which === 'legend' && prevHeight ? `${prevHeight}px` : '';
   openPop.hidden = false;
   openPop.querySelector('input, button').focus();
 }
@@ -914,7 +921,7 @@ async function ensurePastCaptures() {
   }
 }
 
-// Highlights (Layers popover). Mutually exclusive: both recolour the dot outline.
+// Highlights (Settings popover). Mutually exclusive: both recolour the dot outline.
 const hlPhoto = document.getElementById('hl-photo');
 const hlNew   = document.getElementById('hl-new');
 
@@ -2028,11 +2035,10 @@ function setMapTheme(theme) {
     miniMap.remove(); miniMap = null;
     toggleMiniMap();
   }
-  document.querySelectorAll('#theme-switch button').forEach(b =>
-    b.setAttribute('aria-pressed', String(b.dataset.theme === theme)));
+  document.getElementById('theme-dark').checked = theme === 'dark';
   saveSession();
 }
-document.querySelectorAll('#theme-switch button').forEach(b => b.onclick = () => setMapTheme(b.dataset.theme));
+document.getElementById('theme-dark').onchange = e => setMapTheme(e.target.checked ? 'dark' : 'light');
 document.getElementById('minimap').onchange = toggleMiniMap;
 
 // ── Auto-rotate setting ───────────────────────────────────────────
@@ -2360,8 +2366,9 @@ document.addEventListener('visibilitychange', () => {
   if (typeof DeviceOrientationEvent === 'undefined') {
     setAutoRotate(false);
     document.getElementById('autorotate').disabled = true;
-    document.getElementById('autorotate-note').textContent =
-      'This device has no compass. Use a two-finger twist to rotate the map manually.';
+    const note = document.getElementById('autorotate-note');
+    note.textContent = 'This device has no compass. Use a two-finger twist to rotate the map manually.';
+    note.hidden = false;
   }
   maybeShowCartoNotice();
   const p = new URLSearchParams(location.search);
