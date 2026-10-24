@@ -23,7 +23,7 @@ SAMPLE_PHONES = {
         [6, 138.65, -34.97, "0", "active"],    # uncaptured (string zero holder)
     ],
     "players": {
-        "7": {"name": "GhostScout", "cellId": 3},
+        "7": {"name": "GhostScout", "cellId": 3, "emoji": "💤"},
         "8": {"name": "Mate",       "cellId": 3},
         "9": {"name": "<b>Rival</b>", "cellId": 4},
     },

@@ -249,6 +249,7 @@ const state = {
   lastOrienteerBufferS:   0,        // buffer used for the last orienteer solve
   mapTheme:               'dark',   // 'dark' | 'light'
   autoRotate:             true,     // settings: compass FAB may rotate the map
+  playerEmoji:            '',       // the player's in-game emoji, for the avatar
   headingLocked:          false,    // compass FAB: locked to device heading
   follow:                 false,    // map keeps the location dot in view
 };
@@ -626,11 +627,17 @@ document.addEventListener('keydown', e => {
 const ONBOARDED_KEY = 'payphone_pathfinder_onboarded';
 function markOnboarded() { try { localStorage.setItem(ONBOARDED_KEY, '1'); } catch (e) {} }
 
+// The emoji is player-set: show one grapheme only (a flag or skin tone is several code points)
+function firstGrapheme(s) {
+  try { return new Intl.Segmenter().segment(s)[Symbol.iterator]().next().value?.segment || ''; }
+  catch (e) { return [...s][0] || ''; }
+}
+
 function renderAvatar() {
   const face = document.getElementById('avatar-face');
   if (state.username) {
     face.className = '';
-    face.textContent = state.username[0].toUpperCase();
+    face.textContent = firstGrapheme(state.playerEmoji) || state.username[0].toUpperCase();
   } else {
     face.textContent = '';
     face.className = 'icon icon-user';
@@ -643,6 +650,7 @@ function saveName(value) {
   const name = value.trim();
   const changed = name !== state.username;
   state.username = name;
+  if (changed) state.playerEmoji = '';  // the old name's; loadPhones fetches the new one
   markOnboarded();
   renderAvatar(); renderPlan(); saveSession();
   if (!changed) return;
@@ -670,6 +678,7 @@ function finishOnboarding(value) {
   document.getElementById('onboard').hidden = true;
   markOnboarded();
   state.username = value.trim();
+  state.playerEmoji = '';
   renderAvatar(); renderPlan(); saveSession();
   if (!state.username) toast('Browsing without a name. Add it any time from the top corner.');
   loadPhones();
@@ -692,7 +701,10 @@ async function loadPhones() {
       throw new Error(err.detail || `HTTP ${res.status}`);
     }
     const data = await res.json();
+    if (username !== state.username) return;  // name changed mid-flight; the newer load applies
     state.phones = data.phones;
+    state.playerEmoji = data.emoji || '';
+    renderAvatar();
     renderMarkers();
     noteRefreshResult(data);
     if (data.stale) {
@@ -2180,6 +2192,7 @@ function saveSession() {
       lastRouteExtraS:     state.lastRouteExtraS,
       mapTheme:            state.mapTheme,
       autoRotate:          state.autoRotate,
+      playerEmoji:        state.playerEmoji,
       orienteerArriveBy: document.getElementById('orienteer-arrive-by')?.value || '',
     }));
   } catch (_) {}
@@ -2201,6 +2214,8 @@ function restoreSession() {
     if (typeof s.lastRouteExtraS === 'number') state.lastRouteExtraS = s.lastRouteExtraS;
     if (s.mapTheme && TILE_URLS[s.mapTheme]) setMapTheme(s.mapTheme);
     if (typeof s.autoRotate === 'boolean') setAutoRotate(s.autoRotate);
+    // Saved so the avatar doesn't flash the letter before phones load
+    if (s.username && typeof s.playerEmoji === 'string') state.playerEmoji = s.playerEmoji;
     // Restore arrive-by time (or let IIFE set default if absent)
     if (s.orienteerArriveBy) {
       const el = document.getElementById('orienteer-arrive-by');
@@ -2236,6 +2251,7 @@ async function refreshPhones() {
     }
     const data   = await res.json();
     if (username !== state.username) return;  // name changed mid-flight; loadPhones has it
+    if ((data.emoji || '') !== state.playerEmoji) { state.playerEmoji = data.emoji || ''; renderAvatar(); saveSession(); }
     const newMap = Object.fromEntries(data.phones.map(p => [p.id, p]));
     let changed  = 0;
     for (const phone of state.phones) {
@@ -2350,7 +2366,7 @@ document.addEventListener('visibilitychange', () => {
   maybeShowCartoNotice();
   const p = new URLSearchParams(location.search);
   const urlName = (p.get('username') || '').trim();
-  if (urlName) state.username = urlName;
+  if (urlName && urlName !== state.username) { state.username = urlName; state.playerEmoji = ''; }
 
   // Share link: applied *after* restoreSession so it replaces the recipient's
   // stored selection rather than merging with it.

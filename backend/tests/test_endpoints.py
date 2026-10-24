@@ -88,6 +88,8 @@ async def test_phones_shaping(client, mock_api):
     # holder_name resolved from the players map (escaping is the frontend's job)
     assert phones[4]["holder_name"] == "<b>Rival</b>"
     assert phones[1]["holder_name"] is None
+    # The viewer's own emoji, for the avatar
+    assert body["emoji"] == "💤"
 
 
 async def test_phones_username_case_insensitive(client, mock_api):
@@ -97,6 +99,15 @@ async def test_phones_username_case_insensitive(client, mock_api):
 
     phones = {p["id"]: p for p in r.json()["phones"]}
     assert phones[2]["status"] == "mine"
+    assert r.json()["emoji"] == "💤"
+
+
+async def test_phones_player_without_emoji(client, mock_api):
+    mock_phones_ok(mock_api)
+
+    r = await client.get("/api/phones", params={"username": "Mate"})
+
+    assert r.json()["emoji"] is None
 
 
 async def test_phones_without_username(client, mock_api):
@@ -114,6 +125,7 @@ async def test_phones_without_username(client, mock_api):
     assert phones[1]["status"] == "uncaptured"
     # Holder names are public data and still resolve, so tooltips keep working.
     assert phones[4]["holder_name"] == "<b>Rival</b>"
+    assert r.json()["emoji"] is None
 
 
 async def test_phones_blank_username_does_not_match_blank_player(client, mock_api):

@@ -662,7 +662,10 @@ async def get_phones(
             "holder_name": holder_name,
         })
 
-    return {"phones": result, "stale": stale, "data_age_s": int(age_s)}
+    me = players.get(my_player_id) if my_player_id else None
+    emoji = me.get("emoji") if isinstance(me, dict) else None
+
+    return {"phones": result, "emoji": emoji, "stale": stale, "data_age_s": int(age_s)}
 
 
 async def _photon(path: str, params: dict, key: tuple) -> dict:
