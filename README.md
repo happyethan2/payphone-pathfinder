@@ -1,11 +1,11 @@
 # Payphone Pathfinder
 
-A route optimiser for [Payphone Tag](https://payphonetag.com): select phones on the map, set a start and end point, and it finds the best order to visit them all. Phones are colour-coded by who holds them, and a finished route opens leg by leg in Google Maps. It is self-hosted with Docker and routes across all of Australia.
+Payphone Pathfinder plans routes for [Payphone Tag](https://payphonetag.com) anywhere in Australia, on foot, by bicycle or by car. You select phones on the map. The app calculates the fastest order to visit them, then guides you from stop to stop. You host it yourself with Docker.
 
-## Prerequisites
+## Requirements
 
 - Docker with Docker Compose
-- ~16 GB free disk space
+- About 16 GB of free disk space
 - On Windows: Git Bash or WSL
 
 ## Install
@@ -21,16 +21,28 @@ curl -L -o osrm-data/foot/australia-latest.osm.pbf \
 cp osrm-data/foot/australia-latest.osm.pbf osrm-data/bicycle/
 cp osrm-data/foot/australia-latest.osm.pbf osrm-data/car/
 
-./deploy.sh --reprocess-osrm   # builds the routing data (1–3 hours), then starts everything
+./deploy.sh --reprocess-osrm   # builds the routing data (1–3 hours), then starts the app
 ```
 
-On Windows Git Bash, run the last line as `MSYS_NO_PATHCONV=1 ./deploy.sh --reprocess-osrm`.
+On Windows Git Bash, run the last command as `MSYS_NO_PATHCONV=1 ./deploy.sh --reprocess-osrm`.
 
-Open **http://localhost:8000**. Keep the `.osm.pbf` files: `deploy.sh` needs them to rebuild the routing data later.
+Open **http://localhost:8000**. Do not delete the `.osm.pbf` files. `deploy.sh` needs them to rebuild the routing data.
+
+## Use
+
+1. Enter your in-game name with the top-right button. Without a name, the app cannot show which phones you or your cellmates hold.
+2. Select phones. Tap a phone, or use **Lasso** to draw around a group.
+3. Set a start point. The end point is optional. Without an end point, the route finishes at the last phone.
+4. Tap **Find Optimal Route**.
+5. Follow the route. **Open in Google Maps** opens the current leg. When the game shows that you hold the current phone, the app marks the stop as done and moves to the next stop. **Skip** moves to the next stop without tagging.
+
+**Orienteering** mode chooses the phones for you. It finds the most phones you can tag between the start and the end before the **Arrive By** time. It needs your in-game name and an end point.
+
+The gear button opens **Settings**: highlight filters, map style, and navigation options. The **ⓘ** button in Settings opens the map legend.
 
 ---
 
-## Extra details
+## Details
 
 ### Updating
 
@@ -38,23 +50,25 @@ Open **http://localhost:8000**. Keep the `.osm.pbf` files: `deploy.sh` needs the
 ./deploy.sh
 ```
 
-This pulls the latest code and images, rebuilds the backend, and runs a health check. If the OSRM image has changed, it asks to rebuild the routing data. Say yes, or OSRM will crash-loop on startup. To force a rebuild, run `./deploy.sh --reprocess-osrm`.
+This command pulls the latest code and images, rebuilds the backend, and runs a health check. It stops if tracked files have local changes.
+
+If the OSRM image has changed, the command asks to rebuild the routing data. Answer yes. If you answer no, OSRM crash-loops on startup. To rebuild the routing data at any time, run `./deploy.sh --reprocess-osrm`.
 
 ### CARTO basemap key
 
-Since August 2026, CARTO requires an API key for its basemaps. Without one, the map still works, but every tile is stamped "API KEY REQUIRED". The key is free, needs no account, and allows 5M tiles a month.
+Since August 2026, CARTO requires an API key for its basemaps. Without a key, the map works, but every tile shows "API KEY REQUIRED". The key is free, needs no account, and allows 5 million tiles per month.
 
-- Each instance needs its own key, because the quota is per key.
-- The key travels in tile URLs, so it isn't secret. Still, keep it in `.env` (gitignored), never in `.env.example`.
-- Leave the CARTO and OpenStreetMap attribution on the map. That is a condition of the free tier.
+- Each instance needs its own key. The quota is per key.
+- The key is visible in tile URLs, so it is not secret. Keep it in `.env`, which git ignores. Do not put it in `.env.example`.
+- Keep the CARTO and OpenStreetMap attribution on the map. The free tier requires it.
 
-### Phones and GPS
+### GPS on phones
 
-GPS needs HTTPS. The mobile steps below are for iOS.
+Browsers allow GPS only over HTTPS. Use one of these two methods. The phone steps are for iOS.
 
-**Tailscale (easiest):** run `tailscale serve --bg 8000` and open your Tailscale HTTPS URL.
+**Tailscale:** run `tailscale serve --bg 8000`, then open your Tailscale HTTPS URL.
 
-**Self-signed cert (direct IP access):** generate a cert into `backend/certs/`. The backend serves HTTPS automatically when a cert is there.
+**Self-signed certificate (access by IP address):** create a certificate in `backend/certs/`. When a certificate is there, the backend serves HTTPS.
 
 ```bash
 mkdir -p backend/certs
@@ -67,26 +81,46 @@ docker run --rm -v "$(pwd)/backend/certs:/certs" alpine/openssl \
 docker compose restart backend
 ```
 
-Then, on iOS:
+Then, on the iPhone:
 
 1. Open `https://YOUR_IP:8000/cert.pem` in Safari and install the profile.
-2. Turn the cert on under **Settings → General → About → Certificate Trust Settings**. This is the step people miss.
+2. Go to **Settings → General → About → Certificate Trust Settings** and turn the certificate on. Step 2 is required. Installing the profile alone is not enough.
+
+### Indoor phones
+
+`backend/data/indoor.json` lists phones that are probably indoors or probably never open to the public. The app uses it in three places:
+
+- The **Indoor** filter adds a dashed ring to these phones on the map.
+- A route stop for one of these phones always has a dashed ring.
+- During navigation, the current stop shows a warning with a confidence level (High or Medium).
+
+The **Show Usual Hours** setting is off by default. When it is on, the warning also shows the hours when players usually tag the phone. Outside those hours, the warning says "Probably Locked". The hours are a rough guide only.
+
+The file is a fixed snapshot. This repository does not include the tool that made it. To change the list, edit the file, then run `./deploy.sh`. The file is built into the backend image, so a restart alone does not load a new file. Format:
+
+```json
+{"phones": {"<phone id>": {"conf": "high", "kind": "indoor", "open": [8, 21]}}}
+```
+
+- `conf`: `high` or `medium`.
+- `kind`: `indoor` (probably indoors) or `never` (probably never public).
+- `open`: `[from_hour, to_hour]` in the phone's local time, or `null` if unknown. The range can cross midnight, for example `[22, 6]`.
 
 ### Address search
 
-The start and end fields search addresses with [Photon](https://github.com/komoot/photon), through this app's backend (`/api/geocode`). By default that's komoot's free public instance at photon.komoot.io. It's fine for light use; searches are cached for a day and limited to Australia.
+The start and end fields search for addresses with [Photon](https://github.com/komoot/photon), through this app's backend (`/api/geocode`). By default, the backend uses komoot's free public server at photon.komoot.io. That server is for light use. The backend caches each search for one day and limits results to Australia.
 
-A busy instance should run its own Photon and set `PHOTON_URL` in `.env` (for example `PHOTON_URL=http://photon:2322`). GraphHopper publishes a weekly Photon database for Australia/Oceania (about 2 GB); see Photon's docs for setup. Without address search, tapping **Choose on Map** still works.
+An instance with many users should run its own Photon server and set `PHOTON_URL` in `.env`, for example `PHOTON_URL=http://photon:2322`. GraphHopper publishes a weekly Photon database for Australia and Oceania (about 2 GB). See the Photon documentation for setup. If address search is unavailable, **Choose on Map** still works.
 
 ### Share links
 
-The share button next to **Find Optimal Route** copies a link to your current plan. The link holds the transport mode, start, end, and every selected phone. Opening it replaces the recipient's own selection.
+The share button next to **Find Optimal Route** copies a link to your current plan. The link contains the transport mode, the start, the end, and every selected phone. Opening the link replaces the recipient's own selection.
 
-The recipient doesn't need a username: phones load uncoloured until they enter one. The link leaves out your username and the solved route, so the recipient re-solves it for their own game state. Phone IDs are the same for every player, so a link works on any instance running this version.
+The link does not contain your in-game name or the calculated route. The recipient's app calculates the route again from the recipient's own game data. The recipient does not need a name to open the link. Phone IDs are the same for every player, so a link works on any instance that runs this version.
 
 ### Running tests
 
-The backend tests mock all upstream services, so they need no Docker or network access. They also run in GitHub Actions on every push and pull request.
+The backend tests replace every external service with a mock, so they need no Docker and no network access. GitHub Actions runs them on every push and pull request.
 
 ```bash
 cd backend
@@ -97,13 +131,13 @@ python -m pytest tests -v
 
 ### Troubleshooting
 
-- **OSRM commands fail on Windows:** prefix them with `MSYS_NO_PATHCONV=1`.
-- **GPS denied on iOS:** go to Settings → Privacy & Security → Location Services → Safari, and set it to "While Using".
-- **Tiles say "API KEY REQUIRED":** `CARTO_API_KEY` isn't set. If you just set it, hard-refresh, because old tiles can stay cached. Check what the server sends with `curl http://localhost:8000/api/config.js`.
-- **"A routing service (OSRM or Vroom) did not respond":** a routing container is down or still loading. OSRM takes a minute or two to load after startup. Check `docker compose ps` and `docker compose logs osrm-car vroom`.
-- **Vroom returns no routes:** the selected phones can't be reached with that transport mode. Try another mode or area.
-- **OSRM fingerprint mismatch on startup:** the routing data doesn't match the OSRM image. Run `./deploy.sh --reprocess-osrm`.
-- **Can't reach the app over Tailscale on Linux:** Docker's iptables rules can block it. Run:
+- **OSRM commands fail on Windows:** put `MSYS_NO_PATHCONV=1` before the command.
+- **GPS is denied on iOS:** go to **Settings → Privacy & Security → Location Services → Safari** and choose "While Using".
+- **Tiles show "API KEY REQUIRED":** `CARTO_API_KEY` is not set. If you set it recently, do a hard refresh, because the browser can keep old tiles. To see what the server sends, run `curl http://localhost:8000/api/config.js`.
+- **"A routing service (OSRM or Vroom) did not respond":** a routing container is stopped or still loading. OSRM needs one to two minutes to load after startup. Check `docker compose ps` and `docker compose logs osrm-car vroom`.
+- **Vroom returns no routes:** the selected phones cannot be reached with that transport mode. Try a different mode or area.
+- **OSRM reports a fingerprint mismatch on startup:** the routing data does not match the OSRM image. Run `./deploy.sh --reprocess-osrm`.
+- **The app is not reachable over Tailscale on Linux:** Docker's iptables rules can block the traffic. Run:
   ```bash
   sudo iptables -I FORWARD -i tailscale0 -j ACCEPT
   sudo iptables -I FORWARD -o tailscale0 -j ACCEPT
