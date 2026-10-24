@@ -1099,7 +1099,17 @@ async def serve_index():
     )
 
 
+class RevalidatingStaticFiles(StaticFiles):
+    """No build step means no hashed filenames, so a browser that heuristically
+    caches styles.css keeps showing the old one after a change. Make it ask every
+    time; the ETag turns an unchanged file into a cheap 304."""
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # Static files — MUST be mounted after all API routes.
 # Conditional so the module also imports outside Docker (tests, local uvicorn).
 if os.path.isdir(FRONTEND_DIR):
-    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+    app.mount("/", RevalidatingStaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
