@@ -35,12 +35,10 @@
     <button class="chip" data-filter="lassoExcludeOwned" aria-pressed="false" title="Lasso skips phones you already own"><span class="icon icon-check" aria-hidden="true"></span>Skip Owned</button>
     <button class="chip" data-filter="lassoExcludeCellmates" aria-pressed="false" title="Lasso skips phones held by your cellmates"><span class="icon icon-check" aria-hidden="true"></span>Skip Cellmates</button>
   </div>
-  <div class="dock-row">
-    <div class="segmented" role="group" aria-label="Map selection tools">
-      <button id="lasso-add" aria-pressed="false" onclick="toggleLasso('lasso')"><span class="icon icon-lasso" aria-hidden="true"></span>Lasso</button>
-      <button id="lasso-remove" aria-pressed="false" onclick="toggleLasso('lasso-deselect')"><span class="icon icon-deselect" aria-hidden="true"></span>Deselect</button>
-    </div>
-    <button id="dock-clear" class="dock-btn" onclick="clearSelection()" hidden>Clear <span class="badge" id="sel-badge"></span></button>
+  <div class="segmented" role="group" aria-label="Map selection tools">
+    <button id="dock-clear" onclick="clearSelection()" aria-label="Clear selected phones" hidden><span class="icon icon-close" aria-hidden="true"></span><span class="badge" id="sel-badge"></span></button>
+    <button id="lasso-add" aria-pressed="false" onclick="toggleLasso('lasso')"><span class="icon icon-lasso" aria-hidden="true"></span>Lasso</button>
+    <button id="lasso-remove" aria-pressed="false" onclick="toggleLasso('lasso-deselect')"><span class="icon icon-deselect" aria-hidden="true"></span>Deselect</button>
   </div>
 </div>
 
@@ -71,15 +69,10 @@
         <div class="field-head"><div class="sec-title">Start &amp; End</div>
           <button class="text-btn" id="clear-ends" onclick="clearEnds()" hidden>Clear</button></div>
         <div class="place-wrap">
-          <button class="place-field" id="start-field" onclick="openSearch('start')"><span class="pin-dot" style="background:#2ecc71"></span><span class="pf-text" id="start-text"></span></button>
+          <button class="place-field" id="start-field" onclick="openSearch('start')"><span class="pin-dot"></span><span class="pf-text" id="start-text"></span></button>
           <button class="pf-gps" id="start-gps" onclick="useMyLocation('start')" aria-label="Use my location" title="Use My Location" hidden><span class="icon icon-gps" aria-hidden="true"></span></button>
         </div>
-        <button class="place-field" id="end-field" onclick="openSearch('end')"><span class="pin-dot" style="background:#e74c3c"></span><span class="pf-text" id="end-text"></span></button>
-      </div>
-      <div class="field" id="sel-field">
-        <div class="field-head"><div class="sec-title">Phones</div></div>
-        <div class="count" id="sel-count"></div>
-        <div class="note">Recommended to use lasso for selecting phones</div>
+        <button class="place-field" id="end-field" onclick="openSearch('end')"><span class="pin-dot pin-end"></span><span class="pf-text" id="end-text"></span></button>
       </div>
       <div class="field" id="arrive-field" hidden>
         <div class="field-head"><div class="sec-title">Arrive By</div></div>
@@ -500,12 +493,10 @@ function renderPlan() {
   document.getElementById('summary-hint').textContent = problem || 'Tap to edit';
   document.querySelectorAll('#mode-switch button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === state.routeMode)));
   document.querySelectorAll('#profile-switch button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.profile === state.profile)));
-  document.getElementById('sel-field').hidden = orienteer;
   document.getElementById('arrive-field').hidden = !orienteer;
   document.getElementById('auto-note').textContent = state.username
     ? 'Optimises for the most phones within your given time window'
     : 'Needs your name, so it can skip phones you already hold';
-  document.getElementById('sel-count').textContent = n ? `${n} phone${n === 1 ? '' : 's'} selected` : 'No phones selected';
 
   const clear = document.getElementById('dock-clear');
   clear.hidden = !n;
@@ -872,6 +863,8 @@ function clearSelection() {
   const byId = new Map(state.phones.map(p => [p.id, p]));
   const restyle = () => prev.forEach(id => { const p = byId.get(id); if (p) refreshMarker(p); });
   state.selectedIds.clear();
+  // Clear hides itself; keep keyboard focus in the pill instead of dropping to <body>
+  if (document.activeElement?.id === 'dock-clear') document.getElementById('lasso-add').focus();
   restyle(); updateSelCount(); saveSession();
   toast(`${prev.size} phone${prev.size === 1 ? '' : 's'} cleared`, () => {
     prev.forEach(id => state.selectedIds.add(id));
@@ -1261,7 +1254,8 @@ function drawEndpoints() {
     const key = `${which}Marker`;
     if (state[key]) { map.removeLayer(state[key]); state[key] = null; }
     const pt = state[which];
-    if (pt && !pt.live) state[key] = L.marker([pt.lat, pt.lon], { icon: makeEndpointIcon(which, pt), zIndexOffset: 500 }).addTo(map);
+    // Not interactive: the frame must not swallow taps meant for the phone under it, or a re-pick
+    if (pt && !pt.live) state[key] = L.marker([pt.lat, pt.lon], { icon: makeEndpointIcon(which, pt), zIndexOffset: 500, interactive: false, keyboard: false }).addTo(map);
   });
 }
 
@@ -1280,27 +1274,15 @@ function snapPoint(latlng) {
     : { lat: latlng.lat, lon: latlng.lng };
 }
 
-function makeBracketIcon(which) {
-  const color = which === 'start' ? '#2ecc71' : '#e74c3c';
-  const borderStyle = which === 'start'
-    ? `border-top:3px solid ${color};border-bottom:3px solid ${color};border-left:3px solid ${color};border-right:none;border-radius:3px 0 0 3px;`
-    : `border-top:3px solid ${color};border-bottom:3px solid ${color};border-right:3px solid ${color};border-left:none;border-radius:0 3px 3px 0;`;
-  return L.divIcon({
-    html: `<div style="width:10px;height:18px;${borderStyle}box-sizing:border-box;"></div>`,
-    className: '', iconSize: [10, 18], iconAnchor: [5, 9],
-  });
-}
-
-// Snapped points get a bracket around the node's circle; custom (unsnapped)
-// points have no circle to bracket, so they get a standalone coloured dot
+// Shape, not colour, tells them apart: start is round, end is square.
+// Snapped points get a frame around the phone's dot; custom points a solid marker.
 function makeEndpointIcon(which, point) {
-  if (point.phone_id != null) return makeBracketIcon(which);
-  const color = which === 'start' ? '#2ecc71' : '#e74c3c';
+  const snap = point.phone_id != null;
+  // End frame is a step larger so both still read when start and end share a phone
+  const size = snap ? (which === 'end' ? 32 : 28) : 14;
   return L.divIcon({
-    html: `<div style="width:12px;height:12px;border-radius:50%;
-      background:${color};
-      border:2px solid #fff;box-shadow:0 0 0 3px ${color}4d"></div>`,
-    className: '', iconSize: [12, 12], iconAnchor: [6, 6],
+    className: `ep ep-${which}${snap ? ' ep-snap' : ''}`,
+    iconSize: [size, size], iconAnchor: [size / 2, size / 2],
   });
 }
 
