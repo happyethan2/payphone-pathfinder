@@ -92,6 +92,7 @@
       <div class="wp wp-active" id="nav-badge"></div>
       <div><div class="nav-title" id="nav-title"></div><div class="nav-stats" id="route-stats"></div></div>
     </div>
+    <div class="access-line" id="access-line" role="status" hidden></div>
     <div class="leg-row" id="leg-row">
       <button id="leg-prev" aria-label="Previous leg" onclick="changeLeg(-1)"><span class="icon icon-chevron-left" aria-hidden="true"></span></button>
       <span id="leg-label"></span>
@@ -135,6 +136,7 @@
     <div class="sec-title">Filters</div>
     <label class="switch-row"><span class="label"><span class="icon icon-camera" aria-hidden="true"></span>Wiki Photo</span><input type="checkbox" role="switch" id="hl-photo"></label>
     <label class="switch-row"><span class="label"><span class="icon icon-magic" aria-hidden="true"></span>Never Captured</span><input type="checkbox" role="switch" id="hl-new"></label>
+    <label class="switch-row"><span class="label"><span class="icon icon-lock" aria-hidden="true"></span>Indoor</span><input type="checkbox" role="switch" id="hl-indoor"></label>
   </div>
   <div class="field">
     <div class="sec-title">Display</div>
@@ -146,6 +148,8 @@
     <label class="switch-row"><span class="label"><span class="icon icon-route" aria-hidden="true"></span>Highlight Current Leg</span><input type="checkbox" role="switch" id="legfocus" checked></label>
     <label class="switch-row"><span class="label"><span class="icon icon-compass" aria-hidden="true"></span>Auto-Rotate Map</span><input type="checkbox" role="switch" id="autorotate" checked></label>
     <div class="note" id="autorotate-note" hidden></div>
+    <label class="switch-row"><span class="label"><span class="icon icon-clock" aria-hidden="true"></span>Show Usual Hours</span><input type="checkbox" role="switch" id="show-hours"></label>
+    <div class="note">Adds typical player capture hours to the indoor warning while navigating. Not always accurate.</div>
   </div>
 </div>
 
@@ -159,6 +163,7 @@
       <div class="legend-item"><span class="legend-hostile dot"></span>Hostile</div>
       <div class="legend-item"><span class="legend-photo dot"></span>Wiki Photo</div>
       <div class="legend-item"><span class="legend-new dot"></span>New</div>
+      <div class="legend-item"><span class="legend-indoor dot"></span>Indoor</div>
     </div>
   </div>
 </div>
@@ -244,6 +249,9 @@ const state = {
   wikiPhotoIds:    null,    // Set<number> loaded lazily; null = not yet fetched
   newPhoneFilter:  false,
   pastCaptureIds:  null,    // Set<number> loaded lazily; null = not yet fetched
+  indoorFilter:    false,   // dashed ring on phones that are probably indoors
+  indoorById:      null,    // Map<number, {conf, kind, open}> from /api/indoor-phones; null = not loaded
+  showUsualHours:  false,   // settings: add the usual hours to the indoor line
   lastRoute:       null,
   mapsLegs:        [],
   currentLeg:      0,
@@ -322,6 +330,7 @@ function makeTooltipHtml(phone) {
       <span style="font-size:11px;color:${color};font-weight:600;">${label}</span>
     </div>
     ${phone.holder_name ? `<div style="font-size:10px;color:#a8afb5;margin-top:4px;">held by ${escapeHtml(phone.holder_name)}</div>` : ''}
+    ${indoorOf(phone.id) ? `<div style="font-size:10px;color:#f5b041;margin-top:4px;">${accessLabel(indoorOf(phone.id)).text}</div>` : ''}
   </div>`;
 }
 
@@ -335,8 +344,8 @@ const STATUS_COLORS = {
 // Colours drawn over the basemap, per map style. Light tiles need dark,
 // saturated strokes: white or pastel rings vanish against them.
 const MAP_INK = {
-  dark:  { sel: '#ffffff', isNew: '#fbbf24', photo: '#c084fc', lasso: '#9bbce0', unlasso: '#efa29a' },
-  light: { sel: '#1f2937', isNew: '#b45309', photo: '#9333ea', lasso: '#1d4f80', unlasso: '#b42318' },
+  dark:  { sel: '#ffffff', isNew: '#fbbf24', photo: '#c084fc', lasso: '#9bbce0', unlasso: '#efa29a', indoor: '#e5e7eb' },
+  light: { sel: '#1f2937', isNew: '#b45309', photo: '#9333ea', lasso: '#1d4f80', unlasso: '#b42318', indoor: '#374151' },
 };
 function mapInk() { return MAP_INK[state.mapTheme] || MAP_INK.dark; }
 
@@ -757,7 +766,8 @@ function renderMarkers() {
 
 function makeMarker(phone) {
   const m = L.circleMarker([phone.lat, phone.lon], phoneStyle(phone));
-  m.bindTooltip(makeTooltipHtml(phone), { direction: 'top', sticky: true });
+  // A function, so the tooltip is rebuilt on open: status changes and late indoor data show up
+  m.bindTooltip(() => makeTooltipHtml(phone), { direction: 'top', sticky: true });
   m.on('click', e => { L.DomEvent.stopPropagation(e); onMarkerClick(phone); });
   return m;
 }
@@ -774,10 +784,10 @@ function waypointSize() {
   return z >= 15 ? 22 : z >= 13 ? 17 : z >= 11 ? 12 : 8;
 }
 
-function makeWpIcon(label, extraClass) {
+function makeWpIcon(label, extraClass, indoor) {
   const sz      = waypointSize();
   const fs      = Math.max(6, Math.round(sz * 0.44));
-  const cls     = ['wp', extraClass].filter(Boolean).join(' ');
+  const cls     = ['wp', extraClass, indoor && 'wp-indoor'].filter(Boolean).join(' ');
   const showNum = sz >= 17 || extraClass === 'wp-active';  // always label current stop
   // Done stops trade their number for a tick (tagged) or the Skip button's arrow
   const glyph   = { 'wp-tagged': 'icon-check', 'wp-skipped': 'icon-arrow-right' }[extraClass];
@@ -788,12 +798,13 @@ function makeWpIcon(label, extraClass) {
   });
 }
 
-function mkStyle(color, sel, hasPhoto, isNew) {
+function mkStyle(color, sel, hasPhoto, isNew, indoor) {
   const ink = mapInk();
-  const strokeColor  = isNew ? ink.isNew : hasPhoto ? ink.photo : (sel ? ink.sel : 'rgba(0,0,0,0.3)');
+  const strokeColor  = isNew ? ink.isNew : hasPhoto ? ink.photo : sel ? ink.sel : indoor ? ink.indoor : 'rgba(0,0,0,0.3)';
   // A highlight owns the ring colour, so selection shows as a thicker ring (and the bigger dot)
-  const strokeWeight = (isNew || hasPhoto) ? (sel ? 4 : 2) : (sel ? 2.5 : 1);
-  return { radius: markerRadius(sel), fillColor: color, color: strokeColor,
+  const strokeWeight = (isNew || hasPhoto) ? (sel ? 4 : 2) : (sel ? 2.5 : indoor ? 2 : 1);
+  // Indoor is a dash pattern, not a colour, so it combines with every highlight above
+  return { radius: markerRadius(sel), fillColor: color, color: strokeColor, dashArray: indoor ? '3 3' : null,
            weight: strokeWeight, fillOpacity: 0.9, opacity: 1 };
 }
 
@@ -803,7 +814,8 @@ function phoneStyle(phone) {
                    && state.wikiPhotoIds.has(Number(phone.id));
   const isNew    = state.newPhoneFilter && state.pastCaptureIds !== null
                    && !state.pastCaptureIds.has(Number(phone.id));
-  const style = mkStyle(STATUS_COLORS[phone.status] || '#888', sel, hasPhoto, isNew);
+  const indoor   = state.indoorFilter && !!indoorOf(phone.id);
+  const style = mkStyle(STATUS_COLORS[phone.status] || '#888', sel, hasPhoto, isNew, indoor);
   // A route stop's marker stands in for its phone; hide the dot under it, or its
   // status colour shows through the stop when leg focus fades it
   if (phone.id in state.waypointMarkersById) { style.opacity = 0; style.fillOpacity = 0; }
@@ -955,6 +967,62 @@ async function setNewPhoneFilter(on) {
 }
 hlPhoto.onchange = () => setPhotoFilter(hlPhoto.checked);
 hlNew.onchange   = () => setNewPhoneFilter(hlNew.checked);
+
+// Indoor phones: a dash pattern, so it sits alongside either highlight above
+const hlIndoor = document.getElementById('hl-indoor');
+hlIndoor.onchange = () => {
+  state.indoorFilter = hlIndoor.checked;
+  state.phones.forEach(p => refreshMarker(p));
+};
+
+function indoorOf(id) { return state.indoorById?.get(Number(id)) || null; }
+
+// "Probably Indoors · Confidence: High · 8am–9pm". open = [from, to] hours, may wrap midnight.
+function accessLabel(a) {
+  const hour = h => `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`;
+  const hours = state.showUsualHours && a.open;
+  let shut = false;
+  if (hours) {
+    const [from, to] = a.open, h = new Date().getHours();
+    shut = !(from < to ? h >= from && h < to : h >= from || h < to);
+  }
+  const head = a.kind === 'never' ? 'Possibly Not Public' : shut ? 'Probably Locked' : 'Probably Indoors';
+  const parts = [head, `Confidence: ${a.conf === 'high' ? 'High' : 'Medium'}`];
+  if (hours) parts.push(`${hour(a.open[0])}–${hour(a.open[1])}`);
+  return { text: parts.join(' · '), shut };
+}
+
+// The line under the nav card's stop row, for the stop you're heading to
+function renderAccessLine() {
+  const el = document.getElementById('access-line');
+  const id = state.routeOrderedIds[state.routeProgress];
+  const a  = id === undefined ? null : indoorOf(id);
+  document.getElementById('nav-badge').classList.toggle('wp-indoor', !!a);
+  el.hidden = !a;
+  if (!a) return;
+  const { text, shut } = accessLabel(a);
+  el.classList.toggle('now', shut);
+  el.innerHTML = `<span class="icon icon-lock" aria-hidden="true"></span><span>${text}</span>`;
+}
+
+async function loadIndoorPhones() {
+  try {
+    const res = await fetch('/api/indoor-phones');
+    if (!res.ok) return;
+    const data = await res.json();
+    state.indoorById = new Map(Object.entries(data.phones || {}).map(([k, v]) => [Number(k), v]));
+  } catch (_) { return; }  // no hints is fine: the app works as before
+  if (state.indoorFilter) state.phones.forEach(p => refreshMarker(p));
+  if (inNav()) renderLeg();
+}
+
+function setShowUsualHours(on) {
+  state.showUsualHours = on;
+  document.getElementById('show-hours').checked = on;
+  if (inNav()) renderAccessLine();
+  saveSession();
+}
+document.getElementById('show-hours').onchange = e => setShowUsualHours(e.target.checked);
 
 // ── Lasso input ───────────────────────────────────────────────────
 // One pointer draws. A second finger means pan/pinch rather than a lasso: the
@@ -1561,7 +1629,7 @@ function displayRoute(data, extraS = 0) {
   ordered_ids.forEach((id, idx) => {
     const phone = state.phones.find(p => p.id === id);
     if (!phone) return;
-    const icon = makeWpIcon(idx + 1);
+    const icon = makeWpIcon(idx + 1, '', !!indoorOf(id));
     const m = L.marker([phone.lat, phone.lon], { icon, zIndexOffset: (ordered_ids.length - idx) * 10 }).addTo(map);
     state.waypointMarkers.push(m);
     state.waypointMarkersById[id] = m;
@@ -1699,7 +1767,7 @@ function refreshWpIcons() {
     const id     = parseInt(idStr);
     const ordIdx = state.routeOrderedIds.indexOf(id);
     if (ordIdx === -1) continue;
-    m.setIcon(makeWpIcon(ordIdx + 1, wpClass(id, ordIdx)));
+    m.setIcon(makeWpIcon(ordIdx + 1, wpClass(id, ordIdx), !!indoorOf(id)));
     m.setOpacity(leg && !inLeg(state.stopIndexById[id], leg) ? WP_DIM : 1);
   }
 }
@@ -1805,6 +1873,7 @@ function renderLeg() {
     document.getElementById('leg-next').disabled = i >= legs.length - 1;
   }
 
+  renderAccessLine();
   refreshWpIcons();
   updateRouteFocus();
 }
@@ -2066,6 +2135,7 @@ function setMapTheme(theme) {
   const ink = mapInk();
   document.documentElement.style.setProperty('--ink-new', ink.isNew);
   document.documentElement.style.setProperty('--ink-photo', ink.photo);
+  document.documentElement.style.setProperty('--ink-indoor', ink.indoor);
   state.phones.forEach(p => refreshMarker(p));
   map.removeLayer(tileLayer);
   tileLayer = L.tileLayer(TILE_URLS[theme], {
@@ -2240,6 +2310,7 @@ function saveSession() {
       mapTheme:            state.mapTheme,
       autoRotate:          state.autoRotate,
       legFocus:            state.legFocus,
+      showUsualHours:      state.showUsualHours,
       playerEmoji:        state.playerEmoji,
       orienteerArriveBy: document.getElementById('orienteer-arrive-by')?.value || '',
     }));
@@ -2263,6 +2334,7 @@ function restoreSession() {
     if (s.mapTheme && TILE_URLS[s.mapTheme]) setMapTheme(s.mapTheme);
     if (typeof s.autoRotate === 'boolean') setAutoRotate(s.autoRotate);
     if (typeof s.legFocus === 'boolean') setLegFocus(s.legFocus);
+    if (typeof s.showUsualHours === 'boolean') setShowUsualHours(s.showUsualHours);
     // Saved so the avatar doesn't flash the letter before phones load
     if (s.username && typeof s.playerEmoji === 'string') state.playerEmoji = s.playerEmoji;
     // Restore arrive-by time (or let IIFE set default if absent)
@@ -2324,11 +2396,7 @@ async function refreshPhones() {
             && updated.status === 'mine') {
           state.pastCaptureIds.add(Number(phone.id));
         }
-        const m = state.markers[phone.id];
-        if (m) {
-          m.setTooltipContent(makeTooltipHtml(phone));
-          refreshMarker(phone);
-        }
+        if (state.markers[phone.id]) refreshMarker(phone);  // the tooltip rebuilds itself on open
         changed++;
       }
     }
@@ -2351,6 +2419,7 @@ async function refreshPhones() {
     }
     // Re-evaluate refresh rate: may switch to idle once all stops are completed
     if (_advanced) startBackgroundRefresh();
+    else if (inNav()) renderAccessLine();  // keeps "Probably Locked" in step with the clock
 
     const healthColor = noteRefreshResult(data);
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
@@ -2411,6 +2480,7 @@ document.addEventListener('visibilitychange', () => {
     note.hidden = false;
   }
   maybeShowCartoNotice();
+  loadIndoorPhones();  // not awaited: markers and the nav card pick it up when it lands
   const p = new URLSearchParams(location.search);
   const urlName = (p.get('username') || '').trim();
   if (urlName && urlName !== state.username) { state.username = urlName; state.playerEmoji = ''; }

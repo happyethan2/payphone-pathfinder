@@ -686,3 +686,35 @@ async def test_health_degraded_when_upstream_failing(client, mock_api):
     assert body["status"] == "degraded"
     assert body["upstream"]["consecutive_failures"] == 3
     assert body["upstream"]["serving_stale"] is True
+
+
+# ── Indoor phones ─────────────────────────────────────────────────
+
+async def test_indoor_phones(client, tmp_path, monkeypatch):
+    f = tmp_path / "indoor.json"
+    f.write_text(json.dumps({"generated_at": "x", "phones": {"12": {"conf": "high", "kind": "indoor", "open": [8, 21]}}}))
+    monkeypatch.setattr(main, "INDOOR_FILE", str(f))
+
+    r = await client.get("/api/indoor-phones")
+
+    assert r.status_code == 200
+    assert r.json() == {"phones": {"12": {"conf": "high", "kind": "indoor", "open": [8, 21]}}}
+    f.write_text("{}")  # read once per process: a new file comes with a new deploy
+    assert (await client.get("/api/indoor-phones")).json()["phones"] == {"12": {"conf": "high", "kind": "indoor", "open": [8, 21]}}
+
+
+async def test_indoor_phones_missing_file(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "INDOOR_FILE", str(tmp_path / "absent.json"))
+
+    r = await client.get("/api/indoor-phones")
+
+    assert r.status_code == 200 and r.json() == {"phones": {}}
+
+
+def test_committed_indoor_file_shape():
+    with open(main.INDOOR_FILE, encoding="utf-8") as f:
+        phones = json.load(f)["phones"]
+    assert phones, "backend/data/indoor.json is empty"
+    for pid, p in phones.items():
+        assert pid.isdigit() and p["conf"] in ("high", "medium") and p["kind"] in ("indoor", "never")
+        assert p["open"] is None or (len(p["open"]) == 2 and all(0 <= h < 24 for h in p["open"]) and p["open"][0] != p["open"][1])
