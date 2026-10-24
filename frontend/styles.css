@@ -42,7 +42,8 @@ button.go:active:not(:disabled) { background: #58bb89; border-color: #58bb89; co
 button:disabled { opacity: .45; cursor: not-allowed; }
 .icon { display: inline-block; width: 18px; height: 18px; flex: 0 0 18px; background: currentColor; mask: var(--icon) center / contain no-repeat; -webkit-mask: var(--icon) center / contain no-repeat; }
 button[aria-busy=true] .icon { mask: none; -webkit-mask: none; background: transparent; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
-.legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 10px; }
+/* Three columns when every label fits on one line, else two */
+.legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px 10px; }
 .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 1.4; color: var(--muted); }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .legend-uncaptured { background:#aaa }
@@ -51,7 +52,9 @@ button[aria-busy=true] .icon { mask: none; -webkit-mask: none; background: trans
 .legend-hostile { background:#e74c3c }
 .legend-photo { background:var(--surface);border:2px solid var(--ink-photo, #c084fc); }
 .legend-new { background:var(--surface);border:2px solid var(--ink-new, #fbbf24); }
-.legend-indoor { background:var(--surface);border:2px dashed var(--ink-indoor, #e5e7eb); }
+/* Six dashes with short gaps: a dashed border only fits four uneven ones at this size */
+.legend-indoor { background: var(--ink-indoor, #e5e7eb); --ring: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Ccircle cx='4' cy='4' r='3' fill='none' stroke='black' stroke-width='2' stroke-dasharray='2.2 0.94'/%3E%3C/svg%3E");
+  mask: var(--ring) center / contain no-repeat; -webkit-mask: var(--ring) center / contain no-repeat; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes dot-stale { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; transition: background .4s; }
