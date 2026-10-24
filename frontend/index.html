@@ -143,6 +143,7 @@
   </div>
   <div class="field">
     <div class="sec-title">Navigation</div>
+    <label class="switch-row"><span class="label"><span class="icon icon-route" aria-hidden="true"></span>Highlight Current Leg</span><input type="checkbox" role="switch" id="legfocus" checked></label>
     <label class="switch-row"><span class="label"><span class="icon icon-compass" aria-hidden="true"></span>Auto-Rotate Map</span><input type="checkbox" role="switch" id="autorotate" checked></label>
     <div class="note" id="autorotate-note" hidden></div>
   </div>
@@ -254,6 +255,7 @@ const state = {
   lastOrienteerBufferS:   0,        // buffer used for the last orienteer solve
   mapTheme:               'dark',   // 'dark' | 'light'
   autoRotate:             true,     // settings: compass FAB may rotate the map
+  legFocus:               true,     // settings: fade route outside the leg in view
   playerEmoji:            '',       // the player's in-game emoji, for the avatar
   headingLocked:          false,    // compass FAB: locked to device heading
   follow:                 false,    // map keeps the location dot in view
@@ -754,13 +756,7 @@ function renderMarkers() {
 }
 
 function makeMarker(phone) {
-  const sel      = state.selectedIds.has(phone.id);
-  const color    = STATUS_COLORS[phone.status] || '#888';
-  const hasPhoto = state.photoFilter && state.wikiPhotoIds !== null
-                   && state.wikiPhotoIds.has(Number(phone.id));
-  const isNew    = state.newPhoneFilter && state.pastCaptureIds !== null
-                   && !state.pastCaptureIds.has(Number(phone.id));
-  const m = L.circleMarker([phone.lat, phone.lon], mkStyle(color, sel, hasPhoto, isNew));
+  const m = L.circleMarker([phone.lat, phone.lon], phoneStyle(phone));
   m.bindTooltip(makeTooltipHtml(phone), { direction: 'top', sticky: true });
   m.on('click', e => { L.DomEvent.stopPropagation(e); onMarkerClick(phone); });
   return m;
@@ -783,8 +779,11 @@ function makeWpIcon(label, extraClass) {
   const fs      = Math.max(6, Math.round(sz * 0.44));
   const cls     = ['wp', extraClass].filter(Boolean).join(' ');
   const showNum = sz >= 17 || extraClass === 'wp-active';  // always label current stop
+  // Done stops trade their number for a tick (tagged) or the Skip button's arrow
+  const glyph   = { 'wp-tagged': 'icon-check', 'wp-skipped': 'icon-arrow-right' }[extraClass];
+  const content = !showNum ? '' : glyph ? `<span class="icon ${glyph}" aria-hidden="true"></span>` : label;
   return L.divIcon({
-    html: `<div class="${cls}" style="width:${sz}px;height:${sz}px;font-size:${fs}px">${showNum ? label : ''}</div>`,
+    html: `<div class="${cls}" style="width:${sz}px;height:${sz}px;font-size:${fs}px">${content}</div>`,
     className: '', iconSize: [sz, sz], iconAnchor: [sz / 2, sz / 2],
   });
 }
@@ -798,16 +797,24 @@ function mkStyle(color, sel, hasPhoto, isNew) {
            weight: strokeWeight, fillOpacity: 0.9, opacity: 1 };
 }
 
-function refreshMarker(phone) {
-  const m = state.markers[phone.id];
-  if (!m) return;
+function phoneStyle(phone) {
   const sel      = state.selectedIds.has(phone.id);
   const hasPhoto = state.photoFilter && state.wikiPhotoIds !== null
                    && state.wikiPhotoIds.has(Number(phone.id));
   const isNew    = state.newPhoneFilter && state.pastCaptureIds !== null
                    && !state.pastCaptureIds.has(Number(phone.id));
-  m.setStyle(mkStyle(STATUS_COLORS[phone.status] || '#888', sel, hasPhoto, isNew));
-  m.setRadius(markerRadius(sel));
+  const style = mkStyle(STATUS_COLORS[phone.status] || '#888', sel, hasPhoto, isNew);
+  // A route stop's marker stands in for its phone; hide the dot under it, or its
+  // status colour shows through the stop when leg focus fades it
+  if (phone.id in state.waypointMarkersById) { style.opacity = 0; style.fillOpacity = 0; }
+  return style;
+}
+
+function refreshMarker(phone) {
+  const m = state.markers[phone.id];
+  if (!m) return;
+  m.setStyle(phoneStyle(phone));
+  m.setRadius(markerRadius(state.selectedIds.has(phone.id)));
 }
 
 // Scale all markers when zoom changes
@@ -817,18 +824,7 @@ map.on('zoomend', () => {
     const m = state.markers[phone.id];
     if (m) m.setRadius(markerRadius(state.selectedIds.has(phone.id)));
   }
-  // Route waypoint markers
-  for (const [idStr, m] of Object.entries(state.waypointMarkersById)) {
-    const id     = parseInt(idStr);
-    const ordIdx = state.routeOrderedIds.indexOf(id);
-    if (ordIdx === -1) continue;
-    const ns  = state.nodeStates[id];
-    const cls = ns === 'skipped'                        ? 'wp-skipped'
-              : ns === 'tagged'                         ? 'wp-tagged'
-              : ordIdx === state.routeProgress          ? 'wp-active'
-              : '';
-    m.setIcon(makeWpIcon(ordIdx + 1, cls));
-  }
+  refreshWpIcons();  // route waypoint markers
 });
 
 function updateSelCount() { renderPlan(); }
@@ -1556,10 +1552,7 @@ function displayRoute(data, extraS = 0) {
     const coords = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
     const line   = L.polyline(coords, { color, weight: 4, opacity: 0.85 }).addTo(map);
     state.routeLayers.push(line);
-    const dec = L.polylineDecorator(line, { patterns: [{ offset: '10%', repeat: 110,
-      symbol: L.Symbol.arrowHead({ pixelSize: 9, fill: true, fillOpacity: 1,
-        pathOptions: { color, weight: 0 } }) }] }).addTo(map);
-    state.decorators.push(dec);
+    state.decorators.push(L.polylineDecorator(line, { patterns: arrowPattern(color) }).addTo(map));
   });
 
   state.nodeStates = {};
@@ -1572,6 +1565,7 @@ function displayRoute(data, extraS = 0) {
     const m = L.marker([phone.lat, phone.lon], { icon, zIndexOffset: (ordered_ids.length - idx) * 10 }).addTo(map);
     state.waypointMarkers.push(m);
     state.waypointMarkersById[id] = m;
+    refreshMarker(phone);  // hides the phone dot under the stop
   });
 
   const allCoords = path.features.flatMap(f => f.geometry.coordinates.map(([lon, lat]) => [lat, lon]));
@@ -1596,8 +1590,10 @@ function clearRoute() {
   state.routeLayers.forEach(l => map.removeLayer(l));
   state.decorators.forEach(d => map.removeLayer(d));
   state.waypointMarkers.forEach(m => map.removeLayer(m));
+  const stopIds = new Set(Object.keys(state.waypointMarkersById).map(Number));
   state.routeLayers = []; state.decorators = []; state.waypointMarkers = [];
   state.waypointMarkersById = {}; state.nodeStates = {};
+  state.phones.forEach(p => { if (stopIds.has(p.id)) refreshMarker(p); });  // bring the dots back
   state.routeProgress = 0; state.routeOrderedIds = [];
   state.lastRoute = null;
   updateMapsLink(null);
@@ -1657,7 +1653,76 @@ function buildLegs(data) {
 function updateMapsLink(data) {
   state.mapsLegs   = data ? buildLegs(data) : [];
   state.currentLeg = 0;
+  // Stop numbers as buildLegs counts them (start = 0, phones gone since the solve
+  // skipped), so leg focus can place each node and line segment in its leg
+  state.stopIndexById = {};
+  state.routeFeatureStops = [];
+  if (!state.mapsLegs.length) return;
+  const present = new Set(state.phones.map(p => p.id));
+  const stops = data.ordered_ids.filter(id => present.has(id));
+  stops.forEach((id, i) => { state.stopIndexById[id] = i + 1; });
+  // A segment belongs to the stop it leads to. The last one ends the route: at the
+  // final phone when the end snapped onto it, otherwise at the end point (unsnapped,
+  // so to_id is null, or start = end on one phone, where to_id would say stop 1).
+  const endStop = state.mapsLegs.at(-1).lastStop;
+  const feats = data.path.features;
+  state.routeFeatureStops = feats.map((f, i) => {
+    const stop = state.stopIndexById[f.properties?.to_id];
+    return i === feats.length - 1 && stop !== stops.length ? endStop : (stop ?? endStop);
+  });
 }
+
+// ── Leg focus: fade the route outside the leg shown in the nav card ──
+const LINE_DIM = 0.2, WP_DIM = 0.35;
+function focusLeg() { return state.legFocus && inNav() ? state.mapsLegs[state.currentLeg] || null : null; }
+function inLeg(stop, leg) { return stop > leg.firstStop && stop <= leg.lastStop; }
+
+function arrowPattern(color, opacity = 1) {
+  // The decorator hands pathOptions straight to L.polygon, so fill opacity belongs there
+  return [{ offset: '10%', repeat: 110, symbol: L.Symbol.arrowHead({ pixelSize: 9,
+    pathOptions: { color, weight: 0, fillOpacity: opacity } }) }];
+}
+
+function wpClass(id, ordIdx) {
+  const ns = state.nodeStates[id];
+  return ns === 'skipped' ? 'wp-skipped'
+       : ns === 'tagged'  ? 'wp-tagged'
+       : ordIdx === state.routeProgress ? 'wp-active'
+       : '';
+}
+
+// One place sets every waypoint's look: state class, then the leg-focus fade.
+// setOpacity is kept by Leaflet across setIcon, so zoom rebuilds don't undo it.
+function refreshWpIcons() {
+  const leg = focusLeg();
+  for (const [idStr, m] of Object.entries(state.waypointMarkersById)) {
+    const id     = parseInt(idStr);
+    const ordIdx = state.routeOrderedIds.indexOf(id);
+    if (ordIdx === -1) continue;
+    m.setIcon(makeWpIcon(ordIdx + 1, wpClass(id, ordIdx)));
+    m.setOpacity(leg && !inLeg(state.stopIndexById[id], leg) ? WP_DIM : 1);
+  }
+}
+
+function updateRouteFocus() {
+  const leg = focusLeg();
+  state.routeLayers.forEach((line, i) => {
+    const dim     = !!leg && !inLeg(state.routeFeatureStops[i], leg);
+    const opacity = dim ? LINE_DIM : 0.85;
+    if (line.options.opacity === opacity) return;  // unchanged: skip the canvas redraw
+    line.setStyle({ opacity });
+    // New patterns, not restyled arrows: the decorator rebuilds them from patterns on every pan
+    state.decorators[i].setPatterns(arrowPattern(line.options.color, dim ? LINE_DIM : 1));
+  });
+}
+
+function setLegFocus(on) {
+  state.legFocus = on;
+  document.getElementById('legfocus').checked = on;
+  if (inNav()) renderLeg();
+  saveSession();
+}
+document.getElementById('legfocus').onchange = e => setLegFocus(e.target.checked);
 
 // Plan ↔ Navigate: the sheet shows the navigate card while a route exists
 function renderNav() {
@@ -1698,8 +1763,10 @@ function endRoute() {
 function legForProgress(prog) {
   const targetIdx = prog + 1;
   let best = 0;
+  // Strictly after firstStop: a leg's first stop is the previous leg's last, and
+  // you reach it on the previous leg — this leg only starts from it
   for (let j = 0; j < state.mapsLegs.length; j++) {
-    if (state.mapsLegs[j].firstStop <= targetIdx) best = j;
+    if (state.mapsLegs[j].firstStop < targetIdx) best = j;
   }
   return best;
 }
@@ -1738,18 +1805,8 @@ function renderLeg() {
     document.getElementById('leg-next').disabled = i >= legs.length - 1;
   }
 
-  // Refresh waypoint marker classes: active pulse on current target, correct state on others
-  for (const [idStr, m] of Object.entries(state.waypointMarkersById)) {
-    const id     = parseInt(idStr);
-    const ordIdx = orderedIds.indexOf(id);
-    if (ordIdx === -1) continue;
-    const ns  = state.nodeStates[id];
-    const cls = ns === 'skipped' ? 'wp-skipped'
-              : ns === 'tagged'  ? 'wp-tagged'
-              : ordIdx === prog  ? 'wp-active'
-              : '';
-    m.setIcon(makeWpIcon(ordIdx + 1, cls));
-  }
+  refreshWpIcons();
+  updateRouteFocus();
 }
 
 function changeLeg(delta) {
@@ -1766,15 +1823,7 @@ function tagCurrentLeg(action) {
   const orderedIds = state.routeOrderedIds;
   if (state.routeProgress >= orderedIds.length) return;
 
-  const phoneId = orderedIds[state.routeProgress];
-  const ordIdx  = state.routeProgress;
-  state.nodeStates[phoneId] = action;
-
-  // Update waypoint marker icon with skipped state class
-  const m = state.waypointMarkersById[phoneId];
-  if (m) {
-    m.setIcon(makeWpIcon(ordIdx + 1, 'wp-skipped'));
-  }
+  state.nodeStates[orderedIds[state.routeProgress]] = action;
 
   if (navigator.vibrate) navigator.vibrate(10);
   state.routeProgress++;
@@ -1784,17 +1833,9 @@ function tagCurrentLeg(action) {
 function revertLeg() {
   if (state.routeProgress <= 0) return;
   state.routeProgress--;
-
-  const orderedIds = state.routeOrderedIds;
-  const phoneId    = orderedIds[state.routeProgress];
-  const ordIdx     = state.routeProgress;
-  delete state.nodeStates[phoneId];
-
-  // Restore waypoint marker to its original (unmarked) icon
-  const m = state.waypointMarkersById[phoneId];
-  if (m) {
-    m.setIcon(makeWpIcon(ordIdx + 1));
-  }
+  delete state.nodeStates[state.routeOrderedIds[state.routeProgress]];
+  // Undo can step back into an earlier leg; show that leg so the target isn't faded
+  if (state.mapsLegs.length) state.currentLeg = Math.min(state.currentLeg, legForProgress(state.routeProgress));
 
   if (navigator.vibrate) navigator.vibrate(8);
   renderLeg();
@@ -2198,6 +2239,7 @@ function saveSession() {
       lastRouteExtraS:     state.lastRouteExtraS,
       mapTheme:            state.mapTheme,
       autoRotate:          state.autoRotate,
+      legFocus:            state.legFocus,
       playerEmoji:        state.playerEmoji,
       orienteerArriveBy: document.getElementById('orienteer-arrive-by')?.value || '',
     }));
@@ -2220,6 +2262,7 @@ function restoreSession() {
     if (typeof s.lastRouteExtraS === 'number') state.lastRouteExtraS = s.lastRouteExtraS;
     if (s.mapTheme && TILE_URLS[s.mapTheme]) setMapTheme(s.mapTheme);
     if (typeof s.autoRotate === 'boolean') setAutoRotate(s.autoRotate);
+    if (typeof s.legFocus === 'boolean') setLegFocus(s.legFocus);
     // Saved so the avatar doesn't flash the letter before phones load
     if (s.username && typeof s.playerEmoji === 'string') state.playerEmoji = s.playerEmoji;
     // Restore arrive-by time (or let IIFE set default if absent)
@@ -2299,10 +2342,7 @@ async function refreshPhones() {
       const targetId    = state.routeOrderedIds[state.routeProgress];
       const targetPhone = state.phones.find(p => p.id === targetId);
       if (!targetPhone || targetPhone.status !== 'mine') break;
-      // Mark waypoint as tagged and advance
-      const ordIdx = state.routeProgress;
-      const m = state.waypointMarkersById[targetId];
-      if (m) m.setIcon(makeWpIcon(ordIdx + 1, 'wp-tagged'));
+      // Mark waypoint as tagged and advance (renderLeg redraws its icon)
       state.nodeStates[targetId] = 'tagged';
       state.routeProgress++;
       _advanced = true;
