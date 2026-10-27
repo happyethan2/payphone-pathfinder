@@ -245,11 +245,16 @@ body.picking #tool-dock { display: none; }
 .wp.wp-indoor { outline: 2px dashed var(--ink-indoor, #e5e7eb); outline-offset: 2px; }
 .nav-head .wp.wp-indoor { outline-color: #f5b041; }
 
-/* The current stop's access line: its own full-width row, one line, never wraps */
-.access-line { display: flex; align-items: center; gap: 6px; margin: -2px 0 10px; min-width: 0; font-size: 13px; font-weight: 600; color: #f5b041; }
-.access-line .icon { width: 15px; height: 15px; flex: none; }
-.access-line span:last-child { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.access-line.now { color: #efa29a; }
+/* The current stop's access lines: up to three full-width rows, each one line that never wraps.
+   Rows after the first line up with the first row's text, past its icon. */
+.access-line { display: flex; flex-direction: column; gap: 2px; margin: -2px 0 10px; min-width: 0; }
+.access-row { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 21px; font-size: 13px; font-weight: 600; color: #f5b041; }
+.access-row:first-child { padding-left: 0; }
+.access-row .icon { width: 15px; height: 15px; flex: none; }
+.access-row span:last-child { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.access-row.now { color: #efa29a; }
+.access-row.place { font-weight: 500; }
+.access-row.hours { font-size: 12px; font-weight: 400; color: var(--muted); }
 
 /* ── Start/end markers: round = start, square = end; no colour ── */
 .ep { background: #fff; border: 2px solid #101112; border-radius: 50%; box-shadow: 0 1px 5px rgba(0,0,0,.5); }
@@ -304,3 +309,4 @@ body.picking #tool-dock { display: none; }
 .icon-info { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%226.5%22%2F%3E%3Cpath%20d%3D%22M9%208.3v3.9M9%205.8v.1%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-route { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%224.5%22%20cy%3D%2213.5%22%20r%3D%221.8%22%2F%3E%3Ccircle%20cx%3D%2213.5%22%20cy%3D%224.5%22%20r%3D%221.8%22%2F%3E%3Cpath%20d%3D%22M6.3%2013.5H11a2.5%202.5%200%20000-5H7a2.5%202.5%200%20010-5h4.7%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-lock { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223.5%22%20y%3D%228%22%20width%3D%2211%22%20height%3D%227.5%22%20rx%3D%221.5%22%2F%3E%3Cpath%20d%3D%22M6%208V5.5a3%203%200%20016%200V8%22%2F%3E%3C%2Fsvg%3E"); }
+.icon-warning { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M9%202.5L16.2%2015.2H1.8L9%202.5zM9%207.2v3.6M9%2013v.1%22%2F%3E%3C%2Fsvg%3E"); }

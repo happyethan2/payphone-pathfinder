@@ -688,33 +688,52 @@ async def test_health_degraded_when_upstream_failing(client, mock_api):
     assert body["upstream"]["serving_stale"] is True
 
 
-# ── Indoor phones ─────────────────────────────────────────────────
+# ── Phone hints ───────────────────────────────────────────────────
 
-async def test_indoor_phones(client, tmp_path, monkeypatch):
-    f = tmp_path / "indoor.json"
-    f.write_text(json.dumps({"generated_at": "x", "phones": {"12": {"conf": "high", "kind": "indoor", "open": [8, 21]}}}))
-    monkeypatch.setattr(main, "INDOOR_FILE", str(f))
+HINT = {"kind": "indoor", "conf": "high", "place": "University", "warn": "May be closed weekends", "days": [0, 1, 2, 3, 4],
+        "listed": None, "open": [8, 21], "n": 42}
 
-    r = await client.get("/api/indoor-phones")
+
+async def test_phone_hints(client, tmp_path, monkeypatch):
+    f = tmp_path / "hints.json"
+    f.write_text(json.dumps({"generated_at": "x", "phones": {"12": HINT}}))
+    monkeypatch.setattr(main, "HINTS_FILE", str(f))
+
+    r = await client.get("/api/phone-hints")
 
     assert r.status_code == 200
-    assert r.json() == {"phones": {"12": {"conf": "high", "kind": "indoor", "open": [8, 21]}}}
+    assert r.json() == {"phones": {"12": HINT}}
     f.write_text("{}")  # read once per process: a new file comes with a new deploy
-    assert (await client.get("/api/indoor-phones")).json()["phones"] == {"12": {"conf": "high", "kind": "indoor", "open": [8, 21]}}
+    assert (await client.get("/api/phone-hints")).json()["phones"] == {"12": HINT}
 
 
-async def test_indoor_phones_missing_file(client, tmp_path, monkeypatch):
-    monkeypatch.setattr(main, "INDOOR_FILE", str(tmp_path / "absent.json"))
+async def test_phone_hints_missing_file(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "HINTS_FILE", str(tmp_path / "absent.json"))
 
-    r = await client.get("/api/indoor-phones")
+    r = await client.get("/api/phone-hints")
 
     assert r.status_code == 200 and r.json() == {"phones": {}}
 
 
-def test_committed_indoor_file_shape():
-    with open(main.INDOOR_FILE, encoding="utf-8") as f:
+async def test_phone_hints_not_an_object(client, tmp_path, monkeypatch):
+    f = tmp_path / "hints.json"
+    f.write_text("[]")
+    monkeypatch.setattr(main, "HINTS_FILE", str(f))
+
+    r = await client.get("/api/phone-hints")
+
+    assert r.status_code == 200 and r.json() == {"phones": {}}
+
+
+def test_committed_hints_file_shape():
+    with open(main.HINTS_FILE, encoding="utf-8") as f:
         phones = json.load(f)["phones"]
-    assert phones, "backend/data/indoor.json is empty"
+    assert phones, "backend/data/hints.json is empty"
     for pid, p in phones.items():
-        assert pid.isdigit() and p["conf"] in ("high", "medium") and p["kind"] in ("indoor", "never")
+        assert pid.isdigit() and set(p) == set(HINT)
+        assert p["kind"] in ("indoor", "never", None) and p["conf"] in (("high", "medium") if p["kind"] else (None,))
+        assert p["kind"] or p["warn"], "a phone that isn't indoors is only listed for its warning"
+        assert p["days"] is None or (p["days"] and all(d in range(7) for d in p["days"]))
+        assert p["listed"] is None or (len(p["listed"]) == 7 and all(0 <= a < b <= 1440 for day in p["listed"] for a, b in day))
         assert p["open"] is None or (len(p["open"]) == 2 and all(0 <= h < 24 for h in p["open"]) and p["open"][0] != p["open"][1])
+        assert isinstance(p["n"], int)

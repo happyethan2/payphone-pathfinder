@@ -66,8 +66,8 @@ PAYPHONE_API_BASE  = os.getenv("PAYPHONE_API_BASE", "https://payphonetag.com/api
 PHONES_URL         = f"{PAYPHONE_API_BASE}/payphones"
 PHOTO_COVERAGE_URL = f"{PAYPHONE_API_BASE}/photo-coverage"
 FRONTEND_DIR       = os.getenv("FRONTEND_DIR", "/app/frontend")
-# Phones that are probably indoors or never public, made by phone-access/pipeline.py export-app
-INDOOR_FILE        = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "indoor.json")
+# Per-phone hints (probably indoors, place, warnings, hours), made by phone-access/pipeline.py export-app
+HINTS_FILE         = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "hints.json")
 CERT_FILE          = os.getenv("CERT_FILE", "/app/certs/cert.pem")
 
 # CARTO began requiring an API key for their raster basemaps in Aug 2026; without one
@@ -175,7 +175,7 @@ def reset_caches() -> None:
     global _PHONES_CACHE, _PHONES_CACHE_AT, _PHONES_FETCHED_AT, _PHONES_FAIL_UNTIL, _PHONES_FAILS
     global _PHOTO_CACHE, _PHOTO_CACHE_AT, _PHOTO_FAIL_UNTIL
     global _CAPTURES_CACHE, _CAPTURES_FAIL_UNTIL
-    global _GEO_CACHE, _INDOOR
+    global _GEO_CACHE, _HINTS
     _HTTP              = None
     _PHONES_CACHE      = None
     _PHONES_CACHE_AT   = 0.0
@@ -188,7 +188,7 @@ def reset_caches() -> None:
     _CAPTURES_CACHE    = {}
     _CAPTURES_FAIL_UNTIL = 0.0
     _GEO_CACHE           = {}
-    _INDOOR              = None
+    _HINTS               = None
 
 
 # ---------------------------------------------------------------------------
@@ -565,20 +565,21 @@ async def bust_phones_cache():
     return {"ok": True}
 
 
-_INDOOR: dict | None = None  # read once; a new file arrives with a new deploy
+_HINTS: dict | None = None  # read once; a new file arrives with a new deploy
 
 
-@app.get("/api/indoor-phones")
-async def get_indoor_phones():
-    """Phone id -> {conf: high|medium, kind: indoor|never, open: [from_hour, to_hour] | null}."""
-    global _INDOOR
-    if _INDOOR is None:
+@app.get("/api/phone-hints")
+async def get_phone_hints():
+    """Phone id -> {kind: indoor|never|null, conf: high|medium|null, place, warn, days, listed, open, n}.
+    kind null: a phone that only carries a warning (a remote community). See README "Indoor phones"."""
+    global _HINTS
+    if _HINTS is None:
         try:
-            with open(INDOOR_FILE, encoding="utf-8") as f:
-                _INDOOR = {"phones": json.load(f).get("phones", {})}
-        except (OSError, ValueError):
-            _INDOOR = {"phones": {}}  # no dataset on this instance: the app just shows no indoor hints
-    return _INDOOR
+            with open(HINTS_FILE, encoding="utf-8") as f:
+                _HINTS = {"phones": json.load(f).get("phones", {})}
+        except (OSError, ValueError, AttributeError):  # AttributeError: the file isn't a JSON object
+            _HINTS = {"phones": {}}  # no dataset on this instance: the app just shows no hints
+    return _HINTS
 
 
 @app.get("/api/photo-coverage")

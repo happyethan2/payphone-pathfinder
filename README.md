@@ -88,23 +88,32 @@ Then, on the iPhone:
 
 ### Indoor phones
 
-`backend/data/indoor.json` lists phones that are probably indoors or probably never open to the public. The app uses it in three places:
+`backend/data/hints.json` lists phones that are probably indoors or probably never open to the public. It can also list other phones that need a warning, for example a phone in a remote community. The app uses it in three places:
 
-- The **Indoor** filter adds a dashed ring to these phones on the map.
+- The **Indoor** filter adds a dashed ring to the phones that are probably indoors or never public.
 - A route stop for one of these phones always has a dashed ring.
-- During navigation, the current stop shows a warning with a confidence level (High or Medium).
-
-The **Show Usual Hours** setting is off by default. When it is on, the warning also shows the hours when players usually tag the phone. Outside those hours, the warning says "Probably Locked". The hours are a rough guide only.
+- During navigation, the current stop shows up to three lines:
+  1. "Probably Indoors", "Possibly Not Public" or "Probably Locked", with a confidence level (High or Medium). The line is red and says "Probably Locked" outside the phone's hours or on a day it is probably closed.
+  2. The type of place and a warning, for example "University · May be closed weekends".
+  3. The hours: listed opening hours from OpenStreetMap when they are known, otherwise the hours when players usually tag the phone, for example "Est. 08:00–21:00 from 42 captures". The estimate is a rough guide only.
 
 The file is a fixed snapshot. This repository does not include the tool that made it. To change the list, edit the file, then run `./deploy.sh`. The file is built into the backend image, so a restart alone does not load a new file. Format:
 
 ```json
-{"phones": {"<phone id>": {"conf": "high", "kind": "indoor", "open": [8, 21]}}}
+{"phones": {"<phone id>": {"kind": "indoor", "conf": "high", "place": "University", "warn": "May be closed weekends",
+                           "days": [0, 1, 2, 3, 4], "listed": null, "open": [8, 21], "n": 42}}}
 ```
 
-- `conf`: `high` or `medium`.
-- `kind`: `indoor` (probably indoors) or `never` (probably never public).
-- `open`: `[from_hour, to_hour]` in the phone's local time, or `null` if unknown. The range can cross midnight, for example `[22, 6]`.
+- `kind`: `indoor` (probably indoors), `never` (probably never public), or `null` for a phone that is only listed for its warning.
+- `conf`: `high` or `medium`; `null` when `kind` is `null`.
+- `place`: a short name for the type of place, or `null`.
+- `warn`: a short warning, or `null`.
+- `days`: the days the phone is probably reachable, Monday = 0 to Sunday = 6, or `null` for every day.
+- `listed`: opening hours from OpenStreetMap: 7 lists (Monday first) of `[from, to]` in minutes after midnight, or `null`. An empty list means closed that day.
+- `open`: `[from_hour, to_hour]` estimated from capture times, or `null` if unknown. The range can cross midnight, for example `[22, 6]`.
+- `n`: the number of captures the estimate is based on.
+
+All times are the phone's local time. The app compares them with the device's clock.
 
 ### Address search
 

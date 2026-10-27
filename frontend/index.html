@@ -153,8 +153,6 @@
     <label class="switch-row"><span class="label"><span class="icon icon-route" aria-hidden="true"></span>Highlight Current Leg</span><input type="checkbox" role="switch" id="legfocus" checked></label>
     <label class="switch-row"><span class="label"><span class="icon icon-compass" aria-hidden="true"></span>Auto-Rotate Map</span><input type="checkbox" role="switch" id="autorotate" checked></label>
     <div class="note" id="autorotate-note" hidden></div>
-    <label class="switch-row"><span class="label"><span class="icon icon-clock" aria-hidden="true"></span>Show Usual Hours</span><input type="checkbox" role="switch" id="show-hours"></label>
-    <div class="note">Adds typical player capture hours to the indoor warning while navigating. Not always accurate.</div>
   </div>
 </div>
 
@@ -255,8 +253,7 @@ const state = {
   newPhoneFilter:  false,
   pastCaptureIds:  null,    // Set<number> loaded lazily; null = not yet fetched
   indoorFilter:    false,   // dashed ring on phones that are probably indoors
-  indoorById:      null,    // Map<number, {conf, kind, open}> from /api/indoor-phones; null = not loaded
-  showUsualHours:  false,   // settings: add the usual hours to the indoor line
+  hints:           null,    // Map<number, hint> from /api/phone-hints; null = not loaded
   lastRoute:       null,
   mapsLegs:        [],
   currentLeg:      0,
@@ -335,7 +332,8 @@ function makeTooltipHtml(phone) {
       <span style="font-size:11px;color:${color};font-weight:600;">${label}</span>
     </div>
     ${phone.holder_name ? `<div style="font-size:10px;color:#a8afb5;margin-top:4px;">held by ${escapeHtml(phone.holder_name)}</div>` : ''}
-    ${indoorOf(phone.id) ? `<div style="font-size:10px;color:#f5b041;margin-top:4px;">${accessLabel(indoorOf(phone.id)).text}</div>` : ''}
+    ${hintOf(phone.id) ? accessLines(hintOf(phone.id)).map((l, i) => `<div style="font-size:10px;margin-top:${i ? 1 : 4}px;color:${
+      { now: '#efa29a', hours: '#a8afb5' }[l.cls] || '#f5b041'};">${escapeHtml(l.text)}</div>`).join('') : ''}
   </div>`;
 }
 
@@ -819,7 +817,7 @@ function phoneStyle(phone) {
                    && state.wikiPhotoIds.has(Number(phone.id));
   const isNew    = state.newPhoneFilter && state.pastCaptureIds !== null
                    && !state.pastCaptureIds.has(Number(phone.id));
-  const indoor   = state.indoorFilter && !!indoorOf(phone.id);
+  const indoor   = state.indoorFilter && !!hintOf(phone.id)?.kind;
   const style = mkStyle(STATUS_COLORS[phone.status] || '#888', sel, hasPhoto, isNew, indoor);
   // A route stop's marker stands in for its phone; hide the dot under it, or its
   // status colour shows through the stop when leg focus fades it
@@ -980,54 +978,64 @@ hlIndoor.onchange = () => {
   state.phones.forEach(p => refreshMarker(p));
 };
 
-function indoorOf(id) { return state.indoorById?.get(Number(id)) || null; }
+// A phone's hint from /api/phone-hints, or null. kind is set for phones that are probably
+// indoors or never public; a phone with kind null only carries a warning (a remote community).
+function hintOf(id) { return state.hints?.get(Number(id)) || null; }
 
-// "Probably Indoors · Confidence: High · 8am–9pm". open = [from, to] hours, may wrap midnight.
-function accessLabel(a) {
-  const hour = h => `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`;
-  const hours = state.showUsualHours && a.open;
-  let shut = false;
-  if (hours) {
-    const [from, to] = a.open, h = new Date().getHours();
-    shut = !(from < to ? h >= from && h < to : h >= from || h < to);
+const hhmm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+// Up to three lines: "Probably Indoors · Confidence: High", "University · May be closed weekends",
+// then the hours. Listed OSM hours beat the capture estimate; days and listed count Monday as 0.
+function accessLines(a) {
+  const now = new Date(), dow = (now.getDay() + 6) % 7, min = now.getHours() * 60 + now.getMinutes();
+  const today = a.listed?.[dow];
+  let shut;
+  if (today) shut = !today.some(([f, t]) => min >= f && min < t);
+  else {
+    const [f, t] = a.open ? a.open.map(h => h * 60) : [0, 1440];  // the estimate may wrap midnight
+    shut = (!!a.days && !a.days.includes(dow)) || !(f < t ? min >= f && min < t : min >= f || min < t);
   }
-  const head = a.kind === 'never' ? 'Possibly Not Public' : shut ? 'Probably Locked' : 'Probably Indoors';
-  const parts = [head, `Confidence: ${a.conf === 'high' ? 'High' : 'Medium'}`];
-  if (hours) parts.push(`${hour(a.open[0])}–${hour(a.open[1])}`);
-  return { text: parts.join(' · '), shut };
+  const lines = [];
+  if (a.kind) {
+    const head = a.kind === 'never' ? 'Possibly Not Public' : shut ? 'Probably Locked' : 'Probably Indoors';
+    lines.push({ text: `${head} · Confidence: ${a.conf === 'high' ? 'High' : 'Medium'}`, cls: shut ? 'now' : '' });
+  }
+  const place = [a.place, a.warn].filter(Boolean).join(' · ');
+  if (place) lines.push({ text: place, cls: 'place' });
+  if (today) {
+    const all = today.length === 1 && today[0][0] === 0 && today[0][1] === 1440;
+    lines.push({ text: all ? 'Listed as open 24 hours' : today.length
+      ? `Listed hours today ${today.map(([f, t]) => `${hhmm(f)}–${hhmm(t)}`).join(', ')}` : 'Listed as closed today', cls: 'hours' });
+  } else if (a.open) {
+    lines.push({ text: `Est. ${hhmm(a.open[0] * 60)}–${hhmm(a.open[1] * 60)} from ${a.n} captures`, cls: 'hours' });
+  }
+  return lines;
 }
 
-// The line under the nav card's stop row, for the stop you're heading to
+// The lines under the nav card's stop row, for the stop you're heading to
 function renderAccessLine() {
   const el = document.getElementById('access-line');
   const id = state.routeOrderedIds[state.routeProgress];
-  const a  = id === undefined ? null : indoorOf(id);
-  document.getElementById('nav-badge').classList.toggle('wp-indoor', !!a);
+  const a  = id === undefined ? null : hintOf(id);
+  document.getElementById('nav-badge').classList.toggle('wp-indoor', !!a?.kind);
   el.hidden = !a;
   if (!a) return;
-  const { text, shut } = accessLabel(a);
-  el.classList.toggle('now', shut);
-  el.innerHTML = `<span class="icon icon-lock" aria-hidden="true"></span><span>${text}</span>`;
+  // Lock for indoors, warning sign for a warning-only phone; later rows line up with the first row's text
+  const icon = a.kind ? 'icon-lock' : 'icon-warning';
+  el.innerHTML = accessLines(a).map((l, i) => `<div class="access-row ${l.cls}">`
+    + `${i ? '' : `<span class="icon ${icon}" aria-hidden="true"></span>`}<span>${escapeHtml(l.text)}</span></div>`).join('');
 }
 
-async function loadIndoorPhones() {
+async function loadPhoneHints() {
   try {
-    const res = await fetch('/api/indoor-phones');
+    const res = await fetch('/api/phone-hints');
     if (!res.ok) return;
     const data = await res.json();
-    state.indoorById = new Map(Object.entries(data.phones || {}).map(([k, v]) => [Number(k), v]));
+    state.hints = new Map(Object.entries(data.phones || {}).map(([k, v]) => [Number(k), v]));
   } catch (_) { return; }  // no hints is fine: the app works as before
   if (state.indoorFilter) state.phones.forEach(p => refreshMarker(p));
   if (inNav()) renderLeg();
 }
-
-function setShowUsualHours(on) {
-  state.showUsualHours = on;
-  document.getElementById('show-hours').checked = on;
-  if (inNav()) renderAccessLine();
-  saveSession();
-}
-document.getElementById('show-hours').onchange = e => setShowUsualHours(e.target.checked);
 
 // ── Lasso input ───────────────────────────────────────────────────
 // One pointer draws. A second finger means pan/pinch rather than a lasso: the
@@ -1656,7 +1664,7 @@ function displayRoute(data, extraS = 0) {
   ordered_ids.forEach((id, idx) => {
     const phone = state.phones.find(p => p.id === id);
     if (!phone) return;
-    const icon = makeWpIcon(idx + 1, '', !!indoorOf(id));
+    const icon = makeWpIcon(idx + 1, '', !!hintOf(id)?.kind);
     const m = L.marker([phone.lat, phone.lon], { icon, zIndexOffset: (ordered_ids.length - idx) * 10 }).addTo(map);
     state.waypointMarkers.push(m);
     state.waypointMarkersById[id] = m;
@@ -1794,7 +1802,7 @@ function refreshWpIcons() {
     const id     = parseInt(idStr);
     const ordIdx = state.routeOrderedIds.indexOf(id);
     if (ordIdx === -1) continue;
-    m.setIcon(makeWpIcon(ordIdx + 1, wpClass(id, ordIdx), !!indoorOf(id)));
+    m.setIcon(makeWpIcon(ordIdx + 1, wpClass(id, ordIdx), !!hintOf(id)?.kind));
     m.setOpacity(leg && !inLeg(state.stopIndexById[id], leg) ? WP_DIM : 1);
   }
 }
@@ -2337,7 +2345,6 @@ function saveSession() {
       mapTheme:            state.mapTheme,
       autoRotate:          state.autoRotate,
       legFocus:            state.legFocus,
-      showUsualHours:      state.showUsualHours,
       playerEmoji:        state.playerEmoji,
       orienteerArriveBy: document.getElementById('orienteer-arrive-by')?.value || '',
     }));
@@ -2361,7 +2368,6 @@ function restoreSession() {
     if (s.mapTheme && TILE_URLS[s.mapTheme]) setMapTheme(s.mapTheme);
     if (typeof s.autoRotate === 'boolean') setAutoRotate(s.autoRotate);
     if (typeof s.legFocus === 'boolean') setLegFocus(s.legFocus);
-    if (typeof s.showUsualHours === 'boolean') setShowUsualHours(s.showUsualHours);
     // Saved so the avatar doesn't flash the letter before phones load
     if (s.username && typeof s.playerEmoji === 'string') state.playerEmoji = s.playerEmoji;
     // Restore arrive-by time (or let IIFE set default if absent)
@@ -2507,7 +2513,7 @@ document.addEventListener('visibilitychange', () => {
     note.hidden = false;
   }
   maybeShowCartoNotice();
-  loadIndoorPhones();  // not awaited: markers and the nav card pick it up when it lands
+  loadPhoneHints();  // not awaited: markers and the nav card pick it up when it lands
   const p = new URLSearchParams(location.search);
   const urlName = (p.get('username') || '').trim();
   if (urlName && urlName !== state.username) { state.username = urlName; state.playerEmoji = ''; }

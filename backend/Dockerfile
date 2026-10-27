@@ -3,7 +3,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py .
-# Indoor-phone hints (phone-access/pipeline.py export-app); data/indoor.json must be committed
+# Phone hints (phone-access/pipeline.py export-app); data/hints.json must be committed
 COPY data/ ./data/
 # Certs are mounted at runtime via docker-compose volume (backend/certs/ -> /app/certs/).
 # If present, uvicorn serves HTTPS. If absent, plain HTTP (for reverse-proxy setups).
