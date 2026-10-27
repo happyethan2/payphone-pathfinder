@@ -87,7 +87,7 @@
     </div>
     <div class="cta-row">
       <button class="go" id="find-btn" onclick="findPlannedRoute()"></button>
-      <button id="share-btn" onclick="shareSelection()" aria-label="Copy share link" title="Copy Share Link"><span class="icon icon-share" aria-hidden="true"></span></button>
+      <button id="share-btn" onclick="shareSelection()" title="Copy Share Link"><span class="icon icon-share" aria-hidden="true"></span>Share</button>
     </div>
   </section>
 
@@ -95,6 +95,7 @@
     <div class="nav-head">
       <div class="wp wp-active" id="nav-badge"></div>
       <div><div class="nav-title" id="nav-title"></div><div class="nav-stats" id="route-stats"></div></div>
+      <button class="nav-share" onclick="shareSelection()" aria-label="Copy share link" title="Copy Share Link"><span class="icon icon-share" aria-hidden="true"></span></button>
     </div>
     <div class="access-line" id="access-line" role="status" hidden></div>
     <div class="leg-row" id="leg-row">
@@ -1068,6 +1069,28 @@ function cancelLassoStroke() {
   state.lassoDragging = false;
   state.lassoPoints = [];
   cleanupLasso();
+}
+// Middle-button drag pans the map with a mouse even while lassoing. Leaflet's own drag already takes
+// the middle button, but lasso mode turns it off; this stands in only then. panBy takes screen
+// pixels, so it moves the right way on a rotated map too.
+let _midDrag = null;
+mapEl.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); });  // no autoscroll
+mapEl.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'mouse' || e.button !== 1 || map.dragging.enabled()) return;
+  _midDrag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  mapEl.setPointerCapture(e.pointerId);
+  if (state.follow) setFollow(false);  // as a drag does
+});
+mapEl.addEventListener('pointermove', e => {
+  if (_midDrag?.id !== e.pointerId) return;
+  // panBy rounds to whole pixels; keep the remainder so fractional moves don't drift
+  const d = L.point(_midDrag.x - e.clientX, _midDrag.y - e.clientY).round();
+  if (!d.x && !d.y) return;
+  map.panBy(d, { animate: false });
+  _midDrag.x -= d.x; _midDrag.y -= d.y;
+});
+for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+  mapEl.addEventListener(type, e => { if (_midDrag?.id === e.pointerId) _midDrag = null; });
 }
 // While lassoing the map owns its touches. Without this the browser reads a
 // stroke as a gesture and swallows the next tap (e.g. turning Lasso off).
