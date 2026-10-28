@@ -1144,9 +1144,13 @@ function finishLasso() {
       refreshMarker(phone);
     }
   });
-  // The count badge on Clear is the feedback; only say something when nothing happened
+  // The count badge on Clear is the feedback; only say something when nothing happened.
+  // One stroke per tap of the tool: a stroke that changed the selection turns it off.
   if (!changed) toast(deselecting ? 'No selected phones in that area' : 'No phones in that area');
-  else if (navigator.vibrate) navigator.vibrate(18);
+  else {
+    if (navigator.vibrate) navigator.vibrate(18);
+    setMode('click');
+  }
   updateSelCount();
   saveSession();
 }
