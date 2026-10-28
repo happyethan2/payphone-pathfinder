@@ -316,6 +316,8 @@ body.picking #tool-dock { display: none; }
 .lock-row .lock-id { flex: 0 1 auto; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lock-row .lock-where { font-weight: 400; color: var(--muted); }
 .lock-map { flex: none; width: 40px; height: 40px; margin: -10px -6px -10px auto; border: 0; border-radius: 20px; background: transparent; color: var(--muted); display: grid; place-items: center; }
+.callout { display: flex; align-items: flex-start; gap: 8px; margin-top: 4px; padding: 10px 12px; border-radius: 10px; background: var(--accent-surface); color: #d5e5f7; font-size: 13px; line-height: 1.4; }
+.callout .icon { width: 16px; height: 16px; flex-basis: 16px; margin-top: 1px; color: var(--accent); }
 #locked-list { margin-top: 14px; }
 #locked-list .lock-row + .sec-title { margin-top: 12px; }
 #review-back { position: fixed; z-index: 1100; left: 50%; translate: -50% 0; top: max(16px, env(safe-area-inset-top)); color: var(--text); }

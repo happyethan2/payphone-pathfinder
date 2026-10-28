@@ -141,7 +141,7 @@
     <div class="sec-title">Filters</div>
     <label class="switch-row"><span class="label"><span class="icon icon-camera" aria-hidden="true"></span>Wiki Photo</span><input type="checkbox" role="switch" id="hl-photo"></label>
     <label class="switch-row"><span class="label"><span class="icon icon-magic" aria-hidden="true"></span>Never Captured</span><input type="checkbox" role="switch" id="hl-new"></label>
-    <label class="switch-row"><span class="label"><span class="icon icon-lock" aria-hidden="true"></span>Indoor</span><input type="checkbox" role="switch" id="hl-indoor"></label>
+    <label class="switch-row"><span class="label"><span class="icon icon-lock" aria-hidden="true"></span>Indoor / Locked</span><input type="checkbox" role="switch" id="hl-indoor"></label>
   </div>
   <div class="field">
     <div class="sec-title">Display</div>
@@ -150,7 +150,7 @@
   </div>
   <div class="field">
     <div class="sec-title">Navigation</div>
-    <label class="switch-row"><span class="label"><span class="icon icon-route" aria-hidden="true"></span>Highlight Current Leg</span><input type="checkbox" role="switch" id="legfocus" checked></label>
+    <label class="switch-row"><span class="label"><span class="icon icon-route" aria-hidden="true"></span>Highlight Current Leg</span><input type="checkbox" role="switch" id="legfocus"></label>
     <label class="switch-row"><span class="label"><span class="icon icon-compass" aria-hidden="true"></span>Auto-Rotate Map</span><input type="checkbox" role="switch" id="autorotate" checked></label>
     <div class="note" id="autorotate-note" hidden></div>
   </div>
@@ -174,7 +174,7 @@
 <div class="popover" id="pop-locked" role="dialog" aria-modal="true" aria-labelledby="pop-locked-h" hidden>
   <div class="popover-head"><h2 id="pop-locked-h"></h2><button class="text-btn" onclick="closePopover()">Cancel</button></div>
   <div class="field">
-    <div class="note">Phones switched off are left out of the route. Tap the pin to see where one is.</div>
+    <div class="callout"><span class="icon icon-info" aria-hidden="true"></span><span>Switch a phone on to include it in the route.</span></div>
     <div id="locked-list"></div>
   </div>
   <div class="cta-row"><button class="go" onclick="confirmLocked()">Find Route</button></div>
@@ -275,7 +275,7 @@ const state = {
   lastOrienteerBufferS:   0,        // buffer used for the last orienteer solve
   mapTheme:               'dark',   // 'dark' | 'light'
   autoRotate:             true,     // settings: compass FAB may rotate the map
-  legFocus:               true,     // settings: fade route outside the leg in view
+  legFocus:               false,    // settings: fade route outside the leg in view
   playerEmoji:            '',       // the player's in-game emoji, for the avatar
   headingLocked:          false,    // compass FAB: locked to device heading
   follow:                 false,    // map keeps the location dot in view
