@@ -259,9 +259,6 @@ body.picking #tool-dock { display: none; }
 /* ── Start/end markers: round = start, square = end; no colour ── */
 .ep { background: #fff; border: 2px solid #101112; border-radius: 50%; box-shadow: 0 1px 5px rgba(0,0,0,.5); }
 .ep-end { border-radius: 3px; }
-/* Snapped onto a phone: a detached frame, so it never reads as a selection ring */
-.ep-snap { background: transparent; border: 3px solid #fff; box-shadow: 0 0 0 1.5px #101112, inset 0 0 0 1.5px #101112; }
-.ep-snap.ep-end { border-radius: 6px; }
 
 /* ── Live location dot ───────────────────────────────────── */
 .loc-dot {

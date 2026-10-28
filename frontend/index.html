@@ -782,6 +782,12 @@ function markerRadius(sel) {
 }
 
 // Waypoint (route stop) icon size — one tier larger than phone dots to stand out
+// Start/end marker size: about a phone dot's width at each zoom tier, so it never dwarfs the map
+function endpointSize() {
+  const z = map.getZoom();
+  return z >= 15 ? 14 : z >= 13 ? 12 : z >= 11 ? 9 : 7;
+}
+
 function waypointSize() {
   const z = map.getZoom();
   return z >= 15 ? 22 : z >= 13 ? 17 : z >= 11 ? 12 : 8;
@@ -840,6 +846,7 @@ map.on('zoomend', () => {
     if (m) m.setRadius(markerRadius(state.selectedIds.has(phone.id)));
   }
   refreshWpIcons();  // route waypoint markers
+  drawEndpoints();   // start/end markers resize with the dots
 });
 
 function updateSelCount() { renderPlan(); }
@@ -1368,12 +1375,17 @@ searchInput.addEventListener('keydown', e => {
 });
 
 function drawEndpoints() {
+  const s = state.start, e = state.end;  // a live start isn't drawn, so it shares with nothing
+  const shared = !!(s && e && !s.live && !e.live
+    && ((s.phone_id != null && s.phone_id === e.phone_id) || (s.lat === e.lat && s.lon === e.lon)));  // share links round coords
   ['start', 'end'].forEach(which => {
     const key = `${which}Marker`;
     if (state[key]) { map.removeLayer(state[key]); state[key] = null; }
     const pt = state[which];
-    // Not interactive: the frame must not swallow taps meant for the phone under it, or a re-pick
-    if (pt && !pt.live) state[key] = L.marker([pt.lat, pt.lon], { icon: makeEndpointIcon(which, pt), zIndexOffset: 500, interactive: false, keyboard: false }).addTo(map);
+    // Not interactive: the marker must not swallow taps meant for the phone under it, or a re-pick.
+    // Start draws above end, so a loop shows the circle on the (larger) square.
+    if (pt && !pt.live) state[key] = L.marker([pt.lat, pt.lon], { icon: makeEndpointIcon(which, shared),
+      zIndexOffset: which === 'start' ? 501 : 500, interactive: false, keyboard: false }).addTo(map);
   });
 }
 
@@ -1392,16 +1404,12 @@ function snapPoint(latlng) {
     : { lat: latlng.lat, lon: latlng.lng };
 }
 
-// Shape, not colour, tells them apart: start is round, end is square.
-// Snapped points get a frame around the phone's dot; custom points a solid marker.
-function makeEndpointIcon(which, point) {
-  const snap = point.phone_id != null;
-  // End frame is a step larger so both still read when start and end share a phone
-  const size = snap ? (which === 'end' ? 32 : 28) : 14;
-  return L.divIcon({
-    className: `ep ep-${which}${snap ? ' ep-snap' : ''}`,
-    iconSize: [size, size], iconAnchor: [size / 2, size / 2],
-  });
+// Shape, not colour, tells them apart: start is round, end is square. A small solid marker,
+// on top of the phone's dot when snapped to one; it shrinks with zoom like the dots.
+function makeEndpointIcon(which, shared) {
+  // When start and end are one point, the end square is a step larger so the circle sits inside it
+  const size = endpointSize() + (shared && which === 'end' ? 6 : 0);
+  return L.divIcon({ className: `ep ep-${which}`, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
 }
 
 function setEndpoint(which, point) {
