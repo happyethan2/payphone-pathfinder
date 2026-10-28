@@ -131,7 +131,7 @@ body.picking #sheet { transform: translateY(110%); }
 #search-list .s { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
 #search-list .msg { color: var(--muted); font-size: 13px; cursor: default; }
 .cta-row { display: flex; gap: 8px; padding-top: 4px; }
-#share-btn { flex: none; padding: 10px 16px; }
+#share-btn { flex: none; width: 48px; }
 
 /* Navigate card */
 .nav-head { display: flex; align-items: center; gap: 12px; padding: 16px 0 12px; }

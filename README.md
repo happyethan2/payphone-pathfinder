@@ -123,7 +123,7 @@ An instance with many users should run its own Photon server and set `PHOTON_URL
 
 ### Share links
 
-The **Share** button next to **Find Optimal Route** copies a link to your current plan. During navigation, the share icon at the top of the navigation card does the same. The link contains the transport mode, the start, the end, and every selected phone. Opening the link replaces the recipient's own selection.
+The share button next to **Find Optimal Route** copies a link to your current plan. During navigation, the share icon at the top of the navigation card does the same. The link contains the transport mode, the start, the end, and every selected phone. Opening the link replaces the recipient's own selection.
 
 The link does not contain your in-game name or the calculated route. The recipient's app calculates the route again from the recipient's own game data. The recipient does not need a name to open the link. Phone IDs are the same for every player, so a link works on any instance that runs this version.
 
