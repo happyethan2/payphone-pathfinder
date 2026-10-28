@@ -171,6 +171,15 @@
   </div>
 </div>
 
+<div class="popover" id="pop-locked" role="dialog" aria-modal="true" aria-labelledby="pop-locked-h" hidden>
+  <div class="popover-head"><h2 id="pop-locked-h"></h2><button class="text-btn" onclick="closePopover()">Cancel</button></div>
+  <div class="field">
+    <div class="note">Phones switched off are left out of the route. Tap the pin to see where one is.</div>
+    <div id="locked-list"></div>
+  </div>
+  <div class="cta-row"><button class="go" onclick="confirmLocked()">Find Route</button></div>
+</div>
+
 <!-- ── Start/end search (full screen on mobile, over the panel on desktop) ── -->
 <div id="search-screen" role="dialog" aria-modal="true" aria-label="Search for a place" hidden>
   <div class="search-head">
@@ -185,6 +194,7 @@
 <div id="pick-banner" hidden></div>
 <div id="pick-actions" hidden><button onclick="pickCancel()">Cancel</button></div>
 
+<button id="review-back" class="chip" hidden onclick="this.hidden = true; findPlannedRoute()">Back to Review</button>
 <div id="toast" role="status" hidden><span id="toast-msg"></span><button id="toast-undo" hidden>Undo</button></div>
 
 <!-- ── CARTO basemap key notice (host-facing, dismissible) ─────── -->
@@ -555,8 +565,10 @@ document.querySelectorAll('#mode-switch button').forEach(b => b.onclick = () => 
 document.querySelectorAll('#profile-switch button').forEach(b => b.onclick = () => setProfile(b.dataset.profile));
 document.getElementById('orienteer-arrive-by').addEventListener('change', () => { renderPlan(); saveSession(); });
 
-async function findPlannedRoute() {
+async function findPlannedRoute(reviewed) {
   if (routeBusy || planProblem()) return;
+  // Probably-locked phones get a review first (before any GPS wait); its Find Route calls back with reviewed
+  if (!reviewed && state.routeMode === 'route' && reviewLocked()) return;
   if (state.start && state.start.live) {
     setRouteBusy(true);
     const live = state.start;
@@ -993,6 +1005,7 @@ const hhmm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 6
 
 // Up to three lines: "Probably Indoors · Confidence: High", "University · May be closed weekends",
 // then the hours. Listed OSM hours beat the capture estimate; days and listed count Monday as 0.
+// Red (now) means you probably can't get in: shut right now, never public, or a place warning that says so.
 function accessLines(a) {
   const now = new Date(), dow = (now.getDay() + 6) % 7, min = now.getHours() * 60 + now.getMinutes();
   const today = a.listed?.[dow];
@@ -1005,10 +1018,10 @@ function accessLines(a) {
   const lines = [];
   if (a.kind) {
     const head = a.kind === 'never' ? 'Possibly Not Public' : shut ? 'Probably Locked' : 'Probably Indoors';
-    lines.push({ text: `${head} · Confidence: ${a.conf === 'high' ? 'High' : 'Medium'}`, cls: shut ? 'now' : '' });
+    lines.push({ text: `${head} · Confidence: ${a.conf === 'high' ? 'High' : 'Medium'}`, cls: shut || a.kind === 'never' ? 'now' : '' });
   }
   const place = [a.place, a.warn].filter(Boolean).join(' · ');
-  if (place) lines.push({ text: place, cls: 'place' });
+  if (place) lines.push({ text: place, cls: a.warn === 'May not be public' || a.warn === 'May be airside' ? 'place now' : 'place' });
   if (today) {
     const all = today.length === 1 && today[0][0] === 0 && today[0][1] === 1440;
     lines.push({ text: all ? 'Listed as open 24 hours' : today.length
@@ -1026,11 +1039,78 @@ function renderAccessLine() {
   const a  = id === undefined ? null : hintOf(id);
   document.getElementById('nav-badge').classList.toggle('wp-indoor', !!a?.kind);
   el.hidden = !a;
-  if (!a) return;
-  // Lock for indoors, warning sign for a warning-only phone; later rows line up with the first row's text
+  if (a) el.innerHTML = accessHtml(a);
+}
+
+// A hint's rows: lock for indoors, warning sign for a warning-only phone; later rows line up with the first row's text
+function accessHtml(a) {
   const icon = a.kind ? 'icon-lock' : 'icon-warning';
-  el.innerHTML = accessLines(a).map((l, i) => `<div class="access-row ${l.cls}">`
+  return accessLines(a).map((l, i) => `<div class="access-row ${l.cls}">`
     + `${i ? '' : `<span class="icon ${icon}" aria-hidden="true"></span>`}<span>${escapeHtml(l.text)}</span></div>`).join('');
+}
+
+// Any red line: switched off by default in the review
+function isLocked(id) {
+  const a = hintOf(id);
+  return !!a && accessLines(a).some(l => l.cls.includes('now'));
+}
+
+// Before routing: list every selected phone with a hint. The probably shut ones come first, switched
+// off; the rest are "Worth a Look", switched on. Returns false when there are none, so routing goes ahead.
+let reviewKeep = null, seenId = null;  // switch states and the phone shown, while the review is set aside for See on Map
+function reviewLocked() {
+  document.getElementById('review-back').hidden = true;
+  state.markers[seenId]?.closeTooltip();  // the route (or the review) takes over from the phone you looked at
+  seenId = null;
+  const ids = [...state.selectedIds].filter(id => hintOf(id)?.kind || hintOf(id)?.warn);
+  if (!ids.length) { reviewKeep = null; return false; }
+  hideToast();  // its Undo sits above the scrim and could change the plan under the review
+  const row = id => {
+    const a = hintOf(id), on = reviewKeep?.get(id) ?? !isLocked(id);
+    // The pin sits on the address line so the status lines below keep the full width
+    return `<div class="switch-row lock-row"><div class="label"><div class="lock-head">`
+      + `<label class="lock-id" for="lk-${id}">#${id}${a.where ? `<span class="lock-where"> · ${escapeHtml(a.where)}</span>` : ''}</label>`
+      + `<button class="lock-map" onclick="seeOnMap(${id})" aria-label="See #${id} on map"><span class="icon icon-pin" aria-hidden="true"></span></button></div>`
+      + `<label class="access-line" for="lk-${id}">${accessHtml(a)}</label></div>`
+      + `<input type="checkbox" role="switch" id="lk-${id}" data-id="${id}" aria-label="Visit #${id}"${on ? ' checked' : ''}></div>`;
+  };
+  const group = (title, g) => g.length ? `<div class="sec-title">${title}</div>${g.map(row).join('')}` : '';
+  document.getElementById('pop-locked-h').textContent = `Check ${ids.length} Phone${ids.length === 1 ? '' : 's'} Before Routing`;
+  document.getElementById('locked-list').innerHTML = group('Probably Shut', ids.filter(isLocked))
+    + group('Worth a Look', ids.filter(id => !isLocked(id)));
+  reviewKeep = null;
+  openPopover('locked');
+  return true;
+}
+
+// Set the review aside to look at one phone; Back to Review (or Find) brings it back with the switches as left
+function seeOnMap(id) {
+  reviewKeep = new Map([...document.querySelectorAll('#locked-list input')].map(el => [Number(el.dataset.id), el.checked]));
+  closePopover();
+  document.getElementById('review-back').hidden = false;
+  const phone = state.phones.find(p => p.id === id);
+  if (!phone) return;
+  setSheetFull(false);
+  setFollow(false);
+  map.setView([phone.lat, phone.lon], Math.max(map.getZoom(), 17));
+  state.markers[id]?.openTooltip();
+  seenId = id;
+}
+
+function confirmLocked() {
+  const skip = [...document.querySelectorAll('#locked-list input:not(:checked)')].map(el => Number(el.dataset.id))
+    .filter(id => state.selectedIds.has(id));
+  closePopover();
+  if (state.routeMode !== 'route') return;  // switched to Orienteering behind the review: it picks its own phones
+  const restyle = () => skip.forEach(id => { const phone = state.phones.find(p => p.id === id); if (phone) refreshMarker(phone); });
+  skip.forEach(id => state.selectedIds.delete(id));
+  restyle(); updateSelCount(); saveSession();
+  // Undo puts them back in the plan ("locked" depends on the hour, so tomorrow they may be fine)
+  const undo = () => { skip.forEach(id => state.selectedIds.add(id)); restyle(); updateSelCount(); saveSession(); };
+  const n = skip.length, phones = `${n} phone${n === 1 ? '' : 's'}`;
+  if (!state.selectedIds.size) { toast(`Skipped ${phones}: none left to route`, undo); return; }
+  if (n) toast(`Skipped ${phones}`, undo);
+  findPlannedRoute(true);
 }
 
 async function loadPhoneHints() {
@@ -1049,7 +1129,7 @@ async function loadPhoneHints() {
 // stroke is dropped and Leaflet's own two-finger handling moves the map.
 const _lassoPointers = new Set();
 mapEl.addEventListener('pointerdown', e => {
-  if (!isLassoMode()) return;
+  if (!isLassoMode() || routeBusy) return;  // the selection is fixed while a route is found
   if (e.pointerType === 'mouse' && e.button !== 0) return;
   // A primary pointer means no other finger is down, so anything still listed
   // is a lift-off we never saw. Touch ids are never reused, so without this one
@@ -1175,7 +1255,7 @@ function onMarkerClick(phone) {
       { lat: phone.lat, lon: phone.lon, phone_id: phone.id, label: `Phone #${phone.id}` });
     return;
   }
-  if (inNav()) return;  // the plan is hidden while navigating
+  if (inNav() || routeBusy) return;  // the plan is hidden while navigating, and fixed while a route is found
   if (state.routeMode === 'orienteer') return;  // orienteering picks its own phones
   const adding = !state.selectedIds.has(phone.id);
   adding ? state.selectedIds.add(phone.id) : state.selectedIds.delete(phone.id);

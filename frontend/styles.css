@@ -218,6 +218,7 @@ body.picking #tool-dock { display: none; }
   #toast { left: 50%; right: auto; transform: translateX(-50%); width: 420px; }
   .scrim { background: transparent; }
   .popover { left: auto; right: 72px; top: 16px; bottom: auto; width: 320px; border-radius: 12px; border: 1px solid var(--divider); }
+  #pop-locked { width: 400px; }  /* each row's status lines need the room */
   #search-screen { top: 16px; left: 16px; right: auto; bottom: auto; width: 360px; max-height: calc(100dvh - 32px); border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.3); }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -307,3 +308,16 @@ body.picking #tool-dock { display: none; }
 .icon-route { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%224.5%22%20cy%3D%2213.5%22%20r%3D%221.8%22%2F%3E%3Ccircle%20cx%3D%2213.5%22%20cy%3D%224.5%22%20r%3D%221.8%22%2F%3E%3Cpath%20d%3D%22M6.3%2013.5H11a2.5%202.5%200%20000-5H7a2.5%202.5%200%20010-5h4.7%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-lock { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223.5%22%20y%3D%228%22%20width%3D%2211%22%20height%3D%227.5%22%20rx%3D%221.5%22%2F%3E%3Cpath%20d%3D%22M6%208V5.5a3%203%200%20016%200V8%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-warning { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M9%202.5L16.2%2015.2H1.8L9%202.5zM9%207.2v3.6M9%2013v.1%22%2F%3E%3C%2Fsvg%3E"); }
+/* Probably-locked review before routing: the list scrolls so Find Route stays in view; min-width lets long rows end in an ellipsis */
+#locked-list { max-height: 50dvh; overflow-y: auto; }
+.lock-row { align-items: flex-start; padding: 8px 0; }
+.lock-row .label { flex-direction: column; align-items: stretch; gap: 2px; min-width: 0; }
+.lock-head { display: flex; align-items: center; min-width: 0; }
+.lock-row .lock-id { flex: 0 1 auto; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lock-row .lock-where { font-weight: 400; color: var(--muted); }
+.lock-map { flex: none; width: 40px; height: 40px; margin: -10px -6px -10px auto; border: 0; border-radius: 20px; background: transparent; color: var(--muted); display: grid; place-items: center; }
+#locked-list { margin-top: 14px; }
+#locked-list .lock-row + .sec-title { margin-top: 12px; }
+#review-back { position: fixed; z-index: 1100; left: 50%; translate: -50% 0; top: max(16px, env(safe-area-inset-top)); color: var(--text); }
+.lock-row .access-line { margin: 0; }
+.lock-row input { margin-top: 2px; }

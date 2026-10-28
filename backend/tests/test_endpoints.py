@@ -691,7 +691,7 @@ async def test_health_degraded_when_upstream_failing(client, mock_api):
 # ── Phone hints ───────────────────────────────────────────────────
 
 HINT = {"kind": "indoor", "conf": "high", "place": "University", "warn": "May be closed weekends", "days": [0, 1, 2, 3, 4],
-        "listed": None, "open": [8, 21], "n": 42}
+        "listed": None, "open": [8, 21], "n": 42, "where": "UniSA Playford Building, Level 3"}
 
 
 async def test_phone_hints(client, tmp_path, monkeypatch):
@@ -737,3 +737,4 @@ def test_committed_hints_file_shape():
         assert p["listed"] is None or (len(p["listed"]) == 7 and all(0 <= a < b <= 1440 for day in p["listed"] for a, b in day))
         assert p["open"] is None or (len(p["open"]) == 2 and all(0 <= h < 24 for h in p["open"]) and p["open"][0] != p["open"][1])
         assert isinstance(p["n"], int)
+        assert p["where"] is None or 0 < len(p["where"]) <= 48
