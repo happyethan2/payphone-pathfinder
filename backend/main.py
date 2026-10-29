@@ -175,8 +175,9 @@ def reset_caches() -> None:
     global _PHONES_CACHE, _PHONES_CACHE_AT, _PHONES_FETCHED_AT, _PHONES_FAIL_UNTIL, _PHONES_FAILS
     global _PHOTO_CACHE, _PHOTO_CACHE_AT, _PHOTO_FAIL_UNTIL
     global _CAPTURES_CACHE, _CAPTURES_FAIL_UNTIL
-    global _GEO_CACHE, _HINTS
+    global _GEO_CACHE, _HINTS, _LATEST
     _HTTP              = None
+    _LATEST            = None
     _PHONES_CACHE      = None
     _PHONES_CACHE_AT   = 0.0
     _PHONES_FETCHED_AT = 0.0
@@ -774,7 +775,35 @@ async def health():
 
     upstream_ok = _PHONES_FAILS == 0
     status = "ok" if upstream_ok and all(services.values()) else "degraded"
-    return {"status": status, "upstream": upstream, "services": services}
+    return {"status": status, "version": APP_VERSION, "upstream": upstream, "services": services}
+
+
+# This server's version: deploy.sh bakes in `git describe --tags`, so "v2.1.0" on a release and
+# "v2.1.0-3-gdb9a587" three commits past it; "unknown" when the image was built another way.
+APP_VERSION = os.getenv("APP_VERSION") or "unknown"
+LATEST_RELEASE_URL = "https://api.github.com/repos/happyethan2/payphone-pathfinder/releases/latest"
+_LATEST: tuple[dict | None, float] | None = None  # (latest release, checked at)
+
+
+@app.get("/api/version")
+async def get_version():
+    """This server's version and the latest published release (asked of GitHub at most every 6 hours)."""
+    global _LATEST
+    now = time.monotonic()
+    if _LATEST is None or now - _LATEST[1] > (6 * 3600 if _LATEST[0] else 600):
+        rel = _LATEST[0] if _LATEST else None  # a failed check keeps the last answer
+        try:
+            resp = await _http().get(LATEST_RELEASE_URL, headers={"Accept": "application/vnd.github+json"}, timeout=5.0)
+            resp.raise_for_status()
+            j = resp.json()
+            tag, url = str(j["tag_name"]), str(j["html_url"])
+            if not url.startswith("https://github.com/"):  # the page links it
+                raise ValueError(f"unexpected release url {url!r}")
+            rel = {"tag": tag, "url": url}
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
+            logger.warning("Latest-release check failed: %s: %s", type(e).__name__, e)
+        _LATEST = (rel, now)
+    return {"version": APP_VERSION, "latest": _LATEST[0]}
 
 
 @app.post("/api/route")

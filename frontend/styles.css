@@ -43,6 +43,15 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .icon { display: inline-block; width: 18px; height: 18px; flex: 0 0 18px; background: currentColor; mask: var(--icon) center / contain no-repeat; -webkit-mask: var(--icon) center / contain no-repeat; }
 button[aria-busy=true] .icon { mask: none; -webkit-mask: none; background: transparent; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
 /* Three columns when every label fits on one line, else two */
+.about-line { font-size: 13px; line-height: 1.6; color: var(--muted); }
+.about-line a { color: var(--accent); }
+.about-update { color: var(--success); font-weight: 600; }
+.leaflet-container .leaflet-control-attribution { padding: 3px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--muted); font-size: 12px; box-shadow: 0 3px 12px rgba(0,0,0,.3); }
+.leaflet-container .leaflet-control-attribution a { color: var(--accent); }
+.leaflet-container .leaflet-right .leaflet-control-attribution { margin: 0 10px 10px 0; }  /* desktop; phones place it by the tool pill */
+.leaflet-container .leaflet-control-attribution.folded { width: 36px; height: 36px; padding: 0; border-radius: 18px; font-size: 0; cursor: pointer; background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.3); display: grid; place-items: center; }
+.leaflet-control-attribution.folded > * { display: none; }
+.leaflet-control-attribution.folded::before { content: ""; width: 18px; height: 18px; background: #cbd0d4; mask: var(--icon) center / contain no-repeat; -webkit-mask: var(--icon) center / contain no-repeat; }
 .legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px 10px; }
 .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 1.4; color: var(--muted); }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
@@ -72,7 +81,7 @@ button[aria-busy=true] .icon { mask: none; -webkit-mask: none; background: trans
 #fab-centre.heading-locked { background: var(--accent-surface); border-color: var(--accent); }
 #loc-badge { margin-top: -4px; font-size: 11px; color: var(--muted); background: var(--surface); border-radius: 6px; padding: 2px 6px; white-space: nowrap; }
 
-#tool-dock { position: fixed; z-index: 900; left: 16px; bottom: calc(var(--sheet-h, 160px) + 24px); display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+#tool-dock { position: fixed; z-index: 900; left: 16px; bottom: calc(var(--sheet-h, 160px) + 12px); display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 /* The dock is a layout box (full width on desktop, so chips can wrap); only its controls take clicks */
 #tool-dock { pointer-events: none; }
 #tool-dock > * { pointer-events: auto; }
@@ -204,8 +213,11 @@ body.picking #tool-dock { display: none; }
 }
 @media (max-width: 639px) {
   body.sheet-full #tool-dock { display: none; }
-  /* Keep Leaflet's attribution (a CARTO free-tier condition) above the sheet */
-  .leaflet-bottom { bottom: var(--sheet-h, 0px); }
+  /* The map credit (a CARTO free-tier condition) shares the tool pill's row: folded, a button at its
+     right end; in full, just above it */
+  .leaflet-bottom { bottom: calc(var(--sheet-h, 0px) + 12px); }
+  .leaflet-container .leaflet-right .leaflet-control-attribution { margin: 0 16px 52px 0; }
+  .leaflet-container .leaflet-right .leaflet-control-attribution.folded { margin: 0 16px 6px 0; }  /* centred on the 48px pill */
   .leaflet-control-zoom { display: none; }  /* pinch to zoom on phones */
 }
 @media (min-width: 640px) {

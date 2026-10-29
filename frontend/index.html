@@ -134,7 +134,7 @@
 <div class="popover" id="pop-settings" role="dialog" aria-modal="true" aria-labelledby="pop-settings-h" hidden>
   <div class="popover-head"><h2 id="pop-settings-h">Settings</h2>
     <span class="head-btns">
-      <button class="text-btn" onclick="openPopover('legend')" aria-label="Legend" title="Legend"><span class="icon icon-info" aria-hidden="true"></span></button>
+      <button class="text-btn" onclick="openPopover('legend')" aria-label="About" title="About"><span class="icon icon-info" aria-hidden="true"></span></button>
       <button class="text-btn" onclick="closePopover()">Done</button>
     </span></div>
   <div class="field">
@@ -157,8 +157,9 @@
 </div>
 
 <div class="popover" id="pop-legend" role="dialog" aria-modal="true" aria-labelledby="pop-legend-h" hidden>
-  <div class="popover-head"><h2 id="pop-legend-h">Legend</h2><button class="text-btn" onclick="openPopover('settings')">Done</button></div>
+  <div class="popover-head"><h2 id="pop-legend-h">About</h2><button class="text-btn" onclick="openPopover('settings')">Done</button></div>
   <div class="field">
+    <div class="sec-title">Legend</div>
     <div class="legend">
       <div class="legend-item"><span class="legend-uncaptured dot"></span>Uncaptured</div>
       <div class="legend-item"><span class="legend-mine dot"></span>Mine</div>
@@ -168,6 +169,17 @@
       <div class="legend-item"><span class="legend-new dot"></span>Never Captured</div>
       <div class="legend-item"><span class="legend-indoor dot"></span>Indoor</div>
     </div>
+  </div>
+  <div class="field">
+    <div class="sec-title">Version</div>
+    <div class="about-line" id="about-version">Unknown</div>
+    <div class="about-line" id="about-latest" hidden></div>
+  </div>
+  <div class="field">
+    <div class="sec-title">Credits</div>
+    <div class="about-line">Map data <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">&copy; OpenStreetMap contributors</a></div>
+    <div class="about-line">Map tiles <a href="https://carto.com/attributions" target="_blank" rel="noopener">&copy; CARTO</a></div>
+    <div class="about-line">Built with <a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a> &middot; Thanks to <a href="https://github.com/Sneethan" target="_blank" rel="noopener">Sneethan</a></div>
   </div>
 </div>
 
@@ -427,9 +439,9 @@ map.on('rotate', () => {
   }, 150);
 });
 
-let tileLayer = L.tileLayer(TILE_URLS.dark, {
-  attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19,
-}).addTo(map);
+const CREDIT = '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">&copy; OpenStreetMap</a> <a href="https://carto.com/attributions" target="_blank" rel="noopener">&copy; CARTO</a>';
+let tileLayer = L.tileLayer(TILE_URLS.dark, { attribution: CREDIT, maxZoom: 19 }).addTo(map);
+map.attributionControl.setPrefix(false);  // Leaflet is credited on the About page
 
 // Zoom buttons bottom-right (desktop only — hidden on phones, which pinch);
 // bottom-left belongs to the selection dock
@@ -460,6 +472,33 @@ function toggleMiniMap() {
 }
 
 const mapEl = map.getContainer();
+
+// The map credit shows in full at startup, then folds to an info button after 5 s or your first touch
+// of the map (the OSMF attribution guidelines allow this; the About page keeps the full credits).
+// The button unfolds it again.
+{
+  const credit = map.attributionControl.getContainer();
+  credit.classList.add('icon-info');  // only for its --icon, drawn by the folded style
+  let timer;
+  const folded = () => credit.classList.contains('folded');
+  const fold = () => {
+    clearTimeout(timer);
+    credit.classList.add('folded');
+    credit.tabIndex = 0;
+    credit.setAttribute('role', 'button');
+    credit.setAttribute('aria-label', 'Map credits');
+  };
+  const unfold = () => {
+    credit.classList.remove('folded');
+    credit.removeAttribute('tabindex'); credit.removeAttribute('role'); credit.removeAttribute('aria-label');
+    timer = setTimeout(fold, 5000);
+  };
+  credit.addEventListener('click', e => { if (folded()) { e.preventDefault(); unfold(); } });
+  credit.addEventListener('keydown', e => { if (folded() && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); unfold(); } });
+  mapEl.addEventListener('pointerdown', e => { if (!credit.contains(e.target)) fold(); });
+  mapEl.addEventListener('wheel', fold, { passive: true });
+  unfold();
+}
 
 // ── Sheet (plan / navigate) ───────────────────────────────────────
 const sheet = document.getElementById('sheet');
@@ -1111,6 +1150,27 @@ function confirmLocked() {
   if (!state.selectedIds.size) { toast(`Skipped ${phones}: none left to route`, undo); return; }
   if (n) toast(`Skipped ${phones}`, undo);
   findPlannedRoute(true);
+}
+
+// About page: this server's version (git describe, from deploy.sh) and the latest release on GitHub
+async function loadVersion() {
+  let v;
+  try {
+    const res = await fetch('/api/version');
+    if (!res.ok) return;
+    v = await res.json();
+  } catch (_) { return; }
+  const m = /^(v\d+\.\d+\.\d+)-(\d+)-g([0-9a-f]+)$/.exec(v.version);  // "v2.1.0-3-gdb9a587": 3 commits past v2.1.0
+  document.getElementById('about-version').textContent = m
+    ? `${m[1]} + ${m[2]} commit${m[2] === '1' ? '' : 's'} (${m[3]})` : v.version === 'unknown' ? 'Unknown' : v.version;
+  if (!v.latest) return;
+  const num = s => (/^v?(\d+)\.(\d+)\.(\d+)/.exec(s) || []).slice(1).map(Number);
+  const [mine, latest] = [num(m ? m[1] : v.version), num(v.latest.tag)];
+  const behind = mine.length && latest.length && (latest[0] - mine[0] || latest[1] - mine[1] || latest[2] - mine[2]) > 0;
+  const el = document.getElementById('about-latest');
+  el.innerHTML = `Latest release: <a href="${escapeHtml(v.latest.url)}" target="_blank" rel="noopener">${escapeHtml(v.latest.tag)}</a>`
+    + (behind ? ' &middot; <span class="about-update">Update available</span>' : '');
+  el.hidden = false;
 }
 
 async function loadPhoneHints() {
@@ -2265,9 +2325,7 @@ function setMapTheme(theme) {
   document.documentElement.style.setProperty('--ink-indoor', ink.indoor);
   state.phones.forEach(p => refreshMarker(p));
   map.removeLayer(tileLayer);
-  tileLayer = L.tileLayer(TILE_URLS[theme], {
-    attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 19,
-  }).addTo(map);
+  tileLayer = L.tileLayer(TILE_URLS[theme], { attribution: CREDIT, maxZoom: 19 }).addTo(map);
   tileLayer.bringToBack();
   if (miniMap) {
     miniMap.remove(); miniMap = null;
@@ -2606,6 +2664,7 @@ document.addEventListener('visibilitychange', () => {
   }
   maybeShowCartoNotice();
   loadPhoneHints();  // not awaited: markers and the nav card pick it up when it lands
+  loadVersion();
   const p = new URLSearchParams(location.search);
   const urlName = (p.get('username') || '').trim();
   if (urlName && urlName !== state.username) { state.username = urlName; state.playerEmoji = ''; }

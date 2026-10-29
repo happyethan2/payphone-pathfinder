@@ -54,6 +54,8 @@ This command pulls the latest code and images, rebuilds the backend, and runs a 
 
 `main` changes only when a release is published, so `./deploy.sh` gives you the latest release. Unreleased work is on the `development` branch. Send pull requests to `development`.
 
+The About page (the info button in Settings) and `/api/health` show the version the server runs: `v2.1.0` for a release, or `v2.1.0-3-gdb9a587` for 3 commits after it. `deploy.sh` sets the version from git. An image built another way shows `unknown`. The About page also shows the latest release. The server checks GitHub for it at most every 6 hours.
+
 If the OSRM image has changed, the command asks to rebuild the routing data. Answer yes. If you answer no, OSRM crash-loops on startup. To rebuild the routing data at any time, run `./deploy.sh --reprocess-osrm`.
 
 ### CARTO basemap key

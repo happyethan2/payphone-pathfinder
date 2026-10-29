@@ -655,7 +655,7 @@ async def test_health_ok(client, mock_api):
 
     assert r.status_code == 200
     body = r.json()
-    assert body["status"] == "ok"
+    assert body["status"] == "ok" and body["version"] == main.APP_VERSION
     assert body["upstream"]["consecutive_failures"] == 0
     assert body["upstream"]["serving_stale"] is False
     assert body["upstream"]["last_success_age_s"] == 0
@@ -686,6 +686,29 @@ async def test_health_degraded_when_upstream_failing(client, mock_api):
     assert body["status"] == "degraded"
     assert body["upstream"]["consecutive_failures"] == 3
     assert body["upstream"]["serving_stale"] is True
+
+
+# ── /api/version ─────────────────────────────────────────────────
+
+RELEASE = {"tag_name": "v2.1.0", "html_url": "https://github.com/happyethan2/payphone-pathfinder/releases/tag/v2.1.0"}
+
+
+async def test_version_and_latest_release_cached(client, mock_api, monkeypatch):
+    monkeypatch.setattr(main, "APP_VERSION", "v2.1.0-3-gdb9a587")
+    gh = mock_api.get(main.LATEST_RELEASE_URL).mock(return_value=httpx.Response(200, json=RELEASE))
+    for _ in range(2):
+        r = await client.get("/api/version")
+        assert r.json() == {"version": "v2.1.0-3-gdb9a587", "latest": {"tag": "v2.1.0", "url": RELEASE["html_url"]}}
+    assert gh.call_count == 1  # GitHub asked once, then cached
+
+
+async def test_version_when_github_fails_or_lies(client, mock_api):
+    gh = mock_api.get(main.LATEST_RELEASE_URL).mock(return_value=httpx.Response(500))
+    r = await client.get("/api/version")
+    assert r.status_code == 200 and r.json() == {"version": main.APP_VERSION, "latest": None}
+    main._LATEST = None
+    gh.mock(return_value=httpx.Response(200, json={**RELEASE, "html_url": "javascript:alert(1)"}))
+    assert (await client.get("/api/version")).json()["latest"] is None
 
 
 # ── Phone hints ───────────────────────────────────────────────────

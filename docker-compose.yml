@@ -38,7 +38,10 @@ services:
     restart: unless-stopped
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        APP_VERSION: ${APP_VERSION:-unknown}   # set by deploy.sh from git describe
     pull_policy: build   # built locally from source; never pull from a registry
     ports:
       - "8000:8000"

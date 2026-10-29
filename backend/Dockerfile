@@ -5,6 +5,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py .
 # Phone hints (phone-access/pipeline.py export-app); data/hints.json must be committed
 COPY data/ ./data/
+# deploy.sh passes `git describe --tags`; last, so a new version rebuilds nothing above
+ARG APP_VERSION=unknown
+ENV APP_VERSION=$APP_VERSION
 # Certs are mounted at runtime via docker-compose volume (backend/certs/ -> /app/certs/).
 # If present, uvicorn serves HTTPS. If absent, plain HTTP (for reverse-proxy setups).
 CMD ["sh", "-c", \

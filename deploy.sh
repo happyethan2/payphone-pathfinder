@@ -118,6 +118,11 @@ if [ "$REPROCESS" = true ]; then
   done
 fi
 
+# --- Version shown on the About page and in /api/health ---
+APP_VERSION=$(git describe --tags --always 2>/dev/null || echo unknown)
+export APP_VERSION
+echo ">>> version $APP_VERSION"
+
 # --- Rebuild and restart ---
 echo ">>> docker compose up --build -d"
 docker compose up --build -d
