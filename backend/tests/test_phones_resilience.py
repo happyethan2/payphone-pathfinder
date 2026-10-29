@@ -157,3 +157,22 @@ async def test_cache_bust_respects_failure_cooldown(client, mock_api):
 
     assert r.status_code == 200 and r.json()["stale"] is True
     assert route.call_count == calls_after_failure
+
+
+class _JustBooted:
+    """main's clock on a machine that booted 5 s ago: time.monotonic() counts from boot."""
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    def monotonic(self):
+        return 5.0
+
+
+async def test_cache_bust_soon_after_boot(client, mock_api, monkeypatch):
+    # A fresh CI runner or server can still be inside the TTL measured from zero
+    monkeypatch.setattr(main, "time", _JustBooted())
+    route = mock_phones_ok(mock_api)
+    await client.get("/api/phones", params={"username": "GhostScout"})
+    await client.post("/api/phones/refresh")
+    await client.get("/api/phones", params={"username": "GhostScout"})
+    assert route.call_count == 2

@@ -123,7 +123,7 @@ def _http() -> httpx.AsyncClient:
 # cooldown stops every client poll from hammering the struggling upstream.
 # ---------------------------------------------------------------------------
 _PHONES_CACHE: dict | None = None
-_PHONES_CACHE_AT: float    = 0.0   # TTL marker (zeroed by the cache-bust endpoint)
+_PHONES_CACHE_AT: float    = 0.0   # TTL marker (-inf from the cache-bust endpoint)
 _PHONES_FETCHED_AT: float  = 0.0   # last successful fetch — for truthful data-age reporting
 _PHONES_CACHE_TTL: float   = 30.0  # seconds
 _PHONES_LOCK  = asyncio.Lock()
@@ -561,7 +561,7 @@ async def bust_phones_cache():
     game API while it is down.
     """
     global _PHONES_CACHE_AT
-    _PHONES_CACHE_AT = 0.0
+    _PHONES_CACHE_AT = float("-inf")  # not 0: monotonic() counts from boot, so a fresh machine is still inside the TTL
     return {"ok": True}
 
 
