@@ -52,6 +52,8 @@ The gear button opens **Settings**: highlight filters, map style, and navigation
 
 This command pulls the latest code and images, rebuilds the backend, and runs a health check. It stops if tracked files have local changes.
 
+`main` changes only when a release is published, so `./deploy.sh` gives you the latest release. Unreleased work is on the `dev` branch. Send pull requests to `dev`.
+
 If the OSRM image has changed, the command asks to rebuild the routing data. Answer yes. If you answer no, OSRM crash-loops on startup. To rebuild the routing data at any time, run `./deploy.sh --reprocess-osrm`.
 
 ### CARTO basemap key
