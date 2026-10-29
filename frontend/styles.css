@@ -46,12 +46,10 @@ button[aria-busy=true] .icon { mask: none; -webkit-mask: none; background: trans
 .about-line { font-size: 13px; line-height: 1.6; color: var(--muted); }
 .about-line a { color: var(--accent); }
 .about-update { color: var(--success); font-weight: 600; }
-.leaflet-container .leaflet-control-attribution { padding: 3px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--muted); font-size: 12px; box-shadow: 0 3px 12px rgba(0,0,0,.3); }
-.leaflet-container .leaflet-control-attribution a { color: var(--accent); }
-.leaflet-container .leaflet-right .leaflet-control-attribution { margin: 0 10px 10px 0; }  /* desktop; phones place it by the tool pill */
-.leaflet-container .leaflet-control-attribution.folded { width: 36px; height: 36px; padding: 0; border-radius: 18px; font-size: 0; cursor: pointer; background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.3); display: grid; place-items: center; }
-.leaflet-control-attribution.folded > * { display: none; }
-.leaflet-control-attribution.folded::before { content: ""; width: 18px; height: 18px; background: #cbd0d4; mask: var(--icon) center / contain no-repeat; -webkit-mask: var(--icon) center / contain no-repeat; }
+/* Map credit: small and quiet, but always on the map */
+.leaflet-container .leaflet-control-attribution { padding: 2px 7px; border-radius: 6px; background: rgba(16,17,18,.7); color: var(--muted); font-size: 11px; line-height: 1.5; }
+.leaflet-container .leaflet-control-attribution a { color: inherit; }
+.leaflet-container .leaflet-right .leaflet-control-attribution { margin: 0 10px 10px 0; }
 .legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px 10px; }
 .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 1.4; color: var(--muted); }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
@@ -213,11 +211,10 @@ body.picking #tool-dock { display: none; }
 }
 @media (max-width: 639px) {
   body.sheet-full #tool-dock { display: none; }
-  /* The map credit (a CARTO free-tier condition) shares the tool pill's row: folded, a button at its
-     right end; in full, just above it */
-  .leaflet-bottom { bottom: calc(var(--sheet-h, 0px) + 12px); }
-  .leaflet-container .leaflet-right .leaflet-control-attribution { margin: 0 16px 52px 0; }
-  .leaflet-container .leaflet-right .leaflet-control-attribution.folded { margin: 0 16px 6px 0; }  /* centred on the 48px pill */
+  /* Map credit top-left, level with the top of the button column; below the banner while picking a point */
+  .leaflet-top { top: env(safe-area-inset-top, 0px); }
+  body.picking .leaflet-top { top: calc(max(14px, env(safe-area-inset-top)) + 36px); }
+  .leaflet-container .leaflet-left .leaflet-control-attribution { margin: 16px 0 0 16px; }
   .leaflet-control-zoom { display: none; }  /* pinch to zoom on phones */
 }
 @media (min-width: 640px) {
@@ -332,6 +329,6 @@ body.picking #tool-dock { display: none; }
 .callout .icon { width: 16px; height: 16px; flex-basis: 16px; margin-top: 1px; color: var(--accent); }
 #locked-list { margin-top: 14px; }
 #locked-list .lock-row + .sec-title { margin-top: 12px; }
-#review-back { position: fixed; z-index: 1100; left: 50%; translate: -50% 0; top: max(16px, env(safe-area-inset-top)); color: var(--text); }
+#review-back { color: var(--text); }  /* in the tool dock, above the tool pill */
 .lock-row .access-line { margin: 0; }
 .lock-row input { margin-top: 2px; }

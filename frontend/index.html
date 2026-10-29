@@ -34,6 +34,7 @@
 
 <!-- ── Selection tools: picking phones happens on the map ──────── -->
 <div id="tool-dock">
+  <button id="review-back" class="chip" hidden onclick="this.hidden = true; findPlannedRoute()">Back to Review</button>
   <div id="lasso-chips" class="chips" hidden>
     <button class="chip" data-filter="lassoOnlyNew" aria-pressed="false" title="Lasso only picks phones you have never captured"><span class="icon icon-check" aria-hidden="true"></span>Only New</button>
     <button class="chip" data-filter="lassoExcludeOwned" aria-pressed="false" title="Lasso skips phones you already own"><span class="icon icon-check" aria-hidden="true"></span>Skip Owned</button>
@@ -206,7 +207,6 @@
 <div id="pick-banner" hidden></div>
 <div id="pick-actions" hidden><button onclick="pickCancel()">Cancel</button></div>
 
-<button id="review-back" class="chip" hidden onclick="this.hidden = true; findPlannedRoute()">Back to Review</button>
 <div id="toast" role="status" hidden><span id="toast-msg"></span><button id="toast-undo" hidden>Undo</button></div>
 
 <!-- ── CARTO basemap key notice (host-facing, dismissible) ─────── -->
@@ -445,13 +445,22 @@ map.attributionControl.setPrefix(false);  // Leaflet is credited on the About pa
 
 // Zoom buttons bottom-right (desktop only — hidden on phones, which pinch);
 // bottom-left belongs to the selection dock
-L.control.zoom({ position: 'bottomright' }).addTo(map);
+const zoomControl = L.control.zoom({ position: 'bottomright' }).addTo(map);
 
 // Layer group for phone markers — no clustering, all dots always visible
 const markerLayer = L.layerGroup().addTo(map);
 
 // Single breakpoint: bottom sheet below, side panel at and above
 const desktopPanel = window.matchMedia('(min-width: 640px)');
+
+// The map credit (OpenStreetMap and CARTO require it on the map): top-left on phones, where nothing
+// else sits, and bottom-right on desktop
+const placeCredit = () => {
+  map.attributionControl.setPosition(desktopPanel.matches ? 'bottomright' : 'topleft');
+  zoomControl.setPosition('bottomright');  // re-added after the credit, so the buttons stay above it
+};
+placeCredit();
+desktopPanel.addEventListener('change', placeCredit);
 
 // Mini-map (toggleable) — shares the same tile layer. Bottom-right on desktop;
 // top-left on phones, where the bottom edge belongs to the sheet and dock.
@@ -473,33 +482,6 @@ function toggleMiniMap() {
 
 const mapEl = map.getContainer();
 
-// The map credit shows in full at startup, then folds to an info button after 5 s or your first touch
-// of the map (the OSMF attribution guidelines allow this; the About page keeps the full credits).
-// The button unfolds it again.
-{
-  const credit = map.attributionControl.getContainer();
-  credit.classList.add('icon-info');  // only for its --icon, drawn by the folded style
-  let timer;
-  const folded = () => credit.classList.contains('folded');
-  const fold = () => {
-    clearTimeout(timer);
-    credit.classList.add('folded');
-    credit.tabIndex = 0;
-    credit.setAttribute('role', 'button');
-    credit.setAttribute('aria-label', 'Map credits');
-  };
-  const unfold = () => {
-    credit.classList.remove('folded');
-    credit.removeAttribute('tabindex'); credit.removeAttribute('role'); credit.removeAttribute('aria-label');
-    timer = setTimeout(fold, 5000);
-  };
-  credit.addEventListener('click', e => { if (folded()) { e.preventDefault(); unfold(); } });
-  credit.addEventListener('keydown', e => { if (folded() && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); unfold(); } });
-  mapEl.addEventListener('pointerdown', e => { if (!credit.contains(e.target)) fold(); });
-  mapEl.addEventListener('wheel', fold, { passive: true });
-  unfold();
-}
-
 // ── Sheet (plan / navigate) ───────────────────────────────────────
 const sheet = document.getElementById('sheet');
 let sheetFull = false;
@@ -512,7 +494,7 @@ function setSheetFull(full) {
   document.getElementById('grabber').setAttribute('aria-label', full ? 'Collapse plan' : 'Expand plan');
 }
 function toggleSheet() { if (!inNav()) setSheetFull(!sheetFull); }
-// Floating controls (dock, toast, Leaflet attribution) sit just above the sheet
+// Floating controls (the dock) sit just above the sheet
 function syncSheetH() {
   const h = !desktopPanel.matches && !document.body.classList.contains('picking') ? sheet.offsetHeight : 0;
   document.documentElement.style.setProperty('--sheet-h', `${h}px`);
