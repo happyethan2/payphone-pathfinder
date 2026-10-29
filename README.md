@@ -34,11 +34,11 @@ Open **http://localhost:8000**. Do not delete the `.osm.pbf` files. `deploy.sh` 
 2. Select phones. Tap a phone, or use **Lasso** to draw around a group.
 3. Set a start point. The end point is optional. Without an end point, the route finishes at the last phone.
 4. Tap **Find Optimal Route**.
-5. Follow the route. **Open in Google Maps** opens the current leg. When the game shows that you hold the current phone, the app marks the stop as done and moves to the next stop. **Skip** moves to the next stop without tagging.
+5. Follow the route. **Open in Google Maps** opens the current leg. When you tag the current phone, the app marks the stop as done and moves to the next stop, usually within 10 seconds. **Skip** moves to the next stop without tagging. If a skipped phone turns out to be tagged, its stop is marked as done.
 
 **Orienteering** mode chooses the phones for you. It finds the most phones you can tag between the start and the end before the **Arrive By** time. It needs your in-game name and an end point.
 
-The gear button opens **Settings**: highlight filters, map style, and navigation options. The **ⓘ** button in Settings opens the map legend.
+The gear button opens **Settings**: highlight filters, map style, and navigation options. The **ⓘ** button in Settings opens **About**: the map legend, the version and the credits.
 
 ---
 
@@ -124,6 +124,10 @@ All times are the phone's local time. The app compares them with the device's cl
 The start and end fields search for addresses with [Photon](https://github.com/komoot/photon), through this app's backend (`/api/geocode`). By default, the backend uses komoot's free public server at photon.komoot.io. That server is for light use. The backend caches each search for one day and limits results to Australia.
 
 An instance with many users should run its own Photon server and set `PHOTON_URL` in `.env`, for example `PHOTON_URL=http://photon:2322`. GraphHopper publishes a weekly Photon database for Australia and Oceania (about 2 GB). See the Photon documentation for setup. If address search is unavailable, **Choose on Map** still works.
+
+### How the app sees your captures
+
+The game's phone feed shows every capture about 5 minutes late. During a route, the app also asks the game about your current stop, and about the next stop when you are near it. It asks every 10 seconds when you are within 100 m of a stop, for 2 minutes after you leave one, and when your location is unknown or inaccurate. Otherwise it asks every 40 seconds. The app only checks whether you hold the phone. It does not show who else holds it before the feed does.
 
 ### Share links
 

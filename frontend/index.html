@@ -1831,6 +1831,7 @@ function clearRoute() {
   const stopIds = new Set(Object.keys(state.waypointMarkersById).map(Number));
   state.routeLayers = []; state.decorators = []; state.waypointMarkers = [];
   state.waypointMarkersById = {}; state.nodeStates = {};
+  recentSkips.clear();
   state.phones.forEach(p => { if (stopIds.has(p.id)) refreshMarker(p); });  // bring the dots back
   state.routeProgress = 0; state.routeOrderedIds = [];
   state.lastRoute = null;
@@ -2063,6 +2064,7 @@ function tagCurrentLeg(action) {
   if (state.routeProgress >= orderedIds.length) return;
 
   state.nodeStates[orderedIds[state.routeProgress]] = action;
+  if (action === 'skipped') { recentSkips.set(orderedIds[state.routeProgress], Date.now()); lastNearAt = Date.now(); }
 
   if (navigator.vibrate) navigator.vibrate(10);
   state.routeProgress++;
@@ -2119,6 +2121,7 @@ const locIcon = L.divIcon({ html: '<div class="loc-dot"></div>',
 
 let locMarker = null, locCircle = null, lastLatLng = null;
 let lastFixAt = 0;                 // when lastLatLng arrived
+let lastAccuracy = Infinity;       // metres, of lastLatLng
 let gpsBlocked = false;            // location permission denied
 let _defaultStartPending = true;   // offer My Location as the start on the first fix
 
@@ -2132,6 +2135,8 @@ function onPosition(pos) {
   const { latitude: lat, longitude: lon, accuracy } = pos.coords;
   lastLatLng = [lat, lon];
   lastFixAt  = Date.now();
+  lastAccuracy = accuracy;
+  captureCheckOnFix();
   if (gpsBlocked) { gpsBlocked = false; renderPlan(); }
   if (state.start && state.start.live) {
     state.start.lat = lat; state.start.lon = lon;
@@ -2540,20 +2545,17 @@ async function refreshPhones() {
     if (username !== state.username) return;  // name changed mid-flight; loadPhones has it
     if ((data.emoji || '') !== state.playerEmoji) { state.playerEmoji = data.emoji || ''; renderAvatar(); saveSession(); }
     const newMap = Object.fromEntries(data.phones.map(p => [p.id, p]));
-    let changed  = 0;
+    let changed  = 0, upgraded = false;
     for (const phone of state.phones) {
       const updated = newMap[phone.id];
       if (!updated) continue;
+      // A capture the check confirmed stays yours until the feed (about 5 minutes behind) agrees
+      if (confirmedMine.has(phone.id)) {
+        if (updated.status === 'mine' || Date.now() - confirmedMine.get(phone.id) > CONFIRMED_HOLD_MS) confirmedMine.delete(phone.id);
+        else continue;
+      }
+      if (updated.status === 'mine' && state.nodeStates[phone.id] === 'skipped') { state.nodeStates[phone.id] = 'tagged'; upgraded = true; }
       if (updated.status !== phone.status || updated.holder_name !== phone.holder_name) {
-        // Optimistic claiming: if the current route target transitions hostile→uncaptured,
-        // treat it as 'mine' immediately so the marker draws green without a grey flicker.
-        const isCurrentTarget =
-          state.routeOrderedIds.length &&
-          state.routeProgress < state.routeOrderedIds.length &&
-          phone.id === state.routeOrderedIds[state.routeProgress];
-        if (isCurrentTarget && phone.status === 'hostile' && updated.status === 'uncaptured') {
-          updated.status = 'mine';
-        }
         phone.status      = updated.status;
         phone.holder_name = updated.holder_name;
         // If new-phones filter is active and this phone just became mine, remove it
@@ -2566,26 +2568,9 @@ async function refreshPhones() {
         changed++;
       }
     }
-    // Auto-advance route progress when the current target stop is tagged as ours
-    let _advanced = false;
-    while (
-      state.routeOrderedIds.length &&
-      state.routeProgress < state.routeOrderedIds.length &&
-      !state.nodeStates[state.routeOrderedIds[state.routeProgress]]
-    ) {
-      const targetId    = state.routeOrderedIds[state.routeProgress];
-      const targetPhone = state.phones.find(p => p.id === targetId);
-      if (!targetPhone || targetPhone.status !== 'mine') break;
-      // Mark waypoint as tagged and advance (renderLeg redraws its icon)
-      state.nodeStates[targetId] = 'tagged';
-      state.routeProgress++;
-      _advanced = true;
-      if (navigator.vibrate) navigator.vibrate([15, 40, 15]);
-      renderLeg();
+    if (!advanceTagged() && inNav()) {
+      if (upgraded) renderLeg(); else renderAccessLine();  // keeps "Probably Locked" in step with the clock
     }
-    // Re-evaluate refresh rate: may switch to idle once all stops are completed
-    if (_advanced) startBackgroundRefresh();
-    else if (inNav()) renderAccessLine();  // keeps "Probably Locked" in step with the clock
 
     const healthColor = noteRefreshResult(data);
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
@@ -2600,6 +2585,93 @@ async function refreshPhones() {
   }
 }
 
+// Tick and pass every stop, from the current one on, that you now hold. -> whether it advanced
+function advanceTagged() {
+  let advanced = false;
+  while (state.routeProgress < state.routeOrderedIds.length && !state.nodeStates[state.routeOrderedIds[state.routeProgress]]) {
+    const targetId = state.routeOrderedIds[state.routeProgress];
+    if (state.phones.find(p => p.id === targetId)?.status !== 'mine') break;
+    state.nodeStates[targetId] = 'tagged';
+    state.routeProgress++;
+    advanced = true;
+  }
+  if (advanced) {
+    if (navigator.vibrate) navigator.vibrate([15, 40, 15]);
+    renderLeg();
+    startBackgroundRefresh();  // may switch to idle polling once every stop is done
+  }
+  return advanced;
+}
+
+// ── Capture check ─────────────────────────────────────────────────
+// The game's phone feed shows a capture about 5 minutes late, on purpose. While navigating,
+// ask the server whether you now hold the current stop (plus the next one, or a stop skipped in
+// the last 2 minutes, when you could be at it): every 10 s near a stop, for 2 minutes after
+// leaving one, or while location is poor; every 40 s otherwise.
+const CHECK_NEAR_M = 100, CHECK_LINGER_MS = 120_000, CHECK_FAST_MS = 10_000, CHECK_SLOW_MS = 40_000;
+const CONFIRMED_HOLD_MS = 8 * 60_000;  // longer than the feed's delay
+const recentSkips   = new Map();       // phone id -> skipped at
+const confirmedMine = new Map();       // phone id -> confirmed at
+let checkTimer = null, checkDueAt = 0, lastNearAt = 0;
+
+function poorLocation() { return !lastLatLng || Date.now() - lastFixAt > 30_000 || lastAccuracy > 100; }
+// Within 100 m once the fix's own error is allowed for
+function nearPhone(id) {
+  const p = state.phones.find(x => x.id === id);
+  return !!(p && lastLatLng) && map.distance(lastLatLng, [p.lat, p.lon]) - lastAccuracy <= CHECK_NEAR_M;
+}
+function captureCheckIds() {
+  const ids = state.routeOrderedIds, i = state.routeProgress, now = Date.now(), out = [];
+  if (i < ids.length) out.push(ids[i]);
+  if (i + 1 < ids.length && (poorLocation() || nearPhone(ids[i + 1]))) out.push(ids[i + 1]);
+  for (const [id, at] of recentSkips) {
+    if (now - at > CHECK_LINGER_MS || state.nodeStates[id] !== 'skipped') recentSkips.delete(id);
+    else out.push(id);
+  }
+  return [...new Set(out)].filter(id => state.phones.find(p => p.id === id)?.status !== 'mine').slice(0, 4);
+}
+function captureCheckDelay() {
+  if (captureCheckIds().some(nearPhone)) lastNearAt = Date.now();
+  return poorLocation() || Date.now() - lastNearAt < CHECK_LINGER_MS ? CHECK_FAST_MS : CHECK_SLOW_MS;
+}
+function scheduleCaptureCheck(delay) {
+  clearTimeout(checkTimer); checkTimer = null;
+  if (!inNav() || document.hidden || !state.username || !captureCheckIds().length) return;
+  delay ??= captureCheckDelay();
+  checkDueAt = Date.now() + delay;
+  checkTimer = setTimeout(checkCaptures, delay);
+}
+// Walking up to a stop: don't wait out a 40 s gap
+function captureCheckOnFix() {
+  if (checkTimer && checkDueAt - Date.now() > CHECK_FAST_MS && captureCheckIds().some(nearPhone)) {
+    lastNearAt = Date.now();
+    scheduleCaptureCheck(CHECK_FAST_MS);
+  }
+}
+async function checkCaptures() {
+  const ids = captureCheckIds(), username = state.username;
+  if (ids.length) {
+    try {
+      const res = await fetch(`/api/capture-check?${new URLSearchParams({ username, ids: ids.join(',') })}`);
+      if (res.ok && username === state.username) {
+        const { mine } = await res.json();
+        let upgraded = false;
+        for (const id of mine) {
+          const phone = state.phones.find(p => p.id === id);
+          if (!phone) continue;
+          confirmedMine.set(id, Date.now());
+          phone.status = 'mine';
+          refreshMarker(phone);
+          state.pastCaptureIds?.add(id);
+          if (state.nodeStates[id] === 'skipped') { state.nodeStates[id] = 'tagged'; upgraded = true; }
+        }
+        if (!advanceTagged() && upgraded) renderLeg();
+      }
+    } catch (_) {}  // no signal: the next check tries again
+  }
+  scheduleCaptureCheck();
+}
+
 async function manualRefreshPhones() {
   // Bust the server-side cache so we get a live upstream fetch, then refresh.
   try { await fetch('/api/phones/refresh', { method: 'POST' }); } catch (_) {}
@@ -2611,10 +2683,12 @@ function startBackgroundRefresh() {
   const interval = (state.routeOrderedIds.length && state.routeProgress < state.routeOrderedIds.length)
     ? REFRESH_INTERVAL_ACTIVE_MS : REFRESH_INTERVAL_IDLE_MS;
   refreshTimer = setInterval(refreshPhones, interval);
+  scheduleCaptureCheck();
 }
 
 function stopBackgroundRefresh() {
   if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+  clearTimeout(checkTimer); checkTimer = null;
 }
 
 // Pause polling while the tab is hidden — no point refreshing a map nobody is
@@ -2628,6 +2702,7 @@ document.addEventListener('visibilitychange', () => {
     if (state.phones.length) {
       startBackgroundRefresh();
       refreshPhones();
+      scheduleCaptureCheck(0);  // back from the game's site or the dialler: check straight away
     }
   }
 });

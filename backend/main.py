@@ -155,6 +155,17 @@ _CAPTURES_LOCK = asyncio.Lock()
 _CAPTURES_FAIL_UNTIL: float = 0.0
 
 # ---------------------------------------------------------------------------
+# Capture check. The game's phone feed shows every capture about 5 minutes late (on
+# purpose), but its single-phone endpoint is current. A navigating client asks whether
+# the player now holds its current stop or two; only that yes/no leaves this server.
+# One answer per phone serves every client for the fastest client rate (10 s).
+# ---------------------------------------------------------------------------
+_HOLDER_CACHE: dict[int, tuple[str | None, float]] = {}  # phone id -> (holder player id, fetched_at)
+_HOLDER_CACHE_TTL: float = 10.0
+_HOLDER_CACHE_MAX: int   = 500
+_CAPTURE_CHECK_MAX: int  = 4      # current stop, the next one, recent skips
+
+# ---------------------------------------------------------------------------
 # Geocode cache — place names barely change, and a shared instance sees the same
 # few searches over and over; caching keeps us polite to the public Photon.
 # ---------------------------------------------------------------------------
@@ -175,8 +186,9 @@ def reset_caches() -> None:
     global _PHONES_CACHE, _PHONES_CACHE_AT, _PHONES_FETCHED_AT, _PHONES_FAIL_UNTIL, _PHONES_FAILS
     global _PHOTO_CACHE, _PHOTO_CACHE_AT, _PHOTO_FAIL_UNTIL
     global _CAPTURES_CACHE, _CAPTURES_FAIL_UNTIL
-    global _GEO_CACHE, _HINTS, _LATEST
+    global _GEO_CACHE, _HINTS, _LATEST, _HOLDER_CACHE
     _HTTP              = None
+    _HOLDER_CACHE      = {}
     _LATEST            = None
     _PHONES_CACHE      = None
     _PHONES_CACHE_AT   = 0.0
@@ -638,6 +650,48 @@ async def _fetch_past_capture_ids(username: str, cell: str) -> set[int]:
             del _CAPTURES_CACHE[oldest]
         _CAPTURES_CACHE[key] = (ids, time.monotonic())
         return ids
+
+
+async def _phone_holder(pid: int) -> str | None:
+    """The player id holding a phone right now, from the game's single-phone endpoint (None: unheld)."""
+    hit = _HOLDER_CACHE.get(pid)
+    if hit is not None and time.monotonic() - hit[1] < _HOLDER_CACHE_TTL:
+        return hit[0]
+    resp = await _http().get(f"{PAYPHONE_API_BASE}/payphone/{pid}", timeout=_UPSTREAM_TIMEOUT)
+    resp.raise_for_status()
+    d = resp.json()
+    if not isinstance(d, dict):
+        raise ValueError("unexpected payload from game API")
+    by = d.get("captured_by")
+    holder = str(by) if by not in (None, 0, "0", "") else None
+    _HOLDER_CACHE.pop(pid, None)  # re-insert so dict order stays oldest-first
+    if len(_HOLDER_CACHE) >= _HOLDER_CACHE_MAX:
+        del _HOLDER_CACHE[next(iter(_HOLDER_CACHE))]
+    _HOLDER_CACHE[pid] = (holder, time.monotonic())
+    return holder
+
+
+@app.get("/api/capture-check")
+async def capture_check(
+    username: str = Query(...),
+    ids:      str = Query(..., description="Comma-separated phone ids, at most 4"),
+    cell:     str = Query(default=""),
+):
+    """Which of these phones does the player hold right now? For a navigating client's current stops,
+    so a capture ticks within seconds instead of after the feed's 5-minute delay. A phone the game
+    can't answer for is left out; the client asks again on its next check."""
+    try:
+        wanted = list(dict.fromkeys(int(i) for i in ids.split(",") if i.strip()))
+    except ValueError:
+        raise HTTPException(400, "ids must be comma-separated phone ids")
+    if not 0 < len(wanted) <= _CAPTURE_CHECK_MAX:
+        raise HTTPException(400, f"Give 1 to {_CAPTURE_CHECK_MAX} phone ids")
+    data, _, _ = await _get_phones_cached()
+    me, _, _ = _resolve_player(data, username, cell or None)
+    if not me:
+        return {"mine": []}
+    holders = await asyncio.gather(*(_phone_holder(i) for i in wanted), return_exceptions=True)
+    return {"mine": [i for i, h in zip(wanted, holders) if h == me]}
 
 
 @app.get("/api/past-captures")

@@ -159,6 +159,44 @@ async def test_cache_bust_respects_failure_cooldown(client, mock_api):
     assert route.call_count == calls_after_failure
 
 
+def _mock_holder(router, pid, captured_by):
+    return router.get(f"{main.PAYPHONE_API_BASE}/payphone/{pid}").mock(
+        return_value=httpx.Response(200, json={"id": pid, "captured_by": captured_by, "owner_name": "x"}))
+
+
+async def test_capture_check_reports_only_my_phones(client, mock_api):
+    mock_phones_ok(mock_api)
+    _mock_holder(mock_api, 1, 7)    # GhostScout (player 7) just took it; the feed still says unheld
+    _mock_holder(mock_api, 4, 9)    # a rival holds it
+    _mock_holder(mock_api, 6, None)
+    r = await client.get("/api/capture-check", params={"username": "ghostscout", "ids": "1,4,6"})
+    assert r.status_code == 200 and r.json() == {"mine": [1]}
+
+
+async def test_capture_check_shares_one_answer_per_phone(client, mock_api):
+    mock_phones_ok(mock_api)
+    one = _mock_holder(mock_api, 1, 7)
+    for name in ("GhostScout", "Mate"):
+        await client.get("/api/capture-check", params={"username": name, "ids": "1"})
+    assert one.call_count == 1  # cached for the 10 s the fastest client waits anyway
+
+
+async def test_capture_check_survives_a_failing_phone(client, mock_api):
+    mock_phones_ok(mock_api)
+    _mock_holder(mock_api, 1, 7)
+    mock_api.get(f"{main.PAYPHONE_API_BASE}/payphone/4").mock(return_value=httpx.Response(500))
+    r = await client.get("/api/capture-check", params={"username": "GhostScout", "ids": "4,1"})
+    assert r.status_code == 200 and r.json() == {"mine": [1]}
+
+
+async def test_capture_check_rejects_bad_input_and_unknown_players(client, mock_api):
+    mock_phones_ok(mock_api)
+    for ids in ("", "1,x", "1,2,3,4,6"):
+        assert (await client.get("/api/capture-check", params={"username": "GhostScout", "ids": ids})).status_code == 400
+    r = await client.get("/api/capture-check", params={"username": "Nobody", "ids": "1"})
+    assert r.json() == {"mine": []}
+
+
 class _JustBooted:
     """main's clock on a machine that booted 5 s ago: time.monotonic() counts from boot."""
     def __getattr__(self, name):
