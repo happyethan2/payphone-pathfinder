@@ -134,12 +134,62 @@ async def test_cache_bust_forces_refetch(client, mock_api):
     route = mock_phones_ok(mock_api)
     await client.get("/api/phones", params={"username": "GhostScout"})
     assert route.call_count == 1
+    main._PHONES_FETCHED_AT -= main._PHONES_REFRESH_MIN  # the snapshot is 10 s old, still inside the TTL
 
     r = await client.post("/api/phones/refresh")
     assert r.status_code == 200
 
     await client.get("/api/phones", params={"username": "GhostScout"})
     assert route.call_count == 2
+
+
+async def test_cache_bust_at_most_one_pull_per_10s(client, mock_api):
+    route = mock_phones_ok(mock_api)
+    await client.get("/api/phones", params={"username": "GhostScout"})
+    # Everyone tapping refresh on a fresh snapshot: no upstream pull at all
+    for _ in range(3):
+        await client.post("/api/phones/refresh")
+        await client.get("/api/phones", params={"username": "GhostScout"})
+    assert route.call_count == 1
+    # Ten seconds on, one tap pulls once; the next tap is inside the limit again
+    main._PHONES_FETCHED_AT -= main._PHONES_REFRESH_MIN
+    for _ in range(2):
+        await client.post("/api/phones/refresh")
+        await client.get("/api/phones", params={"username": "GhostScout"})
+    assert route.call_count == 2
+
+
+async def test_phones_etag_304_until_a_new_snapshot(client, mock_api):
+    mock_phones_ok(mock_api)
+    params = {"username": "GhostScout"}
+    r1 = await client.get("/api/phones", params=params)
+    etag = r1.headers["etag"]
+    assert etag.startswith('W/"') and r1.headers["cache-control"] == "no-cache"
+    assert abs(r1.json()["fetched_at"] - time.time()) < 5
+
+    r2 = await client.get("/api/phones", params=params, headers={"If-None-Match": etag})
+    assert r2.status_code == 304 and r2.content == b"" and r2.headers["etag"] == etag
+
+    _expire_phones_cache()
+    main._PHONES_FETCHED_WALL -= 100  # time.time() could repeat within the clock's resolution
+    r3 = await client.get("/api/phones", params=params, headers={"If-None-Match": etag})
+    assert r3.status_code == 200 and r3.headers["etag"] != etag and r3.json()["phones"]
+
+
+async def test_phones_etag_changes_when_served_stale(client, mock_api):
+    route = mock_phones_ok(mock_api)
+    etag = (await client.get("/api/phones", params={"username": "GhostScout"})).headers["etag"]
+    _expire_phones_cache()
+    route.mock(return_value=httpx.Response(500))
+    r = await client.get("/api/phones", params={"username": "GhostScout"}, headers={"If-None-Match": etag})
+    assert r.status_code == 200 and r.json()["stale"] is True  # same snapshot, but the client must learn it is stale
+
+
+async def test_phones_gzipped(client, mock_api):
+    big = {**SAMPLE_PHONES, "payphones": [[i, 138.6, -34.9, 0, "active"] for i in range(1, 500)]}
+    mock_phones_ok(mock_api, big)
+    r = await client.get("/api/phones", params={"username": "GhostScout"}, headers={"Accept-Encoding": "gzip"})
+    assert r.headers["content-encoding"] == "gzip" and len(r.json()["phones"]) == 499
 
 
 async def test_cache_bust_respects_failure_cooldown(client, mock_api):
@@ -198,19 +248,23 @@ async def test_capture_check_rejects_bad_input_and_unknown_players(client, mock_
 
 
 class _JustBooted:
-    """main's clock on a machine that booted 5 s ago: time.monotonic() counts from boot."""
+    """main's clock on a machine that booted a few seconds ago: time.monotonic() counts from boot."""
+    now = 5.0
+
     def __getattr__(self, name):
         return getattr(time, name)
 
     def monotonic(self):
-        return 5.0
+        return self.now
 
 
 async def test_cache_bust_soon_after_boot(client, mock_api, monkeypatch):
     # A fresh CI runner or server can still be inside the TTL measured from zero
-    monkeypatch.setattr(main, "time", _JustBooted())
+    clock = _JustBooted()
+    monkeypatch.setattr(main, "time", clock)
     route = mock_phones_ok(mock_api)
     await client.get("/api/phones", params={"username": "GhostScout"})
+    clock.now = 16.0  # past the refresh limit, still inside the TTL counted from zero
     await client.post("/api/phones/refresh")
     await client.get("/api/phones", params={"username": "GhostScout"})
     assert route.call_count == 2

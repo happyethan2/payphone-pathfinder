@@ -30,15 +30,17 @@
     </svg>
   </button>
   <div id="loc-badge">no GPS</div>
+  <div id="offline-badge" role="status" hidden>Offline</div>
 </div>
 
 <!-- ── Selection tools: picking phones happens on the map ──────── -->
 <div id="tool-dock">
   <button id="review-back" class="chip" hidden onclick="this.hidden = true; findPlannedRoute()">Back to Review</button>
-  <div id="lasso-chips" class="chips" hidden>
-    <button class="chip" data-filter="lassoOnlyNew" aria-pressed="false" title="Lasso only picks phones you have never captured"><span class="icon icon-check" aria-hidden="true"></span>Only New</button>
-    <button class="chip" data-filter="lassoExcludeOwned" aria-pressed="false" title="Lasso skips phones you already own"><span class="icon icon-check" aria-hidden="true"></span>Skip Owned</button>
-    <button class="chip" data-filter="lassoExcludeCellmates" aria-pressed="false" title="Lasso skips phones held by your cellmates"><span class="icon icon-check" aria-hidden="true"></span>Skip Cellmates</button>
+  <div id="lasso-chips" class="chips" role="group" aria-labelledby="lasso-skip" hidden>
+    <span class="chips-label" id="lasso-skip">Skip:</span>
+    <button class="chip" data-filter="lassoOnlyNew" aria-pressed="false" title="Lasso skips every phone you have ever captured"><span class="icon icon-check" aria-hidden="true"></span>Visited</button>
+    <button class="chip" data-filter="lassoExcludeOwned" aria-pressed="false" title="Lasso skips phones you hold right now"><span class="icon icon-check" aria-hidden="true"></span>Mine</button>
+    <button class="chip" data-filter="lassoExcludeCellmates" aria-pressed="false" title="Lasso skips phones held by your cellmates"><span class="icon icon-check" aria-hidden="true"></span>Cellmates</button>
   </div>
   <div class="segmented" role="group" aria-label="Map selection tools">
     <button id="dock-clear" onclick="clearSelection()" aria-label="Clear selected phones" hidden><span class="icon icon-close" aria-hidden="true"></span><span class="badge" id="sel-badge"></span></button>
@@ -119,16 +121,17 @@
 <div class="popover" id="pop-avatar" role="dialog" aria-modal="true" aria-labelledby="pop-avatar-h" hidden>
   <div class="popover-head"><h2 id="pop-avatar-h">You</h2><button class="text-btn" onclick="closePopover()">Done</button></div>
   <div class="field">
-    <div class="sec-title">Payphone Tag Name</div>
+    <div class="sec-title">Agent Name</div>
     <div class="name-row">
-      <input type="text" id="name-input" placeholder="Your in-game name" aria-label="Payphone Tag name" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">
+      <input type="text" id="name-input" placeholder="Your agent name" aria-label="Agent name" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">
       <button onclick="saveName(document.getElementById('name-input').value)">Save</button>
     </div>
     <div class="status-line"><span id="refresh-dot" class="status-dot" hidden></span><span id="load-status"></span></div>
-    <div class="note">Your name colours phones by who holds them. Without it, phones load uncoloured.</div>
   </div>
   <div class="field">
     <button style="width:100%" onclick="reloadPhones()">Reload Phones</button>
+    <button id="save-map-btn" onclick="saveRouteMap()">Save Route Map Offline</button>
+    <div class="note" id="save-map-note"></div>
   </div>
 </div>
 
@@ -150,8 +153,13 @@
     <label class="switch-row"><span class="label"><span class="icon icon-map" aria-hidden="true"></span>Mini-Map</span><input type="checkbox" role="switch" id="minimap"></label>
   </div>
   <div class="field">
-    <div class="sec-title">Navigation</div>
-    <label class="switch-row"><span class="label"><span class="icon icon-route" aria-hidden="true"></span>Highlight Current Leg</span><input type="checkbox" role="switch" id="legfocus"></label>
+    <div class="sec-title">Live Navigation</div>
+    <label class="switch-row"><span class="label"><span class="icon icon-route" aria-hidden="true"></span>Highlight</span>
+      <select class="row-select" id="highlight">
+        <option value="all">Everything</option>
+        <option value="leg">Current Leg</option>
+        <option value="phone">Current Phone</option>
+      </select></label>
     <label class="switch-row"><span class="label"><span class="icon icon-compass" aria-hidden="true"></span>Auto-Rotate Map</span><input type="checkbox" role="switch" id="autorotate" checked></label>
     <div class="note" id="autorotate-note" hidden></div>
   </div>
@@ -233,8 +241,8 @@
 <div id="onboard" role="dialog" aria-modal="true" aria-labelledby="onboard-h" hidden>
   <div class="card">
     <h1 id="onboard-h">Welcome to Pathfinder</h1>
-    <p>Enter your Payphone Tag name to colour phones by who holds them. You can add or change it later from the button in the top corner.</p>
-    <input type="text" id="onboard-name" placeholder="Your in-game name" aria-label="Payphone Tag name" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go">
+    <p>Enter your agent name to colour phones by who holds them. You can add or change it later from the button in the top corner.</p>
+    <input type="text" id="onboard-name" placeholder="Your agent name" aria-label="Agent name" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go">
     <button class="go" onclick="finishOnboarding(document.getElementById('onboard-name').value)">Continue</button>
     <button class="text-btn" onclick="finishOnboarding('')">Browse Without a Name</button>
   </div>
@@ -253,7 +261,7 @@ const state = {
   phones:          [],
   markers:         {},
   selectedIds:     new Set(),
-  username:        '',      // optional Payphone Tag name
+  username:        '',      // optional agent name (in-game)
   mode:            'click',  // 'click' | 'lasso' | 'lasso-deselect' | 'setStart' | 'setEnd'
   profile:         'car',
   start:           null,
@@ -288,7 +296,9 @@ const state = {
   lastOrienteerBufferS:   0,        // buffer used for the last orienteer solve
   mapTheme:               'dark',   // 'dark' | 'light'
   autoRotate:             true,     // settings: compass FAB may rotate the map
-  legFocus:               false,    // settings: fade route outside the leg in view
+  highlight:              'all',    // settings: 'all' | 'leg' (fade outside the leg in view) | 'phone' (fade all but the next stop)
+  nextGlow:               null,     // the glow under the segment to the current stop
+  glowSeg:                -1,       // which segment it's under
   playerEmoji:            '',       // the player's in-game emoji, for the avatar
   headingLocked:          false,    // compass FAB: locked to device heading
   follow:                 false,    // map keeps the location dot in view
@@ -302,12 +312,16 @@ let _dataStale        = false;  // backend reported it is serving cached data (g
 // Data freshness shows as a dot on the avatar and in its popover.
 function updateRefreshDot() {
   const dots = [document.getElementById('refresh-dot'), document.getElementById('avatar-dot')];
+  const offline = _refreshFailCount >= 2 || !navigator.onLine;
+  document.getElementById('offline-badge').hidden = !offline;
+  setTilesOffline(offline && swReady && _mapSaved);  // without a saved map, stretching shows nothing
   if (!_lastRefreshAt) { dots.forEach(d => { d.hidden = true; }); return '#a8afb5'; }
   const age = Date.now() - _lastRefreshAt;
   let color, title;
-  if (_refreshFailCount >= 2 || age > 120_000) {
+  // The server pulls a new snapshot every 90 s and we poll every 30 s, so a healthy feed stays under 2.5 min
+  if (_refreshFailCount >= 2 || age > 300_000) {
     color = '#e74c3c'; title = 'Data feed down';
-  } else if (_dataStale || age > 45_000) {
+  } else if (_dataStale || age > 150_000) {
     color = '#e67e22'; title = 'Game API degraded — showing cached data';
   } else {
     color = '#2ecc71'; title = 'Data feed healthy';
@@ -316,16 +330,22 @@ function updateRefreshDot() {
     d.hidden = false;
     d.style.background = color;
     d.title = title;
-    d.classList.toggle('stale', _dataStale || age > 45_000 || _refreshFailCount >= 2);
+    d.classList.toggle('stale', _dataStale || age > 150_000 || _refreshFailCount >= 2);
   }
   return color;
 }
 
 // Record a successful /api/phones response. The backend reports whether it is
-// serving stale cached data (game API down) and how old that data is —
-// anchor the freshness dot to the actual data age, not the poll time.
-function noteRefreshResult(data) {
-  _lastRefreshAt    = Date.now() - (data.data_age_s ? data.data_age_s * 1000 : 0);
+// serving stale cached data (game API down) and when that snapshot was taken —
+// anchor the freshness dot to the actual data age, not the poll time. A body the
+// browser revalidated (304) carries the data_age_s of its first delivery, so
+// prefer fetched_at. Its age is taken against the response's Date (a 304 refreshes it), so
+// both ends are the server's clock and the phone's clock doesn't matter.
+function noteRefreshResult(data, res) {
+  const sent = Date.parse(res?.headers.get('date') || '');
+  _lastRefreshAt    = data.fetched_at && sent ? Date.now() - Math.max(0, sent - data.fetched_at * 1000)
+                    : Math.min(Date.now(), data.fetched_at ? data.fetched_at * 1000
+                                         : Date.now() - (data.data_age_s || 0) * 1000);
   _dataStale        = !!data.stale;
   _refreshFailCount = 0;
   return updateRefreshDot();
@@ -370,8 +390,10 @@ const STATUS_COLORS = {
 // Colours drawn over the basemap, per map style. Light tiles need dark,
 // saturated strokes: white or pastel rings vanish against them.
 const MAP_INK = {
-  dark:  { sel: '#ffffff', isNew: '#fbbf24', photo: '#c084fc', lasso: '#9bbce0', unlasso: '#efa29a', indoor: '#e5e7eb' },
-  light: { sel: '#1f2937', isNew: '#b45309', photo: '#9333ea', lasso: '#1d4f80', unlasso: '#b42318', indoor: '#374151' },
+  dark:  { sel: '#ffffff', isNew: '#fbbf24', newW: 2, photo: '#c084fc', lasso: '#9bbce0', unlasso: '#efa29a', indoor: '#e5e7eb' },
+  // isNew: ultramarine, the one ring tested to stay clear on red, green, blue and grey dots alike
+  // (amber vanished on red, olive on green, a mid blue on blue) without being taken for selection or photo
+  light: { sel: '#1f2937', isNew: '#1e1ab8', newW: 3, photo: '#9333ea', lasso: '#1d4f80', unlasso: '#b42318', indoor: '#374151' },
 };
 function mapInk() { return MAP_INK[state.mapTheme] || MAP_INK.dark; }
 
@@ -658,6 +680,7 @@ function openPopover(which) {
   openPop = document.getElementById(`pop-${which}`);
   popReturn = document.activeElement;
   if (which === 'avatar') document.getElementById('name-input').value = state.username;
+  if (which === 'avatar') renderSaveMapBtn();
   document.getElementById('scrim').hidden = false;
   openPop.style.minHeight = which === 'legend' && prevHeight ? `${prevHeight}px` : '';
   openPop.hidden = false;
@@ -750,19 +773,42 @@ async function loadPhones() {
   setStatus('Loading…', '#a8afb5');
   try {
     const qs   = new URLSearchParams(username ? { username } : {});
-    const res  = await fetch(`/api/phones?${qs}`);
+    // Kept per URL, so the copy is coloured for this name
+    const url = `/api/phones?${qs}`, ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 15000);
+    let res, data, offline = false;
+    try {
+      res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(timer);  // only the wait for an answer is limited: a slow body on a working link is fine
+      if (res.ok) {
+        const copy = res.clone();
+        data = await res.json();
+        self.caches?.open('data').then(c => c.put(url, copy)).catch(() => {});
+      }
+    } catch (e) {
+      // No signal: the phones from the last good load, so a saved route still shows
+      clearTimeout(timer);
+      res = await self.caches?.open('data').then(c => c.match(url)).catch(() => null);
+      if (!res) throw e;
+      data = await res.json();
+      offline = true;
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `HTTP ${res.status}`);
     }
-    const data = await res.json();
     if (username !== state.username) return;  // name changed mid-flight; the newer load applies
     state.phones = data.phones;
     state.playerEmoji = data.emoji || '';
     renderAvatar();
     renderMarkers();
-    noteRefreshResult(data);
-    if (data.stale) {
+    noteRefreshResult(data, offline ? null : res);
+    if (offline) {
+      _refreshFailCount = 2;  // not fresh: red dot and the Offline badge until a refresh gets through
+      updateRefreshDot();
+      const day = new Date(_lastRefreshAt);
+      setStatus(`Offline, phones from ${day.toDateString() === new Date().toDateString() ? ''
+        : day.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' '}${dataTimeLabel()}`, '#e67e22');
+    } else if (data.stale) {
       setStatus(`${state.phones.length} phones loaded — game API down, data from ${dataTimeLabel()}`, '#e67e22');
     } else if (!username) {
       setStatus(`${state.phones.length} phones loaded — add your username to colour-code them`, '#e67e22');
@@ -772,8 +818,16 @@ async function loadPhones() {
     drawEndpoints();
     // Redraw a saved route on first load only — redrawing an active one would
     // throw away the stops already visited (e.g. after a name change).
-    const routeData = state.lastRoute;
-    if (routeData && !inNav()) { displayRoute(routeData, state.lastRouteExtraS); state.lastRoute = routeData; }
+    const routeData = state.lastRoute, saved = _savedProgress;
+    if (routeData && !inNav()) {
+      displayRoute(routeData, state.lastRouteExtraS);  // drops _savedProgress
+      state.lastRoute = routeData;
+      // Stops done before a reload, if they belong to this route
+      if (saved && String(saved.ids) === String(routeData.ordered_ids)) {
+        state.routeProgress = saved.at; state.nodeStates = saved.nodeStates || {}; state.currentLeg = Math.min(saved.leg || 0, Math.max(0, state.mapsLegs.length - 1));
+        renderLeg();
+      }
+    }
     renderPlan();
     saveSession();
     startBackgroundRefresh();
@@ -845,7 +899,7 @@ function mkStyle(color, sel, hasPhoto, isNew, indoor) {
   const ink = mapInk();
   const strokeColor  = isNew ? ink.isNew : hasPhoto ? ink.photo : sel ? ink.sel : indoor ? ink.indoor : 'rgba(0,0,0,0.3)';
   // A highlight owns the ring colour, so selection shows as a thicker ring (and the bigger dot)
-  const strokeWeight = (isNew || hasPhoto) ? (sel ? 4 : 2) : (sel ? 2.5 : indoor ? 2 : 1);
+  const strokeWeight = isNew ? (sel ? 4 : ink.newW) : hasPhoto ? (sel ? 4 : 2) : (sel ? 2.5 : indoor ? 2 : 1);
   // Indoor is a dash pattern, not a colour, so it combines with every highlight above
   return { radius: markerRadius(sel), fillColor: color, color: strokeColor, dashArray: indoor ? '3 3' : null,
            weight: strokeWeight, fillOpacity: 0.9, opacity: 1 };
@@ -950,12 +1004,12 @@ function setChip(key, on) {
 }
 document.querySelectorAll('#lasso-chips .chip').forEach(chip => chip.onclick = async () => {
   const key = chip.dataset.filter, on = !state[key];
-  // "Only New" needs the capture history; without it every phone looks captured
+  // "Skip: Visited" needs the capture history; without it every phone looks captured
   if (on && key === 'lassoOnlyNew' && !(await ensurePastCaptures())) return;
   setChip(key, on);
 });
 
-// Capture history for "never captured" checks (Only New chip, New highlight)
+// Capture history for "never captured" checks (Skip: Visited chip, New highlight)
 async function ensurePastCaptures() {
   if (state.pastCaptureIds !== null) return true;
   const username = state.username;
@@ -1821,25 +1875,27 @@ function displayRoute(data, extraS = 0) {
   document.getElementById('route-stats').textContent = `${km} km · ${durStr} · arrive ${timeStr}`;
   updateMapsLink(data);
   renderNav();
-  startBackgroundRefresh();  // switch to active polling while navigating a route
+  startBackgroundRefresh();  // starts the capture checks
 }
 
 function clearRoute() {
   state.routeLayers.forEach(l => map.removeLayer(l));
   state.decorators.forEach(d => map.removeLayer(d));
   state.waypointMarkers.forEach(m => map.removeLayer(m));
+  if (state.nextGlow) map.removeLayer(state.nextGlow);
+  state.nextGlow = null; state.glowSeg = -1;
   const stopIds = new Set(Object.keys(state.waypointMarkersById).map(Number));
   state.routeLayers = []; state.decorators = []; state.waypointMarkers = [];
   state.waypointMarkersById = {}; state.nodeStates = {};
   recentSkips.clear();
   state.phones.forEach(p => { if (stopIds.has(p.id)) refreshMarker(p); });  // bring the dots back
   state.routeProgress = 0; state.routeOrderedIds = [];
-  state.lastRoute = null;
+  state.lastRoute = null; _savedProgress = null;
   updateMapsLink(null);
   setFollow(false);
   renderNav();
   saveSession();
-  startBackgroundRefresh();  // switch back to idle polling when route is cleared
+  startBackgroundRefresh();  // stops the capture checks
 }
 
 // ── Google Maps legs ──────────────────────────────────────────────
@@ -1911,10 +1967,17 @@ function updateMapsLink(data) {
   });
 }
 
-// ── Leg focus: fade the route outside the leg shown in the nav card ──
+// ── Highlight: fade the route outside the leg shown in the nav card, or all but the next stop ──
 const LINE_DIM = 0.2, WP_DIM = 0.35;
-function focusLeg() { return state.legFocus && inNav() ? state.mapsLegs[state.currentLeg] || null : null; }
+function focusLeg() { return state.highlight === 'leg' && inNav() ? state.mapsLegs[state.currentLeg] || null : null; }
+function focusPhone() { return state.highlight === 'phone' && inNav(); }
 function inLeg(stop, leg) { return stop > leg.firstStop && stop <= leg.lastStop; }
+// The segment leading to the current stop (-1: route done, or its phone gone). By stop
+// number, not to_id: a loop route passes the same phone twice.
+function nextSegment() {
+  const stop = state.stopIndexById[state.routeOrderedIds[state.routeProgress]];
+  return stop == null ? -1 : state.routeFeatureStops.indexOf(stop);
+}
 
 function arrowPattern(color, opacity = 1) {
   // The decorator hands pathOptions straight to L.polygon, so fill opacity belongs there
@@ -1930,38 +1993,50 @@ function wpClass(id, ordIdx) {
        : '';
 }
 
-// One place sets every waypoint's look: state class, then the leg-focus fade.
+// One place sets every waypoint's look: state class, then the highlight fade. The
+// current stop is never faded and sits above the other stops (the location dot above it).
 // setOpacity is kept by Leaflet across setIcon, so zoom rebuilds don't undo it.
 function refreshWpIcons() {
-  const leg = focusLeg();
+  const leg = focusLeg(), only = focusPhone(), n = state.routeOrderedIds.length;
   for (const [idStr, m] of Object.entries(state.waypointMarkersById)) {
     const id     = parseInt(idStr);
     const ordIdx = state.routeOrderedIds.indexOf(id);
     if (ordIdx === -1) continue;
+    const target = ordIdx === state.routeProgress;
     m.setIcon(makeWpIcon(ordIdx + 1, wpClass(id, ordIdx), !!hintOf(id)?.kind));
-    m.setOpacity(leg && !inLeg(state.stopIndexById[id], leg) ? WP_DIM : 1);
+    m.setZIndexOffset(target ? 5000 : (n - ordIdx) * 10);
+    m.setOpacity(!target && (only || (leg && !inLeg(state.stopIndexById[id], leg))) ? WP_DIM : 1);
   }
 }
 
 function updateRouteFocus() {
-  const leg = focusLeg();
+  const leg = focusLeg(), only = focusPhone(), next = nextSegment();
   state.routeLayers.forEach((line, i) => {
-    const dim     = !!leg && !inLeg(state.routeFeatureStops[i], leg);
-    const opacity = dim ? LINE_DIM : 0.85;
+    const dim     = i !== next && (only || (!!leg && !inLeg(state.routeFeatureStops[i], leg)));
+    const opacity = i === next ? 1 : dim ? LINE_DIM : 0.85;
     if (line.options.opacity === opacity) return;  // unchanged: skip the canvas redraw
     line.setStyle({ opacity });
     // New patterns, not restyled arrows: the decorator rebuilds them from patterns on every pan
     state.decorators[i].setPatterns(arrowPattern(line.options.color, dim ? LINE_DIM : 1));
   });
+  // The way to the current stop: drawn on top of the route, over a soft glow of its own colour
+  if (next === state.glowSeg) return;
+  if (state.nextGlow) map.removeLayer(state.nextGlow);
+  state.nextGlow = null; state.glowSeg = next;
+  const line = state.routeLayers[next];
+  if (!line) return;
+  state.nextGlow = L.polyline(line.getLatLngs(), { color: line.options.color, weight: 18, opacity: 0.3, interactive: false }).addTo(map);
+  state.nextGlow.bringToBack();  // under the phone dots and the rest of the route
+  line.bringToFront(); state.decorators[next].bringToFront();
 }
 
-function setLegFocus(on) {
-  state.legFocus = on;
-  document.getElementById('legfocus').checked = on;
+function setHighlight(v) {
+  state.highlight = v === 'leg' || v === 'phone' ? v : 'all';
+  document.getElementById('highlight').value = state.highlight;
   if (inNav()) renderLeg();
   saveSession();
 }
-document.getElementById('legfocus').onchange = e => setLegFocus(e.target.checked);
+document.getElementById('highlight').onchange = e => setHighlight(e.target.value);
 
 // Plan ↔ Navigate: the sheet shows the navigate card while a route exists
 function renderNav() {
@@ -1982,7 +2057,9 @@ function endRoute() {
                  start: state.start, end: state.end };
   clearRoute();
   if (!snap.data) return;
+  _dropMap = setTimeout(dropRouteMap, 6500);  // the saved route map goes with the route
   toast('Route ended', () => {
+    clearTimeout(_dropMap);
     state.start = snap.start; state.end = snap.end;  // legs are built from these
     drawEndpoints();
     displayRoute(snap.data, snap.extraS);
@@ -2047,6 +2124,7 @@ function renderLeg() {
   renderAccessLine();
   refreshWpIcons();
   updateRouteFocus();
+  saveSession();  // progress survives a reload
 }
 
 function changeLeg(delta) {
@@ -2136,6 +2214,15 @@ function onPosition(pos) {
   lastLatLng = [lat, lon];
   lastFixAt  = Date.now();
   lastAccuracy = accuracy;
+  const { heading, speed } = pos.coords;
+  // A loose fix (indoors, say) can jump far enough to look like speed: only trust tight ones, two in a row
+  const fast = Number.isFinite(heading) && speed >= COURSE_MIN_MPS && accuracy <= COURSE_MAX_ACC_M;
+  _fastFixes = fast ? _fastFixes + 1 : 0;
+  if (_fastFixes >= 2) {
+    _courseAt = Date.now(); _headingSource = 'gps';
+    _onHeadingChange(heading);
+  }
+  headingDebug({ course: heading, speed });
   captureCheckOnFix();
   if (gpsBlocked) { gpsBlocked = false; renderPlan(); }
   if (state.start && state.start.live) {
@@ -2155,7 +2242,7 @@ function onPosition(pos) {
       followTo(lastLatLng);
     }
   }
-  if (!locMarker) locMarker = L.marker([lat, lon], { icon: locIcon, zIndexOffset: 1000 }).addTo(map);
+  if (!locMarker) locMarker = L.marker([lat, lon], { icon: locIcon, zIndexOffset: 10000 }).addTo(map);
   else locMarker.setLatLng([lat, lon]);
   if (!locCircle) locCircle = L.circle([lat, lon], { radius: accuracy, color: '#4a9eff',
     fillColor: '#4a9eff', fillOpacity: 0.07, weight: 1 }).addTo(map);
@@ -2312,9 +2399,7 @@ function setMapTheme(theme) {
   document.documentElement.style.setProperty('--ink-photo', ink.photo);
   document.documentElement.style.setProperty('--ink-indoor', ink.indoor);
   state.phones.forEach(p => refreshMarker(p));
-  map.removeLayer(tileLayer);
-  tileLayer = L.tileLayer(TILE_URLS[theme], { attribution: CREDIT, maxZoom: 19 }).addTo(map);
-  tileLayer.bringToBack();
+  rebuildTileLayer();
   if (miniMap) {
     miniMap.remove(); miniMap = null;
     toggleMiniMap();
@@ -2322,8 +2407,113 @@ function setMapTheme(theme) {
   document.getElementById('theme-dark').checked = theme === 'dark';
   saveSession();
 }
-document.getElementById('theme-dark').onchange = e => setMapTheme(e.target.checked ? 'dark' : 'light');
+document.getElementById('theme-dark').onchange = e => {
+  setMapTheme(e.target.checked ? 'dark' : 'light');
+  if (_tilesOffline) toast('Offline: only the theme the route map was saved in shows');
+};
 document.getElementById('minimap').onchange = toggleMiniMap;
+
+function rebuildTileLayer() {
+  map.removeLayer(tileLayer);
+  tileLayer = L.tileLayer(TILE_URLS[state.mapTheme], { attribution: CREDIT, maxZoom: 19,
+    ...(_tilesOffline && { maxNativeZoom: 16 }) }).addTo(map);
+  tileLayer.bringToBack();
+}
+
+// ── Offline route map ─────────────────────────────────────────────
+// Offline, zooms past 16 stretch the saved z16 tiles instead of asking for ones that aren't there
+let _tilesOffline = false;
+function setTilesOffline(on) {
+  if (on === _tilesOffline) return;
+  _tilesOffline = on;
+  rebuildTileLayer();
+}
+
+// sw.js serves saved tiles; registering needs a trusted certificate, so failure is silent
+let swReady = false, _mapSaved = false, _dropMap = null;
+navigator.serviceWorker?.register('/sw.js').catch(() => {});
+navigator.serviceWorker?.ready.then(() => caches.has('tiles')).then(has => has && caches.open('tiles').then(c => c.keys())).then(keys => {
+  swReady = true; _mapSaved = !!keys?.length;
+  updateRefreshDot();
+}).catch(() => {});
+function dropRouteMap() {
+  _mapSaved = false;
+  updateRefreshDot();
+  return self.caches?.delete('tiles');
+}
+
+const TILE_KB = 40;
+// Tiles z12-16 along the route in half-tile steps, 3x3 around each point, this theme at this screen's {r}
+function routeTiles() {
+  const pts = state.lastRoute.path.features.flatMap(f => f.geometry.coordinates.map(([lon, lat]) => L.latLng(lat, lon)));
+  const style = state.mapTheme === 'light' ? 'light_all' : 'dark_all', r = L.Browser.retina ? '@2x' : '';
+  const out = new Set();
+  for (let z = 12; z <= 16; z++) {
+    let prev = null;
+    for (const ll of pts) {
+      const t = L.CRS.EPSG3857.latLngToPoint(ll, z).divideBy(256);
+      const steps = prev ? Math.max(1, Math.ceil(t.distanceTo(prev) / 0.5)) : 1;
+      for (let i = 1; i <= steps; i++) {
+        const q = prev ? prev.add(t.subtract(prev).multiplyBy(i / steps)) : t;
+        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+          out.add(`/${style}/${z}/${Math.floor(q.x) + dx}/${Math.floor(q.y) + dy}${r}.png`);
+        }
+      }
+      prev = t;
+    }
+  }
+  return out;
+}
+
+// Greyed, with the reason under it, until it can work: a route to save along and a trusted certificate
+function renderSaveMapBtn() {
+  const btn = document.getElementById('save-map-btn'), note = document.getElementById('save-map-note');
+  btn.hidden = note.hidden = !CARTO_KEY;
+  const why = !inNav() ? 'Find a route first.'
+            : !swReady ? "Needs this site's certificate trusted on this phone." : '';
+  btn.disabled = _savingMap || !!why;
+  note.textContent = why || 'Saved in browser, deleted when the route ends.';
+}
+
+let _savingMap = false;
+async function saveRouteMap() {
+  if (_savingMap || !state.lastRoute) return;
+  _savingMap = true;  // before any await: a second tap does nothing
+  const btn = document.getElementById('save-map-btn'), route = state.lastRoute;
+  try {
+    clearTimeout(_dropMap);  // an earlier End Route's pending delete would wipe this save
+    const want = routeTiles(), cache = await caches.open('tiles');
+    const have = new Set((await cache.keys()).map(r => new URL(r.url).pathname));
+    const todo = [...want].filter(k => !have.has(k)), total = todo.length;
+    if (!confirm(`Save the map along this route for offline use? About ${total} tiles, ${Math.max(1, Math.round(total * TILE_KB / 1000))} MB. It's deleted when you end the route.`)) return;
+    btn.disabled = true;
+    navigator.storage?.persist?.().catch(() => {});
+    for (const k of have) if (!want.has(k)) await cache.delete(`https://basemaps.cartocdn.com${k}`);  // an earlier route's
+    let done = 0, failed = 0, full = false;
+    const worker = async () => {
+      while (todo.length && !full && state.lastRoute === route) {  // stops if the route ends or changes
+        const k = todo.pop();
+        try {
+          const res = await fetch(`https://${'abcd'[done % 4]}.basemaps.cartocdn.com${k}${CARTO_Q}`, { mode: 'cors' });
+          if (!res.ok) throw new Error(res.status);
+          await cache.put(`https://basemaps.cartocdn.com${k}`, res);
+        } catch (e) {
+          if (e.name === 'QuotaExceededError') full = true; else failed++;
+        }
+        btn.textContent = `Saving Map… ${Math.round(++done / total * 100)}%`;
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    if (state.lastRoute !== route) return;  // ended mid-save: End Route deletes what was saved
+    _mapSaved = (await cache.keys()).length > 0;
+    updateRefreshDot();
+    const est = await navigator.storage?.estimate?.().catch(() => null);
+    toast((full ? 'Storage full: part of the route map saved' : failed ? `Route map saved, ${failed} tiles missed` : 'Route map saved')
+      + (est ? ` · ${Math.round(est.usage / 1e6)} MB stored` : ''));
+  } finally {
+    _savingMap = false; btn.textContent = 'Save Route Map Offline'; renderSaveMapBtn();
+  }
+}
 
 // ── Auto-rotate setting ───────────────────────────────────────────
 function setAutoRotate(on) {
@@ -2341,6 +2531,7 @@ document.getElementById('autorotate').onchange = e => setAutoRotate(e.target.che
 // ── Compass / heading lock ────────────────────────────────────────
 let _compassHeading  = 0;   // device compass heading, degrees clockwise from north
 let _orientationBound = false;
+let _compassSeen = false;          // a reading with a heading in it has arrived
 
 // The map eases toward the sensor heading a fraction of the remaining arc
 // per animation frame, so turning reads as one continuous smooth rotation
@@ -2407,6 +2598,10 @@ function handleCompassTap() {
     document.getElementById('fab-centre').classList.add('heading-locked');
     if (typeof map.setBearing === 'function') map.setBearing(bearingForHeading(_compassHeading));
     _startDeviceOrientation();
+    // A blocked sensor still sends events, just empty ones: say so rather than sit there north-up
+    setTimeout(() => {
+      if (state.headingLocked && !_compassSeen) toast('No compass readings — allow motion sensors for this site in your browser settings');
+    }, 4000);
   } else if (typeof map.setBearing === 'function') {
     map.setBearing(0);                       // auto-rotate off: north-up
   }
@@ -2427,24 +2622,101 @@ map.getContainer().addEventListener('touchstart', e => {
   if (e.touches.length >= 2 && state.headingLocked) _releaseHeadingLock(false);
 }, { passive: true });
 
+const screenAngle = () => screen.orientation?.angle ?? window.orientation ?? 0;
+
+// Android hands over W3C alpha/beta/gamma (Z-X'-Y''); alpha alone is the heading only while the
+// phone lies flat, and upright in a mount it's out by up to 90°. Rebuild the device axes and take
+// the horizontal direction of the screen's top edge tipped back out of the screen: the top edge
+// when flat, the camera's view when upright. th: the screen's rotation. null when edge-on.
+function headingFromEuler(alpha, beta, gamma, th) {
+  const D = Math.PI / 180, cA = Math.cos(alpha * D), sA = Math.sin(alpha * D), cB = Math.cos(beta * D),
+        sB = Math.sin(beta * D), cG = Math.cos(gamma * D), sG = Math.sin(gamma * D), c = Math.cos(th * D), s = Math.sin(th * D);
+  // East and north parts of the device x (right), y (up the screen) and z (out of the screen) axes
+  const xE = cA * cG - sA * sB * sG, xN = sA * cG + cA * sB * sG, yE = -sA * cB, yN = cA * cB,
+        zE = cA * sG + sA * sB * cG, zN = sA * sG - cA * sB * cG;
+  const e = yE * c + xE * s - zE, n = yN * c + xN * s - zN;
+  return Math.hypot(e, n) < 0.2 ? null : (Math.atan2(e, n) / D + 360) % 360;
+}
+
+// Android's absolute orientation points at magnetic north; the map is drawn to true north. The
+// difference (east positive) over Australia, from WMM2025 for late 2026, on a 4° grid from
+// 8°S 108°E: bilinear within 0.25° of the model. Outside the grid: no correction.
+// ponytail: Australia only and drifts ~0.1°/yr; regenerate from WMM (scratchpad declgrid.py) with the 2030 model.
+const DECL_LAT0 = -8, DECL_LON0 = 108, DECL_STEP = 4, DECL_COLS = 13, DECL = [
+  0.7,0.8,0.7,0.7,0.8,1.1,1.7,2.5,3.5,4.5,5.6,6.6,7.6, 0.6,0.8,0.9,1.0,1.2,1.6,2.3,3.1,4.1,5.2,6.2,7.3,8.3,
+  0.2,0.7,1.0,1.2,1.6,2.1,2.8,3.7,4.8,5.8,6.9,8.0,9.0, -0.4,0.3,0.8,1.3,1.8,2.5,3.4,4.3,5.4,6.6,7.7,8.8,9.8,
+  -1.5,-0.4,0.4,1.2,2.0,2.9,3.9,5.0,6.2,7.4,8.6,9.8,10.9, -3.0,-1.6,-0.3,0.8,2.0,3.1,4.4,5.7,7.0,8.4,9.7,11.0,12.1,
+  -5.2,-3.2,-1.4,0.2,1.8,3.3,4.8,6.4,8.0,9.5,11.0,12.4,13.6, -8.3,-5.6,-3.1,-0.9,1.3,3.3,5.3,7.2,9.0,10.8,12.5,14.1,15.5,
+  -12.5,-8.9,-5.6,-2.5,0.4,3.1,5.6,8.0,10.3,12.4,14.4,16.1,17.7, -18.5,-13.8,-9.4,-5.1,-1.2,2.5,5.9,9.0,11.8,14.4,16.7,18.7,20.5,
+  -27.0,-21.2,-15.2,-9.5,-3.9,1.2,5.9,10.0,13.7,17.0,19.7,22.1,24.1];
+function declination(lat, lon) {
+  const y = (DECL_LAT0 - lat) / DECL_STEP, x = (lon - DECL_LON0) / DECL_STEP, rows = DECL.length / DECL_COLS;
+  if (!(y >= 0 && x >= 0 && y <= rows - 1 && x <= DECL_COLS - 1)) return 0;
+  const i = Math.min(Math.floor(y), rows - 2), j = Math.min(Math.floor(x), DECL_COLS - 2), fy = y - i, fx = x - j;
+  const v = (r, c) => DECL[r * DECL_COLS + c];
+  return (v(i, j) * (1 - fx) + v(i, j + 1) * fx) * (1 - fy) + (v(i + 1, j) * (1 - fx) + v(i + 1, j + 1) * fx) * fy;
+}
+function hereDeclination() {
+  const [lat, lon] = lastLatLng || [map.getCenter().lat, map.getCenter().lng];
+  return declination(lat, lon);
+}
+
+function orientationHeading(e) {
+  if (e.webkitCompassHeading != null) return e.webkitCompassHeading;  // iOS — already absolute
+  if (e.alpha == null) return null;
+  const h = headingFromEuler(e.alpha, e.beta || 0, e.gamma || 0, screenAngle());
+  return h == null ? null : (h + hereDeclination() + 360) % 360;  // magnetic -> true north
+}
+
+// Moving at a decent speed, the GPS course beats any compass (car metal and magnetic mounts upset them)
+const COURSE_MIN_MPS = 2.5, COURSE_MAX_ACC_M = 20, COURSE_HOLD_MS = 30_000;
+let _courseAt = 0, _fastFixes = 0, _headingSource = '-';
+
+// ?headingdebug: a live readout of the sensors, for checking a device
+const headingDebugEl = new URLSearchParams(location.search).has('headingdebug') ? document.body.appendChild(
+  Object.assign(document.createElement('pre'), { style: 'position:fixed;z-index:2000;left:8px;top:calc(max(16px, env(safe-area-inset-top)) + 40px);margin:0;padding:6px 8px;border-radius:6px;background:rgba(0,0,0,.75);color:#fff;font:11px/1.4 monospace;pointer-events:none' })) : null;
+const _hd = { counts: {}, ev: {}, course: null, speed: null };
+function headingDebug(patch) {
+  if (!headingDebugEl) return;
+  Object.assign(_hd, patch);
+  const r = v => v == null || !isFinite(v) ? '-' : Math.round(v), e = _hd.ev;
+  headingDebugEl.textContent = [...Object.entries(_hd.counts).map(([k, n]) => `${k} ×${n}`),
+    `α ${r(e.alpha)}  β ${r(e.beta)}  γ ${r(e.gamma)}  abs ${e.absolute ?? '-'}`,
+    `screen ${r(screenAngle())}°  decl ${e.webkitCompassHeading != null ? '- (iOS is true north)' : hereDeclination().toFixed(1) + '°'}`,
+    `heading ${r(e.alpha == null && e.webkitCompassHeading == null ? null : orientationHeading(e))}°  map ${r(_compassHeading)}°`,
+    `course ${r(_hd.course)}° @ ${_hd.speed == null ? '-' : _hd.speed.toFixed(1)} m/s`, `source ${_headingSource}`].join('\n');
+}
+if (headingDebugEl) {
+  // Count both kinds, but show only the one the app steers by: Android's plain event has its own
+  // arbitrary north, and showing it too made the numbers flip between two unrelated headings
+  const used = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
+  for (const type of ['deviceorientation', 'deviceorientationabsolute']) {
+    window.addEventListener(type, e => { _hd.counts[type] = (_hd.counts[type] || 0) + 1; headingDebug(type === used ? { ev: e } : {}); }, true);
+  }
+  headingDebug({});
+}
+
 function _startDeviceOrientation() {
   if (_orientationBound) return;
 
   function onOrientation(e) {
-    if (!state.headingLocked) return;
-    let heading = null;
-    if (e.webkitCompassHeading != null) {
-      heading = e.webkitCompassHeading;            // iOS — already absolute
-    } else if (e.alpha != null) {
-      heading = (360 - e.alpha) % 360;             // convert to compass bearing
-    }
+    const heading = orientationHeading(e);
     if (heading == null) return;
+    _compassSeen = true;
+    if (!state.headingLocked || Date.now() - _courseAt < COURSE_HOLD_MS) return;
+    _headingSource = `compass (${e.type})`;
     _onHeadingChange(heading);
   }
 
-  // iOS 13+ requires a permission prompt on user gesture
-  if (typeof DeviceOrientationEvent !== 'undefined'
+  if ('ondeviceorientationabsolute' in window) {
+    // Android: bind only the absolute event — the plain deviceorientation
+    // event's alpha has an arbitrary zero point and would corrupt the heading.
+    // Checked before requestPermission, which Chromium has too: granted, it bound the plain one.
+    window.addEventListener('deviceorientationabsolute', onOrientation, true);
+    _orientationBound = true;
+  } else if (typeof DeviceOrientationEvent !== 'undefined'
       && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    // iOS 13+ requires a permission prompt on user gesture
     DeviceOrientationEvent.requestPermission()
       .then(result => {
         if (result === 'granted') {
@@ -2453,11 +2725,6 @@ function _startDeviceOrientation() {
         }
       })
       .catch(() => {});
-  } else if ('ondeviceorientationabsolute' in window) {
-    // Android: bind only the absolute event — the plain deviceorientation
-    // event's alpha has an arbitrary zero point and would corrupt the heading
-    window.addEventListener('deviceorientationabsolute', onOrientation, true);
-    _orientationBound = true;
   } else {
     window.addEventListener('deviceorientation', onOrientation, true);
     _orientationBound = true;
@@ -2468,6 +2735,9 @@ startGeolocation();
 
 // ── Session persistence ───────────────────────────────────────────
 const SESSION_KEY = 'payphone_pathfinder_session';
+// Progress read back from the session, held until loadPhones redraws its route: the
+// setters restoreSession calls save before then, and must not save progress 0 over it
+let _savedProgress = null;
 
 function saveSession() {
   try {
@@ -2478,11 +2748,13 @@ function saveSession() {
       start:               state.start,
       end:                 state.end,
       lastRoute:           state.lastRoute,
+      progress:            _savedProgress || (inNav() ? { ids: state.routeOrderedIds, at: state.routeProgress,
+                             nodeStates: state.nodeStates, leg: state.currentLeg } : null),
       routeMode:           state.routeMode,
       lastRouteExtraS:     state.lastRouteExtraS,
       mapTheme:            state.mapTheme,
       autoRotate:          state.autoRotate,
-      legFocus:            state.legFocus,
+      highlight:           state.highlight,
       playerEmoji:        state.playerEmoji,
       orienteerArriveBy: document.getElementById('orienteer-arrive-by')?.value || '',
     }));
@@ -2502,10 +2774,12 @@ function restoreSession() {
     if (state.start && state.start.label === 'My Location' && state.start.phone_id == null) state.start.live = true;
     if (s.end)         state.end       = s.end;
     if (s.lastRoute)   state.lastRoute = s.lastRoute;
+    if (s.lastRoute && s.progress) _savedProgress = s.progress;
     if (typeof s.lastRouteExtraS === 'number') state.lastRouteExtraS = s.lastRouteExtraS;
     if (s.mapTheme && TILE_URLS[s.mapTheme]) setMapTheme(s.mapTheme);
     if (typeof s.autoRotate === 'boolean') setAutoRotate(s.autoRotate);
-    if (typeof s.legFocus === 'boolean') setLegFocus(s.legFocus);
+    if (typeof s.highlight === 'string') setHighlight(s.highlight);
+    else if (typeof s.legFocus === 'boolean') setHighlight(s.legFocus ? 'leg' : 'all');  // the old on/off switch
     // Saved so the avatar doesn't flash the letter before phones load
     if (s.username && typeof s.playerEmoji === 'string') state.playerEmoji = s.playerEmoji;
     // Restore arrive-by time (or let IIFE set default if absent)
@@ -2525,20 +2799,23 @@ function restoreSession() {
 
 // ── Background phone refresh ──────────────────────────────────────
 let refreshTimer = null;
-const REFRESH_INTERVAL_ACTIVE_MS = 4_000;   // navigating a route — faster updates
-const REFRESH_INTERVAL_IDLE_MS   = 10_000;  // no active route — relaxed polling
+// The server takes a new snapshot every 90 s; polls in between are bodiless 304s
+const REFRESH_INTERVAL_MS = 30_000;
 
 async function refreshPhones() {
   const username = state.username;
   if (!state.phones.length) return;   // username optional — see loadPhones()
   try {
     const qs  = new URLSearchParams(username ? { username } : {});
-    const res = await fetch(`/api/phones?${qs}`);
+    // No answer in 10 s counts as a failure: with a VPN up, a phone in airplane mode can still
+    // report itself online, and its requests then hang for minutes instead of failing
+    const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), POLL_TIMEOUT_MS);
+    const res = await fetch(`/api/phones?${qs}`, { signal: ctrl.signal });
+    clearTimeout(timer);  // only the wait for an answer: a slow body on a working link is fine
     if (!res.ok) {
       // Backend errors (e.g. game API down with no cache yet) count as
       // failed refreshes too — previously only network errors did.
-      _refreshFailCount++;
-      updateRefreshDot();
+      noteRefreshFail();
       return;
     }
     const data   = await res.json();
@@ -2572,7 +2849,7 @@ async function refreshPhones() {
       if (upgraded) renderLeg(); else renderAccessLine();  // keeps "Probably Locked" in step with the clock
     }
 
-    const healthColor = noteRefreshResult(data);
+    const healthColor = noteRefreshResult(data, res);
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
     if (data.stale) {
       setStatus(`game API down — data from ${dataTimeLabel()}`, healthColor);
@@ -2580,9 +2857,16 @@ async function refreshPhones() {
       setStatus(`updated ${now}${changed ? ` · ${changed} changed` : ''}`, healthColor + 'b3');
     }
   } catch (_) {
-    _refreshFailCount++;
-    updateRefreshDot();
+    noteRefreshFail();
   }
+}
+
+// A failed poll. The first one retries in 3 s rather than at the next poll, so a lost
+// connection shows as Offline (two failures) within about half a minute
+const POLL_TIMEOUT_MS = 10_000;
+function noteRefreshFail() {
+  if (++_refreshFailCount === 1) setTimeout(refreshPhones, 3000);
+  updateRefreshDot();
 }
 
 // Tick and pass every stop, from the current one on, that you now hold. -> whether it advanced
@@ -2598,7 +2882,7 @@ function advanceTagged() {
   if (advanced) {
     if (navigator.vibrate) navigator.vibrate([15, 40, 15]);
     renderLeg();
-    startBackgroundRefresh();  // may switch to idle polling once every stop is done
+    startBackgroundRefresh();  // reschedules the capture check for the new stop
   }
   return advanced;
 }
@@ -2609,7 +2893,7 @@ function advanceTagged() {
 // the last 2 minutes, when you could be at it): every 10 s near a stop, for 2 minutes after
 // leaving one, or while location is poor; every 40 s otherwise.
 const CHECK_NEAR_M = 100, CHECK_LINGER_MS = 120_000, CHECK_FAST_MS = 10_000, CHECK_SLOW_MS = 40_000;
-const CONFIRMED_HOLD_MS = 8 * 60_000;  // longer than the feed's delay
+const CONFIRMED_HOLD_MS = 10 * 60_000;  // longer than the feed's delay + the server cache + a poll
 const recentSkips   = new Map();       // phone id -> skipped at
 const confirmedMine = new Map();       // phone id -> confirmed at
 let checkTimer = null, checkDueAt = 0, lastNearAt = 0;
@@ -2652,7 +2936,8 @@ async function checkCaptures() {
   const ids = captureCheckIds(), username = state.username;
   if (ids.length) {
     try {
-      const res = await fetch(`/api/capture-check?${new URLSearchParams({ username, ids: ids.join(',') })}`);
+      const res = await fetch(`/api/capture-check?${new URLSearchParams({ username, ids: ids.join(',') })}`,
+        { signal: AbortSignal.timeout?.(POLL_TIMEOUT_MS) });  // a hung request would stop the checks
       if (res.ok && username === state.username) {
         const { mine } = await res.json();
         let upgraded = false;
@@ -2680,9 +2965,7 @@ async function manualRefreshPhones() {
 
 function startBackgroundRefresh() {
   stopBackgroundRefresh();
-  const interval = (state.routeOrderedIds.length && state.routeProgress < state.routeOrderedIds.length)
-    ? REFRESH_INTERVAL_ACTIVE_MS : REFRESH_INTERVAL_IDLE_MS;
-  refreshTimer = setInterval(refreshPhones, interval);
+  refreshTimer = setInterval(refreshPhones, REFRESH_INTERVAL_MS);
   scheduleCaptureCheck();
 }
 
@@ -2707,9 +2990,14 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+// Signal back: catch up now rather than at the next poll
+window.addEventListener('online', () => { updateRefreshDot(); if (state.phones.length) refreshPhones(); else loadPhones(); });
+window.addEventListener('offline', updateRefreshDot);
+
 // ── Startup ───────────────────────────────────────────────────────
 (function() {
   restoreSession();
+  if (!state.lastRoute) dropRouteMap();  // a map left behind by a route that ended as the page closed
   // No orientation API at all → auto-rotate can never work; grey the setting
   // out. (Done after restoreSession so setAutoRotate's saveSession doesn't
   // clobber the stored session with unrestored values.)

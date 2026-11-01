@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -29,6 +30,8 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Payphone Pathfinder", lifespan=_lifespan)
+# /api/phones is ~1.3 MB of JSON and gzips to about a fifth
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
 
 @app.exception_handler(httpx.HTTPError)
@@ -125,7 +128,9 @@ def _http() -> httpx.AsyncClient:
 _PHONES_CACHE: dict | None = None
 _PHONES_CACHE_AT: float    = 0.0   # TTL marker (-inf from the cache-bust endpoint)
 _PHONES_FETCHED_AT: float  = 0.0   # last successful fetch — for truthful data-age reporting
-_PHONES_CACHE_TTL: float   = 30.0  # seconds
+_PHONES_FETCHED_WALL: float = 0.0  # the same moment on the wall clock, sent to clients as fetched_at
+_PHONES_CACHE_TTL: float   = 90.0  # seconds
+_PHONES_REFRESH_MIN: float = 10.0  # a manual refresh re-pulls upstream at most this often (server-wide)
 _PHONES_LOCK  = asyncio.Lock()
 _PHONES_FAIL_UNTIL: float  = 0.0   # no upstream attempts before this (monotonic)
 _PHONES_FAILS: int         = 0     # consecutive upstream failures
@@ -183,7 +188,7 @@ def reset_caches() -> None:
     (requests are intercepted by respx in tests, so nothing real leaks).
     """
     global _HTTP
-    global _PHONES_CACHE, _PHONES_CACHE_AT, _PHONES_FETCHED_AT, _PHONES_FAIL_UNTIL, _PHONES_FAILS
+    global _PHONES_CACHE, _PHONES_CACHE_AT, _PHONES_FETCHED_AT, _PHONES_FETCHED_WALL, _PHONES_FAIL_UNTIL, _PHONES_FAILS
     global _PHOTO_CACHE, _PHOTO_CACHE_AT, _PHOTO_FAIL_UNTIL
     global _CAPTURES_CACHE, _CAPTURES_FAIL_UNTIL
     global _GEO_CACHE, _HINTS, _LATEST, _HOLDER_CACHE
@@ -193,6 +198,7 @@ def reset_caches() -> None:
     _PHONES_CACHE      = None
     _PHONES_CACHE_AT   = 0.0
     _PHONES_FETCHED_AT = 0.0
+    _PHONES_FETCHED_WALL = 0.0
     _PHONES_FAIL_UNTIL = 0.0
     _PHONES_FAILS      = 0
     _PHOTO_CACHE       = None
@@ -278,7 +284,7 @@ async def _get_phones_cached() -> tuple[dict, bool, float]:
       cooldown prevents further upstream attempts for a few seconds.
     - Failure with no snapshot at all (cold start): 503 with a clear message.
     """
-    global _PHONES_CACHE, _PHONES_CACHE_AT, _PHONES_FETCHED_AT, _PHONES_FAIL_UNTIL, _PHONES_FAILS
+    global _PHONES_CACHE, _PHONES_CACHE_AT, _PHONES_FETCHED_AT, _PHONES_FETCHED_WALL, _PHONES_FAIL_UNTIL, _PHONES_FAILS
 
     now = time.monotonic()
     if _PHONES_CACHE is not None and (now - _PHONES_CACHE_AT) < _PHONES_CACHE_TTL:
@@ -306,6 +312,7 @@ async def _get_phones_cached() -> tuple[dict, bool, float]:
         _PHONES_CACHE      = data
         _PHONES_CACHE_AT   = time.monotonic()
         _PHONES_FETCHED_AT = _PHONES_CACHE_AT
+        _PHONES_FETCHED_WALL = time.time()
         _PHONES_FAILS      = 0
         return _PHONES_CACHE, False, 0.0
 
@@ -570,11 +577,13 @@ async def _vroom_solve(
 async def bust_phones_cache():
     """Force-expire the phone data cache so the next /api/phones call re-fetches upstream.
 
-    The failure cooldown still applies, so this can't be used to hammer the
-    game API while it is down.
+    A no-op while the snapshot is under _PHONES_REFRESH_MIN old, so clients tapping
+    refresh together still cause one upstream pull; the failure cooldown also still
+    applies, so this can't be used to hammer the game API while it is down.
     """
     global _PHONES_CACHE_AT
-    _PHONES_CACHE_AT = float("-inf")  # not 0: monotonic() counts from boot, so a fresh machine is still inside the TTL
+    if time.monotonic() - _PHONES_FETCHED_AT >= _PHONES_REFRESH_MIN:
+        _PHONES_CACHE_AT = float("-inf")  # not 0: monotonic() counts from boot, so a fresh machine is still inside the TTL
     return {"ok": True}
 
 
@@ -705,6 +714,7 @@ async def get_past_captures(
 
 @app.get("/api/phones")
 async def get_phones(
+    request: Request,
     # Optional so share links render for someone who has never used this instance.
     # With no username nothing is classified "mine"/"cellmate" — held phones come
     # back "hostile" and unheld "uncaptured", which is accurate, just uncoloured.
@@ -712,6 +722,13 @@ async def get_phones(
     cell: str = Query(default=""),
 ):
     data, stale, age_s = await _get_phones_cached()
+    # One snapshot serves every poll until the next fetch: a browser that already holds it
+    # gets a bodiless 304 and its HTTP cache hands fetch() the stored copy. Weak, as gzip
+    # re-encodes the body; the URL carries the username and cell, so the tag needn't.
+    fetched_at = _PHONES_FETCHED_WALL
+    headers = {"ETag": f'W/"{fetched_at:.3f}-{int(stale)}"', "Cache-Control": "no-cache"}
+    if request.headers.get("if-none-match") == headers["ETag"]:
+        return Response(status_code=304, headers=headers)
     my_player_id, cellmate_player_ids, players = _resolve_player(data, username, cell or None)
 
     result = []
@@ -740,7 +757,8 @@ async def get_phones(
     me = players.get(my_player_id) if my_player_id else None
     emoji = me.get("emoji") if isinstance(me, dict) else None
 
-    return {"phones": result, "emoji": emoji, "stale": stale, "data_age_s": int(age_s)}
+    return JSONResponse({"phones": result, "emoji": emoji, "stale": stale, "data_age_s": int(age_s),
+                         "fetched_at": fetched_at}, headers=headers)
 
 
 async def _photon(path: str, params: dict, key: tuple) -> dict:
