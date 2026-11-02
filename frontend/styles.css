@@ -238,7 +238,9 @@ body.picking #tool-dock { display: none; }
   #grabber, #plan-summary { display: none; }
   #plan-details { display: block; }
   #plan-details > .field:first-child { padding-top: 0; }
-  #tool-dock { left: 392px; right: 16px; bottom: 20px; }
+  /* Centred under the map beside the panel, like a floating toolbar; "safe" falls back to the left
+     edge when the window is too narrow, so the tools never slide under the panel */
+  #tool-dock { left: 392px; right: 16px; bottom: 20px; align-items: safe center; }
   #toast { left: 50%; right: auto; transform: translateX(-50%); width: 420px; }
   .scrim { background: transparent; }
   .popover { left: auto; right: 72px; top: 16px; bottom: auto; width: 320px; border-radius: 12px; border: 1px solid var(--divider); }
