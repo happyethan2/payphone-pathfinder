@@ -64,6 +64,21 @@ services:
       - payphone-net
     restart: unless-stopped
 
+  # Public access through a Cloudflare Tunnel: an outbound connection, so no router ports
+  # open, and only the hostname routed to the backend in the Cloudflare dashboard is
+  # reachable. Off unless .env sets COMPOSE_PROFILES=tunnel and CLOUDFLARE_TUNNEL_TOKEN.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.3
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    profiles: ["tunnel"]
+    depends_on:
+      - backend
+    networks:
+      - payphone-net
+    restart: unless-stopped
+
 networks:
   payphone-net:
     driver: bridge

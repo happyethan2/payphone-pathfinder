@@ -90,6 +90,16 @@ Then, on the iPhone:
 1. Open `https://YOUR_IP:8000/cert.pem` in Safari and install the profile.
 2. Go to **Settings → General → About → Certificate Trust Settings** and turn the certificate on. Step 2 is required. Installing the profile alone is not enough.
 
+### Public access (Cloudflare Tunnel)
+
+To put an instance on the internet without opening router ports, run a Cloudflare Tunnel. It connects out to Cloudflare, gives the site a real HTTPS certificate, and exposes only the hostname you route.
+
+1. In the Cloudflare dashboard, open **Zero Trust → Networks → Tunnels** and create a Cloudflared tunnel. Copy its token.
+2. Add a public hostname to the tunnel. Point it at `https://backend:8000` and turn on **No TLS Verify**, because the backend's own certificate is self-signed.
+3. In `.env`, set `COMPOSE_PROFILES=tunnel` and `CLOUDFLARE_TUNNEL_TOKEN=<token>`, then run `./deploy.sh`.
+
+Route-finding runs on your server's CPU. A Cloudflare rate-limiting rule on `/api/route` and `/api/orienteer` stops anyone from hammering it.
+
 ### Indoor phones
 
 `backend/data/hints.json` lists phones that are probably indoors or probably never open to the public. It can also list other phones that need a warning, for example a phone in a remote community. The app uses it in three places:

@@ -2439,7 +2439,18 @@ navigator.serviceWorker?.ready.then(() => caches.has('tiles')).then(has => has &
 function dropRouteMap() {
   _mapSaved = false;
   updateRefreshDot();
+  try { localStorage.removeItem(MAP_SAVED_AT); } catch (_) {}
   return self.caches?.delete('tiles');
+}
+// CARTO's terms allow map tiles on a device for at most 30 days, so a saved map also goes then.
+// Dated from its first save: saving again only adds missing tiles, the older ones stay.
+const MAP_SAVED_AT = 'routeMapSavedAt', MAP_KEEP_MS = 30 * 86_400_000;
+function routeMapExpired() {
+  try {
+    const at = +localStorage.getItem(MAP_SAVED_AT);
+    if (!at) { localStorage.setItem(MAP_SAVED_AT, Date.now()); return false; }  // a map saved before the date was kept
+    return Date.now() - at > MAP_KEEP_MS;
+  } catch (_) { return false; }
 }
 
 const TILE_KB = 40;
@@ -2485,7 +2496,7 @@ async function saveRouteMap() {
     const want = routeTiles(), cache = await caches.open('tiles');
     const have = new Set((await cache.keys()).map(r => new URL(r.url).pathname));
     const todo = [...want].filter(k => !have.has(k)), total = todo.length;
-    if (!confirm(`Save the map along this route for offline use? About ${total} tiles, ${Math.max(1, Math.round(total * TILE_KB / 1000))} MB. It's deleted when you end the route.`)) return;
+    if (!confirm(`Save the map along this route for offline use? About ${total} tiles, ${Math.max(1, Math.round(total * TILE_KB / 1000))} MB. It's deleted when you end the route, or after 30 days.`)) return;
     btn.disabled = true;
     navigator.storage?.persist?.().catch(() => {});
     for (const k of have) if (!want.has(k)) await cache.delete(`https://basemaps.cartocdn.com${k}`);  // an earlier route's
@@ -2506,6 +2517,7 @@ async function saveRouteMap() {
     await Promise.all([worker(), worker(), worker(), worker()]);
     if (state.lastRoute !== route) return;  // ended mid-save: End Route deletes what was saved
     _mapSaved = (await cache.keys()).length > 0;
+    try { if (_mapSaved && !localStorage.getItem(MAP_SAVED_AT)) localStorage.setItem(MAP_SAVED_AT, Date.now()); } catch (_) {}
     updateRefreshDot();
     const est = await navigator.storage?.estimate?.().catch(() => null);
     toast((full ? 'Storage full: part of the route map saved' : failed ? `Route map saved, ${failed} tiles missed` : 'Route map saved')
@@ -2997,7 +3009,8 @@ window.addEventListener('offline', updateRefreshDot);
 // ── Startup ───────────────────────────────────────────────────────
 (function() {
   restoreSession();
-  if (!state.lastRoute) dropRouteMap();  // a map left behind by a route that ended as the page closed
+  // A map left behind by a route that ended as the page closed, or one past CARTO's 30 days
+  if (!state.lastRoute || routeMapExpired()) dropRouteMap();
   // No orientation API at all → auto-rotate can never work; grey the setting
   // out. (Done after restoreSession so setAutoRotate's saveSession doesn't
   // clobber the stored session with unrestored values.)
