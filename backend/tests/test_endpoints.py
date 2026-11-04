@@ -761,3 +761,395 @@ def test_committed_hints_file_shape():
         assert p["open"] is None or (len(p["open"]) == 2 and all(0 <= h < 24 for h in p["open"]) and p["open"][0] != p["open"][1])
         assert isinstance(p["n"], int)
         assert p["where"] is None or 0 < len(p["where"]) <= 48
+
+
+# ── /api/route with stops ───────────────────────────────────────────
+# SAMPLE_PHONES sit on a diagonal line, 0.01° apart: 1, 2, 3, 4, (5), 6 from the start corner on
+
+def _ncoords(request) -> int:
+    return request.url.path.split("/")[-1].count(";") + 1
+
+
+def mock_osrm_table_sized(router, profile: str, unreachable=None):
+    """A table answer sized to the request. unreachable(n) -> [(i, j)] pairs to mark impossible."""
+    def answer(request):
+        n = _ncoords(request)
+        m = _matrix(n)
+        for i, j in (unreachable(n) if unreachable else []):
+            m[i][j] = UNREACH
+        return httpx.Response(200, json={"code": "Ok", "durations": m, "distances": m})
+    return router.get(host=OSRM_HOSTS[profile], path__regex=r"/table/.*").mock(side_effect=answer)
+
+
+def mock_vroom_echo(router):
+    """Vroom that keeps the jobs in the order it was given them."""
+    def answer(request):
+        jobs = json.loads(request.content)["jobs"]
+        steps = [{"type": "start"}] + [{"type": "job", "id": j["id"]} for j in jobs] + [{"type": "end"}]
+        return httpx.Response(200, json={"code": 0, "routes": [{"steps": steps}]})
+    return router.post(host=VROOM_HOST).mock(side_effect=answer)
+
+
+VIA_46   = {"lat": -34.96, "lon": 138.64}    # between phones 4 and 6
+VIA_AT_3 = {"lat": -34.94, "lon": 138.62}
+VIA_AT_4 = {"lat": -34.95, "lon": 138.63}
+VIA_AT_6 = {"lat": -34.97, "lon": 138.65}
+
+
+def _route_calls(route):
+    return sorted(_ncoords(c.request) for c in route.calls)
+
+
+async def test_route_two_sections(client, mock_api):
+    mock_phones_ok(mock_api)
+    table = mock_osrm_table_sized(mock_api, "car")
+    routes = mock_osrm_routes(mock_api, "car")
+    vroom = mock_vroom_echo(mock_api)
+    r = await client.post("/api/route", json={"phone_ids": [6, 1, 4], "profile": "car",
+                                              **ROUTE_START_END, "vias": [VIA_46]})
+    assert r.status_code == 200
+    body = r.json()
+    assert table.call_count == 2 and vroom.call_count == 2
+    assert sorted(_ncoords(c.request) for c in table.calls) == [3, 4]  # [start,1,4,stop] and [stop,6,end]
+    assert body["ordered_ids"] == [1, 4, 6]
+    assert body["via_after"] == [2]
+    # The stop rides inside the 4 -> 6 leg: one 3-point OSRM call, no leg ends at it
+    assert [l["to_id"] for l in body["legs"]] == [1, 4, 6, None]
+    assert _route_calls(routes) == [2, 2, 2, 3]
+    assert len(body["legs"][2]["steps"]) == 1  # steps flattened across the sub-legs
+
+
+async def test_route_stop_after_snapped_start(client, mock_api):
+    mock_phones_ok(mock_api)
+    mock_osrm_table_sized(mock_api, "car")
+    mock_osrm_routes(mock_api, "car")
+    mock_vroom_echo(mock_api)
+    r = await client.post("/api/route", json={"phone_ids": [1, 4, 6], "profile": "car",
+                                              "start": {"phone_id": 1}, "end": ROUTE_START_END["end"],
+                                              "vias": [VIA_46]})
+    assert r.status_code == 200
+    assert r.json()["ordered_ids"] == [1, 4, 6]
+    assert r.json()["via_after"] == [2]  # the snapped start counts as one
+
+
+async def test_route_consecutive_stops_share_one_leg(client, mock_api):
+    mock_phones_ok(mock_api)
+    table = mock_osrm_table_sized(mock_api, "car")
+    routes = mock_osrm_routes(mock_api, "car")
+    mock_vroom_echo(mock_api)
+    r = await client.post("/api/route", json={"phone_ids": [1, 6], "profile": "car",
+                                              **ROUTE_START_END, "vias": [VIA_AT_3, VIA_AT_4]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ordered_ids"] == [1, 6] and body["via_after"] == [1, 1]
+    assert [l["to_id"] for l in body["legs"]] == [1, 6, None]
+    assert _route_calls(routes) == [2, 2, 4]          # 1 -> stop 1 -> stop 2 -> 6
+    assert 2 in [_ncoords(c.request) for c in table.calls]  # the empty section is still checked
+
+
+async def test_route_disconnected_empty_section(client, mock_api):
+    mock_phones_ok(mock_api)
+    mock_osrm_table_sized(mock_api, "foot", unreachable=lambda n: [(0, 1)] if n == 2 else [])
+    mock_osrm_routes(mock_api, "foot")
+    mock_vroom_echo(mock_api)
+    r = await client.post("/api/route", json={"phone_ids": [1, 6], "profile": "foot",
+                                              **ROUTE_START_END, "vias": [VIA_AT_3, VIA_AT_4]})
+    assert r.status_code == 400
+    assert r.json()["detail"].startswith("Stop 1 and Stop 2 are not connected by foot routing")
+
+
+async def test_route_open_ends_on_last_stop(client, mock_api):
+    mock_phones_ok(mock_api)
+    table = mock_osrm_table_sized(mock_api, "car")
+    routes = mock_osrm_routes(mock_api, "car")
+    mock_vroom_echo(mock_api)
+    r = await client.post("/api/route", json={"phone_ids": [1, 4], "profile": "car", **OPEN_START,
+                                              "vias": [VIA_AT_6]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ordered_ids"] == [1, 4] and body["via_after"] == [2]
+    assert [(l["from_id"], l["to_id"]) for l in body["legs"]] == [(None, 1), (1, 4), (4, None)]
+    assert table.call_count == 1  # the empty open section after the stop needs no table
+    assert _route_calls(routes) == [2, 2, 2]
+
+
+async def test_route_open_with_phones_after_last_stop(client, mock_api):
+    mock_phones_ok(mock_api)
+    mock_osrm_table_sized(mock_api, "car")
+    routes = mock_osrm_routes(mock_api, "car")
+    vroom = mock_vroom_echo(mock_api)
+    r = await client.post("/api/route", json={"phone_ids": [6, 1], "profile": "car", **OPEN_START,
+                                              "vias": [VIA_AT_3]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ordered_ids"] == [1, 6] and body["via_after"] == [1]
+    assert [l["to_id"] for l in body["legs"]] == [1, 6]
+    assert _route_calls(routes) == [2, 3]
+    vehicles = [json.loads(c.request.content)["vehicles"][0] for c in vroom.calls]
+    assert sorted("end_index" in v for v in vehicles) == [False, True]
+
+
+async def test_route_section_cap(client, mock_api, monkeypatch):
+    monkeypatch.setattr(main, "MAX_TABLE_COORDS", 4)
+    mock_phones_ok(mock_api)
+    table = mock_osrm_table_sized(mock_api, "car")
+    r = await client.post("/api/route", json={"phone_ids": [1, 2, 3], "profile": "car",
+                                              **ROUTE_START_END, "vias": [VIA_AT_6]})
+    assert r.status_code == 400
+    assert r.json()["detail"] == ("Too many phones between Start and Stop 1 (3). The maximum is 2 per "
+                                  "section — add a stop between them or deselect some.")
+    assert not table.called  # checked before any OSRM call
+
+
+async def test_route_total_cap_with_stops(client, mock_api, monkeypatch):
+    monkeypatch.setattr(main, "MAX_ROUTE_PHONES", 2)
+    mock_phones_ok(mock_api)
+    r = await client.post("/api/route", json={"phone_ids": [1, 2, 3], "profile": "car",
+                                              **ROUTE_START_END, "vias": [VIA_AT_6]})
+    assert r.status_code == 400
+    assert "maximum is 2 per route with stops" in r.json()["detail"]
+
+
+async def test_route_stop_validation(client, mock_api):
+    mock_phones_ok(mock_api)
+    r = await client.post("/api/route", json={"phone_ids": [1], "profile": "car", **ROUTE_START_END,
+                                              "vias": [VIA_46] * 9})
+    assert r.status_code == 400 and r.json()["detail"] == "At most 8 stops per route"
+    r = await client.post("/api/route", json={"phone_ids": [1], "profile": "car", **ROUTE_START_END,
+                                              "vias": [{"lon": 138.6}]})
+    assert r.status_code == 422
+
+
+async def test_route_unreachable_phone_in_second_section(client, mock_api):
+    mock_phones_ok(mock_api)
+    mock_osrm_table_sized(mock_api, "car", unreachable=lambda n: [(0, 1)] if n == 3 else [])
+    mock_vroom_echo(mock_api)
+    r = await client.post("/api/route", json={"phone_ids": [1, 4, 6], "profile": "car",
+                                              **ROUTE_START_END, "vias": [VIA_46]})
+    assert r.status_code == 400
+    assert r.json()["detail"].startswith("1 selected phone(s) can't be reached by car: #6.")
+
+
+async def test_route_osrm_noroute_is_400(client, mock_api):
+    mock_phones_ok(mock_api)
+    mock_osrm_table_sized(mock_api, "car")
+    mock_vroom_echo(mock_api)
+    mock_api.get(host=OSRM_HOSTS["car"], path__regex=r"/route/.*").mock(
+        return_value=httpx.Response(400, json={"code": "NoRoute", "message": "Impossible route between points"}))
+    r = await client.post("/api/route", json={"phone_ids": [1, 4, 6], "profile": "car",
+                                              **ROUTE_START_END, "vias": [VIA_46]})
+    assert r.status_code == 400
+    assert "No car route" in r.json()["detail"]
+
+
+async def test_route_without_stops_has_no_via_after(client, mock_api):
+    mock_phones_ok(mock_api)
+    mock_osrm_table(mock_api, "car", _matrix(4))
+    mock_osrm_routes(mock_api, "car")
+    mock_vroom(mock_api, job_order=[4, 1])
+    r = await client.post("/api/route", json={"phone_ids": [1, 4], "profile": "car", **ROUTE_START_END, "vias": []})
+    assert r.status_code == 200
+    assert set(r.json()) == {"ordered_ids", "total_distance_m", "total_duration_s", "path", "legs"}
+
+
+# ── /api/path ───────────────────────────────────────────────────────
+
+def mock_osrm_path(router, profile="car", coords=None):
+    coords = coords or [[138.6000001, -34.9200004], [138.605, -34.925], [138.61, -34.93], [138.62, -34.91]]
+    return router.get(host=OSRM_HOSTS[profile], path__regex=r"/route/.*").mock(
+        return_value=httpx.Response(200, json={"code": "Ok", "routes": [
+            {"geometry": {"type": "LineString", "coordinates": coords}, "distance": 3456.7, "duration": 321.0}]}))
+
+
+async def test_path_shape_and_simplified(client, mock_api):
+    route = mock_osrm_path(mock_api)
+    r = await client.get("/api/path", params={"profile": "car", "points": "-34.92,138.6;-34.93,138.61;-34.91,138.62"})
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "max-age=3600"
+    assert r.json() == {"distance_m": 3456.7, "duration_s": 321.0, "geometry": {"type": "LineString",
+                        "coordinates": [[138.6, -34.92], [138.61, -34.93], [138.62, -34.91]]}}  # middle collinear point gone
+    assert route.call_count == 1
+    req = route.calls.last.request
+    assert _ncoords(req) == 3 and req.url.params["steps"] == "false"
+
+
+async def test_path_cached(client, mock_api):
+    route = mock_osrm_path(mock_api)
+    for _ in range(2):
+        r = await client.get("/api/path", params={"profile": "car", "points": "-34.92,138.6;-34.93,138.61"})
+        assert r.status_code == 200
+    assert route.call_count == 1
+
+
+async def test_path_bad_requests(client, mock_api):
+    route = mock_osrm_path(mock_api)
+    for params in ({"profile": "car", "points": "-34.92,138.6"},
+                   {"profile": "car", "points": ";".join(["-34.92,138.6"] * 11)},
+                   {"profile": "car", "points": "-34.92,abc;-34.93,138.61"},
+                   {"profile": "car", "points": "-34.92;-34.93,138.61"},
+                   {"profile": "car", "points": "nan,138.6;-34.93,138.61"},
+                   {"profile": "car", "points": "-134.92,138.6;-34.93,138.61"},
+                   {"profile": "jetpack", "points": "-34.92,138.6;-34.93,138.61"}):
+        assert (await client.get("/api/path", params=params)).status_code == 400, params
+    assert not route.called
+    route.mock(return_value=httpx.Response(400, json={"code": "NoSegment", "message": "Could not find a matching segment"}))
+    r = await client.get("/api/path", params={"profile": "car", "points": "-34.92,138.6;-34.93,138.61"})
+    assert r.status_code == 400 and "No car route" in r.json()["detail"]
+
+
+# ── /api/phone-photos ───────────────────────────────────────────────
+
+W = main.WIKI_BASE
+
+
+def _photo(t, name, medium=None):
+    return {"type": t, "label": f"{t} view", "thumb": f"{W}t/{name}", "medium": medium or f"{W}m/{name}",
+            "full": f"{W}f/{name}", "uploader": "someone"}
+
+
+PHONE_7 = {"id": 7, "captured_by": 7, "cabinet_id": "AB-12_3", "photos": [
+    _photo("other", "o.jpg"), _photo("Front", "f.jpg"), _photo("mystery", "x.jpg"),
+    _photo("street", "s.jpg"), _photo("side", "sd.jpg"),
+    _photo("board", "js.jpg", medium="javascript:alert(1)"),
+    _photo("case", "h.jpg", medium="http://wiki.payphonetag.com/m/h.jpg"),
+    _photo("livery", "e.jpg", medium="https://evil.example/m/e.jpg"),
+]}
+
+
+def _mock_phone(router, pid, payload=None, status=200):
+    return router.get(f"{main.PAYPHONE_API_BASE}/payphone/{pid}").mock(
+        return_value=httpx.Response(status, json=payload if payload is not None else {}))
+
+
+async def test_phone_photos_sorted_and_filtered(client, mock_api):
+    up = _mock_phone(mock_api, 7, PHONE_7)
+    r = await client.get("/api/phone-photos/7")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == 7 and body["wiki_url"] == f"{W}wiki/Payphone:AB-12_3"
+    assert [p["type"] for p in body["photos"]] == ["street", "front", "side", "other", "mystery"]
+    assert body["photos"][1] == {"type": "front", "label": "Front view", "medium": f"{W}m/f.jpg", "full": f"{W}f/f.jpg"}
+    await client.get("/api/phone-photos/7")
+    assert up.call_count == 1  # cached
+
+
+async def test_phone_photos_wiki_url_validation(client, mock_api):
+    for pid, cab, want in ((11, 123, f"{W}wiki/Payphone:123"), (12, "../etc", None), (13, None, None),
+                           (14, "x" * 41, None), (15, "a b", None)):
+        _mock_phone(mock_api, pid, {"cabinet_id": cab, "photos": []})
+        assert (await client.get(f"/api/phone-photos/{pid}")).json()["wiki_url"] == want, cab
+
+
+async def test_phone_photos_upstream_404(client, mock_api):
+    _mock_phone(mock_api, 7, status=404)
+    assert (await client.get("/api/phone-photos/7")).status_code == 404
+
+
+async def test_phone_photos_stale_or_502(client, mock_api):
+    up = _mock_phone(mock_api, 7, PHONE_7)
+    await client.get("/api/phone-photos/7")
+    detail, _ = main._PHONE_CACHE[7]
+    main._PHONE_CACHE[7] = (detail, time.monotonic() - main._PHOTOS_MAX_AGE - 1)
+    up.mock(return_value=httpx.Response(500))
+    r = await client.get("/api/phone-photos/7")
+    assert r.status_code == 200 and len(r.json()["photos"]) == 5  # stale beats nothing
+    main._PHONE_CACHE.clear()
+    assert (await client.get("/api/phone-photos/7")).status_code == 502
+
+
+async def test_phone_photos_global_limit(client, mock_api):
+    up = _mock_phone(mock_api, 7, PHONE_7)
+    main._PHOTO_FETCHES.extend([time.monotonic()] * main._PHOTO_FETCH_LIMIT)
+    r = await client.get("/api/phone-photos/7")
+    assert r.status_code == 429 and not up.called
+
+
+# ── Stops: review follow-ups ────────────────────────────────────────
+
+async def test_route_open_ends_on_two_trailing_stops(client, mock_api):
+    mock_phones_ok(mock_api)
+    table = mock_osrm_table_sized(mock_api, "car")
+    routes = mock_osrm_routes(mock_api, "car")
+    mock_vroom_echo(mock_api)
+    r = await client.post("/api/route", json={"phone_ids": [1], "profile": "car", **OPEN_START,
+                                              "vias": [VIA_AT_4, VIA_AT_6]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ordered_ids"] == [1] and body["via_after"] == [1, 1]
+    # 1 -> stop 1 -> stop 2 is one leg that ends at the last stop
+    assert [(l["from_id"], l["to_id"]) for l in body["legs"]] == [(None, 1), (1, None)]
+    assert _route_calls(routes) == [2, 3]
+    assert sorted(_ncoords(c.request) for c in table.calls) == [2, 3]  # the empty open section needs none
+
+
+async def test_route_snapped_end_with_stop_on_the_end_leg(client, mock_api):
+    mock_phones_ok(mock_api)
+    mock_osrm_table_sized(mock_api, "car")
+    routes = mock_osrm_routes(mock_api, "car")
+    mock_vroom_echo(mock_api)
+    r = await client.post("/api/route", json={"phone_ids": [1, 4, 6], "profile": "car",
+                                              "start": ROUTE_START_END["start"], "end": {"phone_id": 6},
+                                              "vias": [VIA_46]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ordered_ids"] == [1, 4, 6] and body["via_after"] == [2]
+    assert [(l["from_id"], l["to_id"]) for l in body["legs"]] == [(None, 1), (1, 4), (4, 6)]
+    assert _route_calls(routes) == [2, 2, 3]  # 4 -> stop -> end (phone 6)
+
+
+async def test_route_open_last_section_cap(client, mock_api, monkeypatch):
+    monkeypatch.setattr(main, "MAX_TABLE_COORDS", 4)
+    mock_phones_ok(mock_api)
+    r = await client.post("/api/route", json={"phone_ids": [3, 4, 6], "profile": "car", **OPEN_START,
+                                              "vias": [{"lat": -34.93, "lon": 138.61}]})
+    assert r.status_code == 400
+    assert r.json()["detail"].startswith("Too many phones after Stop 1 (3). The maximum is 2 per section")
+
+
+async def test_route_rejects_bad_coordinates(client, mock_api):
+    mock_phones_ok(mock_api)
+    for bad in ({"lat": float("inf"), "lon": 138.6}, {"lat": float("nan"), "lon": 138.6},
+                {"lat": 200.0, "lon": 138.6}, {"lat": -34.9, "lon": -181.0}):
+        for body in ({"phone_ids": [1], "profile": "car", **ROUTE_START_END, "vias": [bad]},
+                     {"phone_ids": [1], "profile": "car", "start": bad}):
+            # json.dumps writes Infinity/NaN as a browser could send them; httpx's json= refuses to
+            r = await client.post("/api/route", content=json.dumps(body), headers={"Content-Type": "application/json"})
+            assert r.status_code == 422, body
+
+
+async def test_route_stops_too_far_apart(client, mock_api):
+    mock_phones_ok(mock_api)
+    table = mock_osrm_table_sized(mock_api, "foot")
+    far = {"lat": -31.95, "lon": 141.45}  # Broken Hill: 500 km from Adelaide in a straight line
+    r = await client.post("/api/route", json={"phone_ids": [1], "profile": "foot", **ROUTE_START_END, "vias": [far]})
+    assert r.status_code == 400 and "too far apart" in r.json()["detail"]
+    assert not table.called
+
+
+async def test_path_length_cap(client, mock_api):
+    route = mock_osrm_path(mock_api)
+    zigzag = ";".join(["-31.95,115.86", "-16.92,145.77"] * 5)  # Perth <-> Cairns, 9 hops
+    r = await client.get("/api/path", params={"profile": "car", "points": zigzag})
+    assert r.status_code == 400 and r.json()["detail"].startswith("That path is too long to preview")
+    r = await client.get("/api/path", params={"profile": "foot", "points": "-34.93,138.60;-33.14,148.18"})
+    assert r.status_code == 400
+    assert not route.called
+
+
+async def test_phone_photos_limit_serves_stale(client, mock_api):
+    up = _mock_phone(mock_api, 7, PHONE_7)
+    await client.get("/api/phone-photos/7")
+    detail, _ = main._PHONE_CACHE[7]
+    main._PHONE_CACHE[7] = (detail, time.monotonic() - main._PHOTOS_MAX_AGE - 1)
+    main._PHOTO_FETCHES.extend([time.monotonic()] * main._PHOTO_FETCH_LIMIT)
+    r = await client.get("/api/phone-photos/7")
+    assert r.status_code == 200 and len(r.json()["photos"]) == 5
+    assert up.call_count == 1  # the limit held: no second upstream call
+
+
+async def test_capture_check_ignores_odd_photo_data(client, mock_api):
+    mock_phones_ok(mock_api)
+    for pid, photos in ((1, 5), (4, {"a": 1}), (6, ["x", None, {"type": "front"}])):
+        _mock_phone(mock_api, pid, {"captured_by": 7, "photos": photos})
+    r = await client.get("/api/capture-check", params={"username": "GhostScout", "ids": "1,4,6"})
+    assert r.json() == {"mine": [1, 4, 6]}

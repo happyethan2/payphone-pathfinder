@@ -268,3 +268,12 @@ async def test_cache_bust_soon_after_boot(client, mock_api, monkeypatch):
     await client.post("/api/phones/refresh")
     await client.get("/api/phones", params={"username": "GhostScout"})
     assert route.call_count == 2
+
+
+async def test_photos_then_capture_check_share_one_upstream_call(client, mock_api):
+    mock_phones_ok(mock_api)
+    one = _mock_holder(mock_api, 1, 7)
+    assert (await client.get("/api/phone-photos/1")).status_code == 200
+    r = await client.get("/api/capture-check", params={"username": "GhostScout", "ids": "1"})
+    assert r.json() == {"mine": [1]}
+    assert one.call_count == 1

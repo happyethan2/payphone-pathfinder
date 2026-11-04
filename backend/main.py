@@ -3,15 +3,18 @@ import json
 import logging
 import math
 import os
+import re
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -59,6 +62,14 @@ async def _upstream_error_handler(request: Request, exc: httpx.HTTPError):
     )
 
 
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request: Request, exc: RequestValidationError):
+    """FastAPI's own 422 echoes each bad input back, and an Infinity or NaN can't be written as
+    JSON: that turned a rejected coordinate into a 500. Where and why is all a client needs."""
+    return JSONResponse(status_code=422, content={"detail": [
+        {"type": e.get("type"), "loc": list(e.get("loc", ())), "msg": e.get("msg")} for e in exc.errors()]})
+
+
 OSRM_URLS = {
     "foot":    os.getenv("OSRM_FOOT_URL",    "http://osrm-foot:5000"),
     "bicycle": os.getenv("OSRM_BICYCLE_URL", "http://osrm-bicycle:5000"),
@@ -89,6 +100,18 @@ AU_BBOX    = "112.9,-43.8,153.7,-10.6"   # minLon,minLat,maxLon,maxLat
 
 # Must match --max-table-size in docker-compose.yml
 MAX_TABLE_COORDS = int(os.getenv("MAX_TABLE_COORDS", "200"))
+
+# Stops split a route into sections, each solved on its own (and each within the table limit)
+MAX_VIAS         = 8     # = Google Maps stops per leg - 2, so every leg still reaches a phone
+MAX_ROUTE_PHONES = 500   # with stops; without them the table limit is the cap
+
+# Straight-line length (sum of hops) a path preview, or a route's chain of stops, may have.
+# Far past any real trip, but it keeps one request's OSRM answer to tens of thousands of points.
+PATH_MAX_KM = {"car": 6000.0, "bicycle": 1500.0, "foot": 500.0}
+
+# Wiki photo order in the navigation card; unknown types go last
+PHOTO_ORDER = ("street", "front", "side", "board", "case", "livery", "other")
+WIKI_BASE   = "https://wiki.payphonetag.com/"
 
 # Payphone tuple indices — adjust here if the live API changes
 IDX_ID     = 0
@@ -160,15 +183,29 @@ _CAPTURES_LOCK = asyncio.Lock()
 _CAPTURES_FAIL_UNTIL: float = 0.0
 
 # ---------------------------------------------------------------------------
-# Capture check. The game's phone feed shows every capture about 5 minutes late (on
-# purpose), but its single-phone endpoint is current. A navigating client asks whether
-# the player now holds its current stop or two; only that yes/no leaves this server.
-# One answer per phone serves every client for the fastest client rate (10 s).
+# Single-phone detail: capture checks and wiki photos. The game's phone feed shows every
+# capture about 5 minutes late (on purpose), but its single-phone endpoint is current. A
+# navigating client asks whether the player now holds its current stop or two; only that
+# yes/no leaves this server. One answer per phone serves every client for the fastest
+# client rate (10 s). The same answer carries the phone's wiki photos, kept for an hour.
 # ---------------------------------------------------------------------------
-_HOLDER_CACHE: dict[int, tuple[str | None, float]] = {}  # phone id -> (holder player id, fetched_at)
+_PHONE_CACHE: dict[int, tuple[dict, float]] = {}  # phone id -> ({holder, wiki_url, photos}, fetched_at)
 _HOLDER_CACHE_TTL: float = 10.0
-_HOLDER_CACHE_MAX: int   = 500
+_PHONE_CACHE_MAX: int    = 500
 _CAPTURE_CHECK_MAX: int  = 4      # current stop, the next one, recent skips
+_PHOTOS_MAX_AGE: float   = 3600.0
+# Photos are fetched as players browse, so they get a global brake on the game API
+_PHOTO_FETCHES: deque = deque()   # monotonic times of recent uncached photo fetches
+_PHOTO_FETCH_LIMIT: int    = 30
+_PHOTO_FETCH_WINDOW: float = 10.0
+
+# ---------------------------------------------------------------------------
+# Road path preview (GET /api/path): cached, and at most 4 OSRM calls at once
+# ---------------------------------------------------------------------------
+_PATH_CACHE: dict[tuple, tuple[dict, float]] = {}
+_PATH_CACHE_TTL: float = 3600.0
+_PATH_CACHE_MAX: int   = 200
+_PATH_SEM = asyncio.Semaphore(4)
 
 # ---------------------------------------------------------------------------
 # Geocode cache — place names barely change, and a shared instance sees the same
@@ -191,9 +228,11 @@ def reset_caches() -> None:
     global _PHONES_CACHE, _PHONES_CACHE_AT, _PHONES_FETCHED_AT, _PHONES_FETCHED_WALL, _PHONES_FAIL_UNTIL, _PHONES_FAILS
     global _PHOTO_CACHE, _PHOTO_CACHE_AT, _PHOTO_FAIL_UNTIL
     global _CAPTURES_CACHE, _CAPTURES_FAIL_UNTIL
-    global _GEO_CACHE, _HINTS, _LATEST, _HOLDER_CACHE
+    global _GEO_CACHE, _HINTS, _LATEST, _PHONE_CACHE, _PATH_CACHE
     _HTTP              = None
-    _HOLDER_CACHE      = {}
+    _PHONE_CACHE       = {}
+    _PATH_CACHE        = {}
+    _PHOTO_FETCHES.clear()
     _LATEST            = None
     _PHONES_CACHE      = None
     _PHONES_CACHE_AT   = 0.0
@@ -215,9 +254,14 @@ def reset_caches() -> None:
 # ---------------------------------------------------------------------------
 
 class StartEnd(BaseModel):
-    lat: Optional[float] = None
-    lon: Optional[float] = None
+    lat: Optional[float] = Field(default=None, ge=-90, le=90, allow_inf_nan=False)
+    lon: Optional[float] = Field(default=None, ge=-180, le=180, allow_inf_nan=False)
     phone_id: Optional[int] = None
+
+
+class LatLon(BaseModel):
+    lat: float = Field(ge=-90, le=90, allow_inf_nan=False)
+    lon: float = Field(ge=-180, le=180, allow_inf_nan=False)
 
 
 class RouteRequest(BaseModel):
@@ -225,6 +269,7 @@ class RouteRequest(BaseModel):
     start: StartEnd
     end: Optional[StartEnd] = None  # None = open route: finish at the last phone
     profile: str  # "foot" | "bicycle" | "car"
+    vias: list[LatLon] = []         # stops to pass through, in order
 
 
 class OrienteerRequest(BaseModel):
@@ -444,19 +489,25 @@ async def _osrm_table(coords: list[tuple[float, float]], profile: str) -> tuple[
     return _clean(body["durations"]), _clean(body["distances"])
 
 
-async def _osrm_route(coord_a: tuple[float, float], coord_b: tuple[float, float], profile: str) -> dict:
-    """Return the first OSRM route object for the a→b leg."""
+async def _osrm_route(coords: list[tuple[float, float]], profile: str, steps: bool = True) -> dict:
+    """Return the first OSRM route object through coords (lat, lon) in order."""
     base = OSRM_URLS.get(profile, OSRM_URLS["car"])
-    lat_a, lon_a = coord_a
-    lat_b, lon_b = coord_b
-    url = f"{base}/route/v1/driving/{lon_a},{lat_a};{lon_b},{lat_b}"
-    resp = await _http().get(url, params={
+    coord_str = ";".join(f"{lon},{lat}" for lat, lon in coords)
+    resp = await _http().get(f"{base}/route/v1/driving/{coord_str}", params={
         "overview": "full",
         "geometries": "geojson",
-        "steps": "true",
+        "steps": "true" if steps else "false",
     }, timeout=30.0)
+    try:
+        body = resp.json()
+    except ValueError:
+        body = None
+    body = body if isinstance(body, dict) else {}
+    # OSRM answers 400 when no road joins the points: the user's to fix, not a server fault
+    if body.get("code") in ("NoRoute", "NoSegment"):
+        raise HTTPException(400, f"No {profile} route joins these points. "
+                                 "Move a point or switch transport mode.")
     resp.raise_for_status()
-    body = resp.json()
     if body.get("code") != "Ok" or not body.get("routes"):
         raise HTTPException(502, f"OSRM route error: {body.get('message')}")
     return body["routes"][0]
@@ -466,17 +517,20 @@ async def _build_route_geometry(
     visit_coords: list[tuple[float, float]],
     visit_labels: list[int | None],
     profile: str,
+    vias_between: dict[int, list[tuple[float, float]]] | None = None,
 ) -> tuple[list, list, float, float]:
     """Fetch per-leg OSRM geometry concurrently (bounded) and assemble the
-    response features/legs in visit order.
+    response features/legs in visit order. vias_between[i]: stops leg i passes through.
 
     Returns (features, legs_summary, total_distance_m, total_duration_s).
     """
     sem = asyncio.Semaphore(8)
+    vias_between = vias_between or {}
 
     async def leg_task(i: int) -> dict:
         async with sem:
-            return await _osrm_route(visit_coords[i], visit_coords[i + 1], profile)
+            return await _osrm_route(
+                [visit_coords[i], *vias_between.get(i, []), visit_coords[i + 1]], profile)
 
     legs = await asyncio.gather(*(leg_task(i) for i in range(len(visit_coords) - 1)))
 
@@ -511,7 +565,7 @@ async def _build_route_geometry(
                     "distance_m":  s.get("distance", 0),
                     "duration_s":  s.get("duration", 0),
                 }
-                for s in leg.get("legs", [{}])[0].get("steps", [])
+                for sub in leg.get("legs", []) for s in sub.get("steps", [])
             ],
         })
 
@@ -525,6 +579,67 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dlon = math.radians(lon2 - lon1)
     a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     return R * 2 * math.asin(math.sqrt(a))
+
+
+def _hops_km(points: list[tuple[float, float]]) -> float:
+    return sum(_haversine_km(*a, *b) for a, b in zip(points, points[1:]))
+
+
+def _assign_sections(
+    anchors: list[tuple[float, float]], has_end: bool, coords: list[tuple[float, float]],
+) -> list[int]:
+    """Section index for each coord. Section k runs anchors[k] -> anchors[k+1]; without an end
+    the last section is open after the last anchor. A phone joins the section it detours least
+    from in a straight line (open section: its distance from the last anchor); ties go earlier.
+
+    ponytail: straight lines, so a phone across a river or range can land in the wrong section;
+    an OSRM table of anchors x phones would fix that at one more call per route.
+    """
+    closed = [(anchors[k], anchors[k + 1], _haversine_km(*anchors[k], *anchors[k + 1]))
+              for k in range(len(anchors) - 1)]
+    out = []
+    for p in coords:
+        costs = [_haversine_km(*a, *p) + _haversine_km(*p, *b) - ab for a, b, ab in closed]
+        if not has_end:
+            costs.append(_haversine_km(*anchors[-1], *p))
+        out.append(min(range(len(costs)), key=costs.__getitem__))  # first minimum: ties go earlier
+    return out
+
+
+def _simplify(coords: list, tol_m: float = 20.0) -> list:
+    """Douglas-Peucker on [lon, lat] points in a local metric frame, iterative so long routes
+    can't overflow the stack. Keeps the endpoints."""
+    n = len(coords)
+    if n <= 2:
+        return list(coords)
+    kx = 111_320.0 * math.cos(math.radians(sum(c[1] for c in coords) / n))
+    xs = [c[0] * kx for c in coords]
+    ys = [c[1] * 110_540.0 for c in coords]
+    keep = [False] * n
+    keep[0] = keep[-1] = True
+    tol2 = tol_m * tol_m
+    stack = [(0, n - 1)]
+    while stack:
+        a, b = stack.pop()
+        if b - a < 2:
+            continue
+        ax, ay = xs[a], ys[a]
+        dx, dy = xs[b] - ax, ys[b] - ay
+        seg2 = dx * dx + dy * dy
+        best, at = tol2, -1
+        for i in range(a + 1, b):
+            px, py = xs[i] - ax, ys[i] - ay
+            t = (px * dx + py * dy) / seg2 if seg2 else 0.0
+            t = 0.0 if t < 0 else 1.0 if t > 1 else t
+            ex, ey = px - t * dx, py - t * dy
+            d2 = ex * ex + ey * ey
+            if d2 > best:
+                best, at = d2, i
+        if at >= 0:
+            keep[at] = True
+            stack.append((a, at))
+            stack.append((at, b))
+    return [c for c, k in zip(coords, keep) if k]
 
 
 async def _vroom_solve(
@@ -661,23 +776,79 @@ async def _fetch_past_capture_ids(username: str, cell: str) -> set[int]:
         return ids
 
 
-async def _phone_holder(pid: int) -> str | None:
-    """The player id holding a phone right now, from the game's single-phone endpoint (None: unheld)."""
-    hit = _HOLDER_CACHE.get(pid)
-    if hit is not None and time.monotonic() - hit[1] < _HOLDER_CACHE_TTL:
+def _trim_phone(d: dict) -> dict:
+    """The parts of the game's single-phone answer we use. Photo URLs are kept only on the
+    wiki (the page loads them), and the wiki page link only for a plain cabinet id."""
+    by = d.get("captured_by")
+    cab = d.get("cabinet_id")
+    cab = str(cab) if cab is not None else ""
+    ok = lambda u: isinstance(u, str) and u.startswith(WIKI_BASE)
+    raw = d.get("photos")
+    photos = []
+    for ph in raw if isinstance(raw, list) else []:  # odd photo data must never break a capture check
+        if isinstance(ph, dict) and ok(ph.get("medium")) and ok(ph.get("full")):
+            photos.append({"type": str(ph.get("type") or "other").lower(), "label": str(ph.get("label") or ""),
+                           "medium": ph["medium"], "full": ph["full"]})
+    rank = {t: i for i, t in enumerate(PHOTO_ORDER)}
+    photos.sort(key=lambda ph: rank.get(ph["type"], len(PHOTO_ORDER)))
+    return {
+        "holder":   str(by) if by not in (None, 0, "0", "") else None,
+        "wiki_url": f"{WIKI_BASE}wiki/Payphone:{cab}" if re.fullmatch(r"[A-Za-z0-9_-]{1,40}", cab) else None,
+        "photos":   photos,
+    }
+
+
+async def _phone_detail(pid: int, max_age: float) -> dict:
+    """One phone from the game's single-phone endpoint, trimmed; an answer up to max_age old is reused."""
+    hit = _PHONE_CACHE.get(pid)
+    if hit is not None and time.monotonic() - hit[1] < max_age:
         return hit[0]
     resp = await _http().get(f"{PAYPHONE_API_BASE}/payphone/{pid}", timeout=_UPSTREAM_TIMEOUT)
     resp.raise_for_status()
     d = resp.json()
     if not isinstance(d, dict):
         raise ValueError("unexpected payload from game API")
-    by = d.get("captured_by")
-    holder = str(by) if by not in (None, 0, "0", "") else None
-    _HOLDER_CACHE.pop(pid, None)  # re-insert so dict order stays oldest-first
-    if len(_HOLDER_CACHE) >= _HOLDER_CACHE_MAX:
-        del _HOLDER_CACHE[next(iter(_HOLDER_CACHE))]
-    _HOLDER_CACHE[pid] = (holder, time.monotonic())
-    return holder
+    detail = _trim_phone(d)
+    _PHONE_CACHE.pop(pid, None)  # re-insert so dict order stays oldest-first
+    if len(_PHONE_CACHE) >= _PHONE_CACHE_MAX:
+        del _PHONE_CACHE[next(iter(_PHONE_CACHE))]
+    _PHONE_CACHE[pid] = (detail, time.monotonic())
+    return detail
+
+
+async def _phone_holder(pid: int) -> str | None:
+    """The player id holding a phone right now (None: unheld)."""
+    return (await _phone_detail(pid, _HOLDER_CACHE_TTL))["holder"]
+
+
+@app.get("/api/phone-photos/{pid}")
+async def phone_photos(pid: int):
+    """A phone's wiki photos, best first, and its wiki page. The game API sends no CORS header,
+    so the browser can't ask it directly."""
+    hit = _PHONE_CACHE.get(pid)
+    shape = lambda d: {"id": pid, "wiki_url": d["wiki_url"], "photos": d["photos"]}
+    if hit is None or time.monotonic() - hit[1] >= _PHOTOS_MAX_AGE:
+        now = time.monotonic()
+        while _PHOTO_FETCHES and now - _PHOTO_FETCHES[0] > _PHOTO_FETCH_WINDOW:
+            _PHOTO_FETCHES.popleft()
+        if len(_PHOTO_FETCHES) >= _PHOTO_FETCH_LIMIT:
+            if hit is not None:
+                return shape(hit[0])
+            raise HTTPException(429, "Lots of people are looking at photos right now. Try again in a few seconds.")
+        _PHOTO_FETCHES.append(now)
+    try:
+        return shape(await _phone_detail(pid, _PHOTOS_MAX_AGE))
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(404, f"Phone {pid} not found") from e
+        err = e
+    except (httpx.HTTPError, ValueError) as e:
+        err = e
+    logger.warning("Phone photos failure for %s: %s: %s", pid, type(err).__name__, err)
+    hit = _PHONE_CACHE.get(pid)
+    if hit is not None:
+        return shape(hit[0])  # stale is better than nothing
+    raise HTTPException(502, "The Payphone Tag wiki photos are unavailable right now. Try again shortly.")
 
 
 @app.get("/api/capture-check")
@@ -878,12 +1049,76 @@ async def get_version():
     return {"version": APP_VERSION, "latest": _LATEST[0]}
 
 
+async def _route_section(
+    a_coord: tuple[float, float], b_coord: tuple[float, float] | None, job_phone_ids: list[int],
+    phone_lookup: dict[int, tuple[float, float]], profile: str, a_name: str, b_name: str,
+) -> list[int]:
+    """Order one section's phones from a_coord to b_coord (None: finish at the best last phone).
+    a_name/b_name word the errors, e.g. "Start"/"end" or "Stop 1"/"Stop 2"."""
+    # Layout: [a, phone_0, ..., phone_N(, b)]
+    all_coords: list[tuple[float, float]] = [a_coord]
+    job_indices: list[tuple[int, int]] = []  # (phone_id, coord_index)
+    for pid in job_phone_ids:
+        job_indices.append((pid, len(all_coords)))
+        all_coords.append(phone_lookup[pid])
+    end_idx: int | None = None
+    if b_coord is not None:
+        end_idx = len(all_coords)
+        all_coords.append(b_coord)
+    if len(all_coords) < 2:
+        return []  # an open section with no phones: nothing to check or order
+
+    # OSRM distance/duration matrix
+    durations, distances = await _osrm_table(all_coords, profile)
+
+    # Fail early with a clear message instead of a cryptic error at the
+    # geometry stage when the road network can't connect the selection.
+    if end_idx is not None and durations[0][end_idx] >= UNREACHABLE:
+        raise HTTPException(
+            400,
+            f"{a_name} and {b_name} are not connected by {profile} routing. "
+            "Move an endpoint or switch transport mode.",
+        )
+    unreachable = [
+        pid for pid, ci in job_indices
+        if durations[0][ci] >= UNREACHABLE
+        or (end_idx is not None and durations[ci][end_idx] >= UNREACHABLE)
+    ]
+    if unreachable:
+        shown = ", ".join(f"#{pid}" for pid in unreachable[:10])
+        more  = f" (+{len(unreachable) - 10} more)" if len(unreachable) > 10 else ""
+        raise HTTPException(
+            400,
+            f"{len(unreachable)} selected phone(s) can't be reached by {profile}: "
+            f"{shown}{more}. Deselect them or switch transport mode.",
+        )
+
+    # Vroom TSP solve — skipped when there is nothing left to order.
+    # If every selected phone is also an endpoint (e.g. "start here, end at this
+    # phone, and that phone is my only selection"), job_phone_ids is empty. That's a
+    # legitimate request, but Vroom rejects a jobs-less problem with an HTTP 400,
+    # which used to bubble out as a bare 500. With no jobs to sequence, the direct
+    # start→end route already *is* the answer — there is nothing to solve.
+    if not job_indices:
+        return []
+    return await _vroom_solve(
+        coords=all_coords,
+        start_idx=0,
+        end_idx=end_idx,
+        job_indices=job_indices,
+        durations=durations,
+        distances=distances,
+    )
+
+
 @app.post("/api/route")
 async def solve_route(req: RouteRequest):
     if req.profile not in OSRM_URLS:
         raise HTTPException(400, f"Unknown profile '{req.profile}'. Use: foot, bicycle, car")
     if not req.phone_ids:
         raise HTTPException(400, "phone_ids must not be empty")
+    if len(req.vias) > MAX_VIAS:
+        raise HTTPException(400, f"At most {MAX_VIAS} stops per route")
 
     # Dedupe while preserving selection order (duplicate job ids break Vroom)
     phone_ids = list(dict.fromkeys(req.phone_ids))
@@ -907,9 +1142,10 @@ async def solve_route(req: RouteRequest):
     has_end     = req.end is not None
     start_coord = _resolve_coord(req.start)
     end_coord   = _resolve_coord(req.end) if has_end else None
+    via_coords  = [(v.lat, v.lon) for v in req.vias]
+    # Section k runs from anchor k to anchor k + 1; without an end the last one is open
+    anchors     = [start_coord, *via_coords] + ([end_coord] if has_end else [])
 
-    # Build the coordinate list and job index mapping
-    # Layout: [start, phone_0, phone_1, ..., phone_N(, end)] — no end on an open route.
     # If start/end snap to a phone_id, remove that phone from the jobs list
     # (the vehicle's presence at start/end covers the capture).
     snapped_start_id = req.start.phone_id
@@ -920,75 +1156,54 @@ async def solve_route(req: RouteRequest):
         if pid != snapped_start_id and pid != snapped_end_id
     ]
 
-    # OSRM's table service rejects requests above --max-table-size coordinates:
-    # start + jobs (+ end, unless the route is open)
-    max_jobs = MAX_TABLE_COORDS - 1 - (1 if has_end else 0)
-    if len(job_phone_ids) > max_jobs:
-        raise HTTPException(
-            400,
-            f"Too many phones selected ({len(job_phone_ids)}). The maximum is "
-            f"{max_jobs} per route — split the selection into smaller batches.",
-        )
+    def _check_known():
+        for pid in job_phone_ids:
+            if pid not in phone_lookup:
+                raise HTTPException(404, f"Phone {pid} not found in Payphone Tag data")
 
-    # Build ordered coordinate list
-    # index 0 = start, 1..N = phones, N+1 = end
-    all_coords: list[tuple[float, float]] = [start_coord]
-    job_indices: list[tuple[int, int]] = []  # (phone_id, coord_index)
-
-    for pid in job_phone_ids:
-        if pid not in phone_lookup:
-            raise HTTPException(404, f"Phone {pid} not found in Payphone Tag data")
-        coord_idx = len(all_coords)
-        all_coords.append(phone_lookup[pid])
-        job_indices.append((pid, coord_idx))
-
-    end_idx: int | None = None
-    if has_end:
-        end_idx = len(all_coords)
-        all_coords.append(end_coord)
-
-    # OSRM distance/duration matrix
-    durations, distances = await _osrm_table(all_coords, req.profile)
-
-    # Fail early with a clear message instead of a cryptic error at the
-    # geometry stage when the road network can't connect the selection.
-    if has_end and durations[0][end_idx] >= UNREACHABLE:
-        raise HTTPException(
-            400,
-            f"Start and end are not connected by {req.profile} routing. "
-            "Move an endpoint or switch transport mode.",
-        )
-    unreachable = [
-        pid for pid, ci in job_indices
-        if durations[0][ci] >= UNREACHABLE
-        or (has_end and durations[ci][end_idx] >= UNREACHABLE)
-    ]
-    if unreachable:
-        shown = ", ".join(f"#{pid}" for pid in unreachable[:10])
-        more  = f" (+{len(unreachable) - 10} more)" if len(unreachable) > 10 else ""
-        raise HTTPException(
-            400,
-            f"{len(unreachable)} selected phone(s) can't be reached by {req.profile}: "
-            f"{shown}{more}. Deselect them or switch transport mode.",
-        )
-
-    # Vroom TSP solve — skipped when there is nothing left to order.
-    # If every selected phone is also an endpoint (e.g. "start here, end at this
-    # phone, and that phone is my only selection"), job_phone_ids is empty. That's a
-    # legitimate request, but Vroom rejects a jobs-less problem with an HTTP 400,
-    # which used to bubble out as a bare 500. With no jobs to sequence, the direct
-    # start→end route already *is* the answer — there is nothing to solve.
-    if job_indices:
-        ordered_ids = await _vroom_solve(
-            coords=all_coords,
-            start_idx=0,
-            end_idx=end_idx,
-            job_indices=job_indices,
-            durations=durations,
-            distances=distances,
-        )
+    if not via_coords:
+        # OSRM's table service rejects requests above --max-table-size coordinates:
+        # start + jobs (+ end, unless the route is open)
+        max_jobs = MAX_TABLE_COORDS - 1 - (1 if has_end else 0)
+        if len(job_phone_ids) > max_jobs:
+            raise HTTPException(
+                400,
+                f"Too many phones selected ({len(job_phone_ids)}). The maximum is "
+                f"{max_jobs} per route — split the selection into smaller batches.",
+            )
+        _check_known()
+        names = ["Start", "end"]
+        sections = [job_phone_ids]
     else:
-        ordered_ids = []
+        _check_known()
+        # Stops ride inside legs, so a chain of far-flung stops would make one huge OSRM geometry
+        if _hops_km(anchors) > PATH_MAX_KM[req.profile]:
+            raise HTTPException(400, f"Those stops are too far apart to route by {req.profile} "
+                                     f"(over {PATH_MAX_KM[req.profile]:,.0f} km between them).")
+        if len(job_phone_ids) > MAX_ROUTE_PHONES:
+            raise HTTPException(
+                400,
+                f"Too many phones selected ({len(job_phone_ids)}). The maximum is "
+                f"{MAX_ROUTE_PHONES} per route with stops — deselect some.",
+            )
+        names = ["Start", *(f"Stop {i + 1}" for i in range(len(via_coords))), "End"]
+        owner = _assign_sections(anchors, has_end, [phone_lookup[pid] for pid in job_phone_ids])
+        sections = [[pid for pid, k in zip(job_phone_ids, owner) if k == s] for s in range(len(via_coords) + 1)]
+        cap = MAX_TABLE_COORDS - 2
+        for k, ids in enumerate(sections):
+            if len(ids) > cap:
+                where = f"between {names[k]} and {names[k + 1]}" if k + 1 < len(anchors) else f"after {names[k]}"
+                raise HTTPException(
+                    400,
+                    f"Too many phones {where} ({len(ids)}). The maximum is {cap} per section — "
+                    "add a stop between them or deselect some.",
+                )
+
+    orders = await asyncio.gather(*(
+        _route_section(anchors[k], anchors[k + 1] if k + 1 < len(anchors) else None, ids,
+                       phone_lookup, req.profile, names[k], names[k + 1])
+        for k, ids in enumerate(sections)))
+    ordered_ids = [pid for ids in orders for pid in ids]
 
     # Prepend/append snapped phones back into the final ordered list
     final_order: list[int] = []
@@ -1005,16 +1220,33 @@ async def solve_route(req: RouteRequest):
     # and emit a zero-length leading/trailing leg — two wasted OSRM round-trips per
     # route and junk entries in path.features. The endpoints instead carry their
     # phone id as a label, so legs are still attributed correctly.
-    visit_coords = [start_coord] + [phone_lookup[pid] for pid in ordered_ids]
-    visit_labels = [snapped_start_id] + ordered_ids
-    if has_end:  # an open route's geometry simply stops at the last phone
+    # Stops never end a leg: they ride along inside the leg that passes them.
+    visit_coords, visit_labels = [start_coord], [snapped_start_id]
+    vias_between: dict[int, list[tuple[float, float]]] = {}
+    pending: list[tuple[float, float]] = []
+    for k, ids in enumerate(orders):
+        for pid in ids:
+            if pending:
+                vias_between[len(visit_coords) - 1], pending = pending, []
+            visit_coords.append(phone_lookup[pid])
+            visit_labels.append(pid)
+        if k < len(via_coords):
+            pending.append(via_coords[k])
+    if has_end:  # an open route's geometry simply stops at the last phone...
+        if pending:
+            vias_between[len(visit_coords) - 1] = pending
         visit_coords.append(end_coord)
         visit_labels.append(snapped_end_id)
+    elif pending:  # ...or at its last stop, when stops come after every phone
+        if pending[:-1]:
+            vias_between[len(visit_coords) - 1] = pending[:-1]
+        visit_coords.append(pending[-1])
+        visit_labels.append(None)
 
     features, legs_summary, total_distance, total_duration = \
-        await _build_route_geometry(visit_coords, visit_labels, req.profile)
+        await _build_route_geometry(visit_coords, visit_labels, req.profile, vias_between)
 
-    return {
+    out = {
         "ordered_ids":      final_order,
         "total_distance_m": total_distance,
         "total_duration_s": total_duration,
@@ -1024,6 +1256,54 @@ async def solve_route(req: RouteRequest):
         },
         "legs": legs_summary,
     }
+    if via_coords:
+        # Stop i comes after the first via_after[i] entries of ordered_ids
+        base = 1 if snapped_start_id is not None else 0
+        out["via_after"] = [base + sum(len(ids) for ids in orders[:i + 1]) for i in range(len(via_coords))]
+    return out
+
+
+@app.get("/api/path")
+async def road_path(
+    profile: str = Query(...),
+    points:  str = Query(..., description="lat,lon;lat,lon;… — 2 to 10 points"),
+):
+    """The road through the plan's points, for the preview line and Along Path. Simplified to
+    20 m: plenty for a line on the map and for picking phones within a kilometre of it."""
+    if profile not in OSRM_URLS:
+        raise HTTPException(400, f"Unknown profile '{profile}'. Use: foot, bicycle, car")
+    bad = HTTPException(400, "points must be lat,lon pairs separated by ;")
+    try:
+        pts = [tuple(round(float(v), 5) for v in part.split(",")) for part in points.split(";")]
+    except ValueError:
+        raise bad
+    if not 2 <= len(pts) <= 10:
+        raise HTTPException(400, "Give 2 to 10 points")
+    if any(len(p) != 2 or not (-90 <= p[0] <= 90 and -180 <= p[1] <= 180) for p in pts):
+        raise bad  # also catches nan, which fails every comparison
+    if _hops_km(pts) > PATH_MAX_KM[profile]:
+        raise HTTPException(400, f"That path is too long to preview by {profile} "
+                                 f"(over {PATH_MAX_KM[profile]:,.0f} km between the points).")
+    key = (profile, tuple(pts))
+    hit = _PATH_CACHE.get(key)
+    if hit is None or time.monotonic() - hit[1] >= _PATH_CACHE_TTL:
+        # The whole job under the semaphore: OSRM, parsing its answer, simplifying and serialising
+        async with _PATH_SEM:
+            route = await _osrm_route(pts, profile, steps=False)
+
+            def build() -> bytes:
+                coords = _simplify(route["geometry"]["coordinates"])
+                return json.dumps({
+                    "distance_m": route["distance"],
+                    "duration_s": route["duration"],
+                    "geometry":   {"type": "LineString", "coordinates": [[round(x, 5), round(y, 5)] for x, y in coords]},
+                }, separators=(",", ":")).encode()
+            body = await asyncio.to_thread(build)
+        _PATH_CACHE.pop(key, None)  # re-insert so dict order stays oldest-first
+        if len(_PATH_CACHE) >= _PATH_CACHE_MAX:
+            del _PATH_CACHE[next(iter(_PATH_CACHE))]
+        _PATH_CACHE[key] = hit = (body, time.monotonic())
+    return Response(hit[0], media_type="application/json", headers={"Cache-Control": "max-age=3600"})
 
 
 @app.post("/api/orienteer")
