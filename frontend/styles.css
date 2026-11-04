@@ -172,6 +172,7 @@ body.picking #sheet { transform: translateY(110%); }
 .nav-head { display: flex; align-items: center; gap: 12px; padding: 16px 0 12px; }
 .nav-head .wp { width: 36px; height: 36px; font-size: 15px; flex: none; }
 .nav-share { flex: none; width: 44px; margin-left: auto; padding: 0; border: 0; background: transparent; color: var(--accent); }
+#nav-photos + .nav-share { margin-left: 0; }  /* the camera, when shown, takes the push to the right */
 .nav-title { font-size: 17px; font-weight: 700; color: var(--text); }
 .nav-stats { font-size: 13px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
 /* Wide halves so the leg arrows are easy to hit; swiping the card also changes leg */
@@ -380,3 +381,35 @@ body.picking #tool-dock { display: none; }
 #review-back { color: var(--text); }  /* in the tool dock, above the tool pill */
 .lock-row .access-line { margin: 0; }
 .lock-row input { margin-top: 2px; }
+
+/* ── Wiki photos: a strip on the nav card, and a full-screen viewer ── */
+/* 4:3 cards 120px tall, so the next photo peeks in; sideways only, and it never hands the swipe to the card */
+#photo-strip { display: flex; gap: 8px; margin: 14px -16px 0; padding: 0 16px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding: 0 16px;
+  touch-action: pan-x; overscroll-behavior-x: contain; scrollbar-width: none; animation: strip-in .22s ease-out; }
+#photo-strip::-webkit-scrollbar { display: none; }
+@keyframes strip-in { from { opacity: 0; transform: translateY(8px); } }
+.ph { position: relative; flex: none; scroll-snap-align: start; }
+.ph-img { display: block; width: 160px; height: 120px; min-height: 0; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: var(--raised); }
+.ph-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ph-wiki { position: absolute; left: 6px; bottom: 6px; padding: 3px 7px; border-radius: 6px; background: rgba(16,17,18,.78); color: var(--text); font-size: 11px; text-decoration: none; }
+/* Small links, 44px to tap: an invisible overlay grows the hit area, not the look */
+.ph-wiki::before, .pv-caption a::before { content: ""; position: absolute; inset: -12px -4px; }
+.pv-caption a { position: relative; }
+#photo-viewer { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: #000; color: var(--text); overflow: hidden; }
+#photo-viewer::backdrop { background: #000; }
+.pv-track { display: flex; width: 100%; height: 100%; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior: contain; touch-action: pan-x; scrollbar-width: none; }
+.pv-track::-webkit-scrollbar { display: none; }
+#photo-viewer.zoomed .pv-track { overflow: hidden; touch-action: none; }
+.pv-slide { flex: none; width: 100%; height: 100%; display: grid; place-items: center; scroll-snap-align: center; scroll-snap-stop: always; overflow: hidden; }
+.pv-slide img { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; -webkit-user-select: none; transform-origin: center; }
+#photo-viewer.zoomed .pv-slide img { cursor: grab; }
+.pv-close { position: absolute; top: max(12px, env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; padding: 0; border-radius: 50%; background: rgba(16,17,18,.7); border: 0; color: var(--text); }
+.pv-nav { display: none; position: absolute; top: 50%; translate: 0 -50%; width: 44px; height: 44px; padding: 0; border-radius: 50%; background: rgba(16,17,18,.7); border: 0; color: var(--text); }
+@media (hover: hover) { .pv-nav { display: inline-flex; } }
+#photo-viewer.single .pv-nav { display: none; }
+.pv-prev { left: 12px; }
+.pv-next { right: 12px; }
+.pv-caption { position: absolute; left: 0; right: 0; bottom: 0; padding: 12px 16px max(12px, env(safe-area-inset-bottom)); text-align: center; font-size: 13px; color: var(--text); background: linear-gradient(transparent, rgba(0,0,0,.7)); pointer-events: none; }
+.pv-caption a { color: var(--accent); pointer-events: auto; }
+#photo-chip { color: var(--text); }
+#photo-chip .icon { display: inline-block; }

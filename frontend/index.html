@@ -36,6 +36,7 @@
 <!-- ── Selection tools: picking phones happens on the map ──────── -->
 <div id="tool-dock">
   <button id="review-back" class="chip" hidden onclick="this.hidden = true; findPlannedRoute()">Back to Review</button>
+  <button id="photo-chip" class="chip" hidden onclick="openPhotoViewer(Number(this.dataset.id), 0)"><span class="icon icon-camera" aria-hidden="true"></span><span></span></button>
   <div id="path-chips" class="chips" role="group" aria-labelledby="path-label" hidden>
     <span class="chips-label" id="path-label">Along Path:</span>
     <button class="chip" onclick="selectAlongPath(0.5)">500 m</button>
@@ -102,9 +103,11 @@
   </section>
 
   <section id="nav-view" hidden>
+    <div id="photo-strip" hidden></div>
     <div class="nav-head">
       <div class="wp wp-active" id="nav-badge"></div>
       <div><div class="nav-title" id="nav-title"></div><div class="nav-stats" id="route-stats"></div></div>
+      <button class="nav-share" id="nav-photos" onclick="togglePhotoStrip()" aria-label="Wiki photos of this stop" title="Wiki Photos" aria-expanded="false" aria-controls="photo-strip" hidden><span class="icon icon-camera" aria-hidden="true"></span></button>
       <button class="nav-share" onclick="shareSelection()" aria-label="Copy share link" title="Copy Share Link"><span class="icon icon-share" aria-hidden="true"></span></button>
     </div>
     <div class="access-line" id="access-line" role="status" hidden></div>
@@ -231,6 +234,15 @@
 <!-- ── Choosing a start/end on the map ─────────────────────────── -->
 <div id="pick-banner" hidden></div>
 <div id="pick-actions" hidden><button onclick="pickCancel()">Cancel</button></div>
+
+<!-- ── Wiki photos, full screen ─────────────────────────────────── -->
+<dialog id="photo-viewer" aria-label="Wiki photos">
+  <div class="pv-track" id="pv-track"></div>
+  <button class="pv-close" onclick="closePhotoViewer()" aria-label="Close photos"><span class="icon icon-close" aria-hidden="true"></span></button>
+  <button class="pv-nav pv-prev" onclick="photoStep(-1)" aria-label="Previous photo"><span class="icon icon-chevron-left" aria-hidden="true"></span></button>
+  <button class="pv-nav pv-next" onclick="photoStep(1)" aria-label="Next photo"><span class="icon icon-chevron-right" aria-hidden="true"></span></button>
+  <div class="pv-caption" id="pv-caption"></div>
+</dialog>
 
 <div id="toast" role="status" hidden><span id="toast-msg"></span><button id="toast-undo" hidden>Undo</button></div>
 
@@ -396,6 +408,7 @@ function makeTooltipHtml(phone) {
       <span style="font-size:11px;color:${color};font-weight:600;">${label}</span>
     </div>
     ${phone.holder_name ? `<div style="font-size:10px;color:#a8afb5;margin-top:4px;">held by ${escapeHtml(phone.holder_name)}</div>` : ''}
+    ${hasPhotos(phone.id) ? '<div style="font-size:10px;color:#c084fc;margin-top:4px;">Wiki photos</div>' : ''}
     ${hintOf(phone.id) ? accessLines(hintOf(phone.id)).map((l, i) => `<div style="font-size:10px;margin-top:${i ? 1 : 4}px;color:${
       { now: '#efa29a', hours: '#a8afb5' }[l.cls] || '#f5b041'};">${escapeHtml(l.text)}</div>`).join('') : ''}
   </div>`;
@@ -885,7 +898,7 @@ function closePopover() {
   if (popReturn) popReturn.focus();
 }
 document.addEventListener('keydown', e => {
-  if (e.key !== 'Escape') return;
+  if (e.key !== 'Escape' || photoViewer.open) return;  // the viewer closes itself
   if (!document.getElementById('search-screen').hidden) closeSearch();
   else if (openPop) closePopover();
   else if (state.mode === 'pick') pickCancel();
@@ -1007,6 +1020,7 @@ async function loadPhones() {
       setStatus(`${state.phones.length} phones loaded`, '#2ecc71');
     }
     drawEndpoints();
+    ensurePhotoIds();  // for the photo buttons and tooltips; not awaited
     // Redraw a saved route on first load only — redrawing an active one would
     // throw away the stops already visited (e.g. after a name change).
     const routeData = state.lastRoute, saved = _savedProgress;
@@ -1227,17 +1241,9 @@ const hlNew   = document.getElementById('hl-new');
 async function setPhotoFilter(on) {
   if (on && state.wikiPhotoIds === null) {
     hlPhoto.disabled = true;
-    try {
-      const res = await fetch('/api/photo-coverage');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      state.wikiPhotoIds = new Set((data.has_photo || []).map(Number));
-    } catch (_) {
-      on = false;
-      toast("Couldn't load wiki photo coverage — try again shortly");
-    } finally {
-      hlPhoto.disabled = false;
-    }
+    on = await ensurePhotoIds();
+    hlPhoto.disabled = false;
+    if (!on) toast("Couldn't load wiki photo coverage — try again shortly");
   }
   state.photoFilter = on;
   hlPhoto.checked = on;
@@ -1539,6 +1545,7 @@ function onMarkerClick(phone) {
     setEndpoint(state.pickWhich, { lat: phone.lat, lon: phone.lon, phone_id: phone.id, label: `Phone #${phone.id}` });
     return;
   }
+  setPhotoChip(phone.id);
   if (inNav() || routeBusy) return;  // the plan is hidden while navigating, and fixed while a route is found
   if (state.routeMode === 'orienteer') return;  // orienteering picks its own phones
   const adding = !state.selectedIds.has(phone.id);
@@ -2331,6 +2338,7 @@ function clearRoute() {
   state.phones.forEach(p => { if (stopIds.has(p.id)) refreshMarker(p); });  // bring the dots back
   state.routeProgress = 0; state.routeOrderedIds = [];
   state.lastRoute = null; _savedProgress = null;
+  closePhotoStrip();
   updateMapsLink(null);
   setFollow(false);
   renderNav();
@@ -2574,6 +2582,7 @@ function renderLeg() {
   }
 
   renderAccessLine();
+  renderPhotoBtn();
   refreshWpIcons();
   updateRouteFocus();
   saveSession();  // progress survives a reload
@@ -2617,6 +2626,7 @@ function revertLeg() {
   let _swipeX = null, _swipeY = null;
   const navEl = document.getElementById('nav-view');
   navEl.addEventListener('touchstart', e => {
+    if (e.target.closest('#photo-strip')) { _swipeX = null; return; }  // the strip scrolls sideways itself
     const t = e.touches[0];
     _swipeX = t.clientX; _swipeY = t.clientY;
   }, { passive: true });
@@ -2643,6 +2653,217 @@ function openCurrentLeg() {
     // Android Chrome's App Links will offer to hand off to GMaps if installed.
     window.open(leg.webUrl, '_blank');
   }
+}
+
+// ── Wiki photos ───────────────────────────────────────────────────
+// Which phones have photos: one list, loaded once after the phones (and by the Wiki Photo filter)
+let _photoIdsP = null;
+function ensurePhotoIds() {
+  if (state.wikiPhotoIds) return Promise.resolve(true);
+  return _photoIdsP ||= fetch('/api/photo-coverage')
+    .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+    .then(data => { state.wikiPhotoIds = new Set((data.has_photo || []).map(Number)); if (inNav()) renderPhotoBtn(); return true; })
+    .catch(() => { _photoIdsP = null; return false; });
+}
+function hasPhotos(id) { return !!state.wikiPhotoIds?.has(Number(id)); }
+function photoLabel(p) { return p.label || p.type.charAt(0).toUpperCase() + p.type.slice(1); }
+
+const _photos = new Map();  // phone id -> /api/phone-photos answer, for this visit
+async function loadPhotos(id) {
+  if (_photos.has(id)) return _photos.get(id);
+  const offline = "Couldn't load photos — check your connection";
+  let res;
+  try { res = await fetch(`/api/phone-photos/${id}`); } catch (_) { throw new Error(offline); }
+  if (!res.ok) throw new Error(res.status === 429 && (await res.json().catch(() => ({}))).detail || offline);
+  const data = await res.json();
+  _photos.set(id, data);
+  return data;
+}
+// A phone's photos, or null once the toast has said why not
+async function photosOrToast(id) {
+  try {
+    const data = await loadPhotos(id);
+    if (data.photos.length) return data;
+    state.wikiPhotoIds?.delete(Number(id));  // the coverage list was out of date: hide its buttons
+    toast(`No wiki photos of #${id} yet`);
+  } catch (e) { toast(e.message); }
+  if (Number(document.getElementById('photo-chip').dataset.id) === id) setPhotoChip(id);
+  if (inNav()) renderPhotoBtn();
+  return null;
+}
+
+// Planning: a chip in the tool dock for the last phone you tapped, when it has photos
+function setPhotoChip(id) {
+  const chip = document.getElementById('photo-chip');
+  chip.hidden = !hasPhotos(id);
+  chip.dataset.id = id;
+  chip.lastElementChild.textContent = `Photos · #${id}`;
+}
+
+// Navigating: the camera button on the card opens a strip of the current stop's photos
+let _stripFor = null;  // the stop whose photos the strip shows
+function renderPhotoBtn() {
+  const id = state.routeOrderedIds[state.routeProgress];
+  document.getElementById('nav-photos').hidden = id === undefined || !hasPhotos(id);
+  if (_stripFor !== null && _stripFor !== id) closePhotoStrip();  // a new stop: the old photos go
+}
+function closePhotoStrip() {
+  const strip = document.getElementById('photo-strip');
+  strip.hidden = true;
+  strip.replaceChildren();
+  _stripFor = null;
+  document.getElementById('nav-photos').setAttribute('aria-expanded', 'false');
+}
+async function togglePhotoStrip() {
+  if (_stripFor !== null) { closePhotoStrip(); return; }
+  const id = state.routeOrderedIds[state.routeProgress];
+  if (id === undefined) return;
+  const data = await photosOrToast(id);
+  if (!data || state.routeOrderedIds[state.routeProgress] !== id) return;  // or the stop changed meanwhile
+  const strip = document.getElementById('photo-strip'), n = data.photos.length;
+  strip.innerHTML = data.photos.map((p, i) => `<div class="ph"><button class="ph-img" onclick="openPhotoViewer(${id}, ${i})" `
+    + `aria-label="${escapeHtml(photoLabel(p))}, photo ${i + 1} of ${n}"><img src="${escapeHtml(p.medium)}" alt="" loading="lazy" decoding="async"></button>`
+    + (i === 0 && data.wiki_url ? `<a class="ph-wiki" href="${escapeHtml(data.wiki_url)}" target="_blank" rel="noopener">Payphone Tag wiki ↗</a>` : '')
+    + '</div>').join('');
+  strip.hidden = false;
+  strip.scrollLeft = 0;
+  _stripFor = id;
+  document.getElementById('nav-photos').setAttribute('aria-expanded', 'true');
+}
+
+// Full screen: swipe (scroll-snap) between photos; pinch, double-tap or double-click, and ctrl+wheel
+// zoom 1-4x, dragging pans while zoomed. Back closes it. The medium image shows until the full one loads.
+const photoViewer = document.getElementById('photo-viewer'), pvTrack = document.getElementById('pv-track');
+let _viewer = { photos: [], wiki: null, i: 0, z: { s: 1, x: 0, y: 0 }, pushed: false }, _viewerAsk = 0;
+async function openPhotoViewer(id, i) {
+  const ask = ++_viewerAsk;
+  const data = await photosOrToast(id);
+  if (!data || ask !== _viewerAsk || photoViewer.open) return;  // a later tap won, or it's already showing
+  _viewer = { photos: data.photos, wiki: data.wiki_url, i: -1, z: { s: 1, x: 0, y: 0 }, pushed: false };
+  pvTrack.innerHTML = data.photos.map(p => `<div class="pv-slide"><img src="${escapeHtml(p.medium)}" alt="${escapeHtml(photoLabel(p))}" draggable="false"></div>`).join('');
+  photoViewer.classList.toggle('single', data.photos.length < 2);
+  photoViewer.showModal();
+  history.pushState({ photoViewer: true }, '');
+  _viewer.pushed = true;
+  pvTrack.scrollLeft = i * pvTrack.clientWidth;
+  showPhoto(Math.min(i, data.photos.length - 1));
+}
+function showPhoto(i) {
+  if (i === _viewer.i) return;
+  _viewer.i = i;
+  resetZoom();
+  const p = _viewer.photos[i], n = _viewer.photos.length;
+  document.getElementById('pv-caption').innerHTML = `${escapeHtml(photoLabel(p))} · ${i + 1} / ${n}`
+    + (_viewer.wiki ? ` · <a href="${escapeHtml(_viewer.wiki)}" target="_blank" rel="noopener">Payphone Tag wiki ↗</a>` : '');
+  photoViewer.querySelector('.pv-prev').disabled = i === 0;
+  photoViewer.querySelector('.pv-next').disabled = i === n - 1;
+  const img = pvTrack.children[i]?.querySelector('img');
+  if (img && !img.dataset.full) {
+    img.dataset.full = '1';
+    const full = new Image();
+    full.onload = () => { if (img.isConnected) img.src = p.full; };
+    full.src = p.full;
+  }
+}
+function photoStep(d) {
+  const i = Math.max(0, Math.min(_viewer.photos.length - 1, _viewer.i + d));
+  pvTrack.scrollTo({ left: i * pvTrack.clientWidth, behavior: 'smooth' });
+}
+function closePhotoViewer() { if (photoViewer.open) photoViewer.close(); }
+let _pvScroll = null;
+photoViewer.addEventListener('close', () => {
+  clearTimeout(_pvScroll);
+  pvTrack.replaceChildren();  // drops the images
+  if (_viewer.pushed) { _viewer.pushed = false; history.back(); }
+});
+window.addEventListener('popstate', () => { if (photoViewer.open) { _viewer.pushed = false; photoViewer.close(); } });
+photoViewer.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); photoStep(e.key === 'ArrowLeft' ? -1 : 1); }
+});
+pvTrack.addEventListener('scroll', () => {
+  clearTimeout(_pvScroll);
+  _pvScroll = setTimeout(() => {
+    if (photoViewer.open && pvTrack.clientWidth) showPhoto(Math.round(pvTrack.scrollLeft / pvTrack.clientWidth));
+  }, 80);
+}, { passive: true });
+
+const zoomImg = () => pvTrack.children[_viewer.i]?.querySelector('img');
+function applyZoom() {
+  const z = _viewer.z, img = zoomImg();
+  if (!img) return;
+  const mx = (z.s - 1) * img.clientWidth / 2, my = (z.s - 1) * img.clientHeight / 2;  // pan at most the overhang
+  z.x = Math.max(-mx, Math.min(mx, z.x)); z.y = Math.max(-my, Math.min(my, z.y));
+  img.style.transform = z.s > 1 ? `translate(${z.x}px, ${z.y}px) scale(${z.s})` : '';
+  photoViewer.classList.toggle('zoomed', z.s > 1);
+}
+function resetZoom() {
+  pvTrack.querySelectorAll('img').forEach(img => { img.style.transform = ''; });
+  _viewer.z = { s: 1, x: 0, y: 0 };
+  photoViewer.classList.remove('zoomed');
+}
+// Zoom to s, keeping the screen point (cx, cy) where it is
+function zoomAt(s, cx, cy) {
+  const z = _viewer.z, box = pvTrack.children[_viewer.i]?.getBoundingClientRect();
+  if (!box) return;
+  const ns = Math.max(1, Math.min(4, s)), ox = cx - box.left - box.width / 2, oy = cy - box.top - box.height / 2;
+  z.x = ox - (ox - z.x) * ns / z.s; z.y = oy - (oy - z.y) * ns / z.s; z.s = ns;
+  if (ns === 1) z.x = z.y = 0;
+  applyZoom();
+}
+{
+  const dist = ts => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
+  const mid = ts => ({ x: (ts[0].clientX + ts[1].clientX) / 2, y: (ts[0].clientY + ts[1].clientY) / 2 });
+  let g = null, lastTap = null;
+  pvTrack.addEventListener('touchstart', e => {
+    const ts = e.touches;
+    g = ts.length === 2 ? { d: dist(ts), m: mid(ts), pinch: true }
+      : ts.length === 1 ? { x: ts[0].clientX, y: ts[0].clientY, moved: false } : null;
+  }, { passive: true });
+  // Not passive: while pinching or zoomed the gesture is ours, not the strip's scroll
+  pvTrack.addEventListener('touchmove', e => {
+    const ts = e.touches, z = _viewer.z;
+    if (!g) return;
+    if (ts.length === 2 && g.pinch) {
+      e.preventDefault();
+      const d = dist(ts), m = mid(ts);
+      zoomAt(z.s * d / g.d, m.x, m.y);
+      z.x += m.x - g.m.x; z.y += m.y - g.m.y; applyZoom();
+      g.d = d; g.m = m;
+    } else if (ts.length === 1 && !g.pinch) {
+      const dx = ts[0].clientX - g.x, dy = ts[0].clientY - g.y;
+      if (Math.hypot(dx, dy) > 10) g.moved = true;
+      if (z.s > 1) { e.preventDefault(); z.x += dx; z.y += dy; applyZoom(); g.x = ts[0].clientX; g.y = ts[0].clientY; }
+    }
+  }, { passive: false });
+  pvTrack.addEventListener('touchend', e => {
+    if (e.touches.length === 1) { g = { x: e.touches[0].clientX, y: e.touches[0].clientY, moved: true }; return; }  // pinch down to one finger: pan on
+    const was = g; g = null;
+    if (e.touches.length || !was || was.pinch || was.moved) { lastTap = null; return; }
+    const p = e.changedTouches[0], now = Date.now();
+    if (lastTap && now - lastTap.at < 300 && Math.hypot(p.clientX - lastTap.x, p.clientY - lastTap.y) < 30) {
+      e.preventDefault();  // no synthetic dblclick on top
+      zoomAt(_viewer.z.s > 1 ? 1 : 2.5, p.clientX, p.clientY);
+      lastTap = null;
+    } else lastTap = { at: now, x: p.clientX, y: p.clientY };
+  });
+  pvTrack.addEventListener('dblclick', e => zoomAt(_viewer.z.s > 1 ? 1 : 2.5, e.clientX, e.clientY));
+  pvTrack.addEventListener('wheel', e => {
+    if (!e.ctrlKey) return;  // a trackpad pinch arrives as ctrl+wheel too
+    e.preventDefault();
+    zoomAt(_viewer.z.s * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+  }, { passive: false });
+  // Mouse: drag to pan while zoomed
+  let drag = null;
+  pvTrack.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'mouse' || _viewer.z.s === 1) return;
+    drag = { x: e.clientX, y: e.clientY }; pvTrack.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  pvTrack.addEventListener('pointermove', e => {
+    if (!drag) return;
+    _viewer.z.x += e.clientX - drag.x; _viewer.z.y += e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY };
+    applyZoom();
+  });
+  for (const type of ['pointerup', 'pointercancel']) pvTrack.addEventListener(type, () => { drag = null; });
 }
 
 // ── Geolocation ───────────────────────────────────────────────────
