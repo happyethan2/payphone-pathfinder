@@ -31,10 +31,16 @@ Open **http://localhost:8000**. Do not delete the `.osm.pbf` files. `deploy.sh` 
 ## Use
 
 1. Enter your in-game name with the top-right button. Without a name, the app cannot show which phones you or your cellmates hold.
-2. Select phones. Tap a phone, or use **Lasso** to draw around a group.
-3. Set a start point. The end point is optional. Without an end point, the route finishes at the last phone.
+2. Set a start point. The end point is optional. Without an end point, the route finishes at the last phone.
+3. Select phones. Tap a phone, or use **Lasso** to draw around a group. Once the plan has a start and an end (or a stop), the road between them shows on the map, and **Path** in the tool bar selects every phone within 500 m, 1 km or 2 km of it. The eye button next to **Add Stop** hides or shows the road.
 4. Tap **Find Optimal Route**.
-5. Follow the route. **Open in Google Maps** opens the current leg. When you tag the current phone, the app marks the stop as done and moves to the next stop, usually within 10 seconds. **Skip** moves to the next stop without tagging. If a skipped phone turns out to be tagged, its stop is marked as done.
+5. Follow the route. **Open in Google Maps** opens the current leg. When you tag the current phone, the app marks the stop as done and moves to the next stop, usually within 10 seconds. **Skip** moves to the next stop without tagging. If a skipped phone turns out to be tagged, its stop is marked as done. If the current phone has photos on the Payphone Tag wiki, the camera button on the card shows them.
+
+**Stops** make the route pass through places you choose, in order, for example a town on the way. **Add Stop** adds one (up to 8). Drag the ≡ handle to reorder the start, the stops and the end. Stops also split the route into sections, and each phone joins the section it is closest to. A route without stops can have up to 198 phones. With stops it can have up to 500, with at most 198 in each section. If a section has too many, the error names it: add a stop inside it or deselect some phones.
+
+**Saved plans:** the profile button keeps up to 20 named plans on this device. Opening one replaces the current plan (Undo brings it back). You can't open a plan while you are following a route.
+
+**Wiki photos:** tap a phone that has photos and a **Photos** button appears above the tools. Photos come from the [Payphone Tag wiki](https://wiki.payphonetag.com) and its contributors. Each photo links to the phone's wiki page. Photos need a connection: they are not saved with the offline map.
 
 **Orienteering** mode chooses the phones for you. It finds the most phones you can tag between the start and the end before the **Arrive By** time. It needs your in-game name and an end point.
 
@@ -98,7 +104,7 @@ To put an instance on the internet without opening router ports, run a Cloudflar
 2. Add a public hostname to the tunnel. Point it at `https://backend:8000` and turn on **No TLS Verify**, because the backend's own certificate is self-signed.
 3. In `.env`, set `COMPOSE_PROFILES=tunnel` and `CLOUDFLARE_TUNNEL_TOKEN=<token>`, then run `./deploy.sh`.
 
-Route-finding runs on your server's CPU. A Cloudflare rate-limiting rule on `/api/route` and `/api/orienteer` stops anyone from hammering it.
+Route-finding runs on your server's CPU. A Cloudflare rate-limiting rule on `/api/route` and `/api/orienteer` stops anyone from hammering it. The road preview (`/api/path`) and wiki photos (`/api/phone-photos`) are protected by the server itself: the preview is cached and runs at most 4 at a time, and photos make at most 30 uncached requests to the game every 10 seconds. Keep them out of the Cloudflare rule, because editing a plan calls the preview often and would use up the quota for Find Route.
 
 ### Indoor phones
 
@@ -143,7 +149,13 @@ The game's phone feed shows every capture about 5 minutes late. During a route, 
 
 The share button next to **Find Optimal Route** copies a link to your current plan. During navigation, the share icon at the top of the navigation card does the same. The link contains the transport mode, the start, the end, and every selected phone. Opening the link replaces the recipient's own selection.
 
+Stops are repeated `via=lat,lon` parameters, in order. Links made before stops existed still work.
+
 The link does not contain your in-game name or the calculated route. The recipient's app calculates the route again from the recipient's own game data. The recipient does not need a name to open the link. Phone IDs are the same for every player, so a link works on any instance that runs this version.
+
+### Offline route map
+
+**Save Route Map Offline** (in the profile popover, during a route) saves map tiles along the route, at zooms 12 to 16, if that comes to 50 MB or less. The size is estimated before saving: a tile in a town is about 40 KB on a high-resolution screen, and a tile of open country about 3 KB. Phones mark the towns. For a longer route, it saves an overview of the road (zoom 12) and street detail within about 1 km of each stop (zooms 15 and 16). Zooms 13 and 14 are then blank offline. The confirmation shows the number of tiles and the estimated size. The map is deleted when the route ends, or after 30 days.
 
 ### Running tests
 
