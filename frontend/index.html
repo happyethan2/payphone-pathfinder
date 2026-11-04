@@ -2907,27 +2907,66 @@ function routeMapExpired() {
   } catch (_) { return false; }
 }
 
-const TILE_KB = 40;
-// Tiles z12-16 along the route in half-tile steps, 3x3 around each point, this theme at this screen's {r}
-function routeTiles() {
+// Tile keys are /{style}/{z}/{x}/{y}{r}.png: this theme at this screen's {r}
+const tileKey = (z, x, y) => `/${state.mapTheme === 'light' ? 'light_all' : 'dark_all'}/${z}/${x}/${y}${L.Browser.retina ? '@2x' : ''}.png`;
+const tileOf = (lat, lon, z) => L.CRS.EPSG3857.latLngToPoint(L.latLng(lat, lon), z).divideBy(256).floor();
+// Tiles at these zooms along the route in half-tile steps, 3x3 around each point
+function routeTiles(zooms) {
   const pts = state.lastRoute.path.features.flatMap(f => f.geometry.coordinates.map(([lon, lat]) => L.latLng(lat, lon)));
-  const style = state.mapTheme === 'light' ? 'light_all' : 'dark_all', r = L.Browser.retina ? '@2x' : '';
   const out = new Set();
-  for (let z = 12; z <= 16; z++) {
+  for (const z of zooms) {
     let prev = null;
     for (const ll of pts) {
       const t = L.CRS.EPSG3857.latLngToPoint(ll, z).divideBy(256);
       const steps = prev ? Math.max(1, Math.ceil(t.distanceTo(prev) / 0.5)) : 1;
       for (let i = 1; i <= steps; i++) {
         const q = prev ? prev.add(t.subtract(prev).multiplyBy(i / steps)) : t;
-        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
-          out.add(`/${style}/${z}/${Math.floor(q.x) + dx}/${Math.floor(q.y) + dy}${r}.png`);
-        }
+        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) out.add(tileKey(z, Math.floor(q.x) + dx, Math.floor(q.y) + dy));
       }
       prev = t;
     }
   }
   return out;
+}
+// Tiles within r of each point at zoom z
+function tilesNear(points, z, r) {
+  const out = new Set();
+  for (const [lat, lon] of points) {
+    const t = tileOf(lat, lon, z);
+    for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) out.add(tileKey(z, t.x + dx, t.y + dy));
+  }
+  return out;
+}
+// Size of a set of tiles. Measured on CARTO @2x: a town tile is 40-47 KB, open road 0.1-6 KB
+// (Adelaide to Parkes: about 55 MB in 14,426 tiles). A tile counts as built-up when a phone is
+// in it or, at z15 and up, next to it; half those sizes without a retina screen.
+// ponytail: phones stand in for towns; a land-use layer would be truer, if ever there is one.
+const TILE_KB_TOWN = 40, TILE_KB_OPEN = 3;
+function estimateMB(keys) {
+  const towns = new Map();  // zoom -> Set of "x/y" with a phone in it
+  let kb = 0;
+  for (const k of keys) {
+    const [, z, x, y] = k.match(/\/(\d+)\/(-?\d+)\/(-?\d+)/).map(Number);
+    if (!towns.has(z)) towns.set(z, new Set(state.phones.map(p => { const t = tileOf(p.lat, p.lon, z); return `${t.x}/${t.y}`; })));
+    const set = towns.get(z), r = z >= 15 ? 1 : 0;
+    let town = false;
+    for (let dx = -r; dx <= r && !town; dx++) for (let dy = -r; dy <= r && !town; dy++) town = set.has(`${x + dx}/${y + dy}`);
+    kb += town ? TILE_KB_TOWN : TILE_KB_OPEN;
+  }
+  return kb / 1000 / (L.Browser.retina ? 1 : 2);
+}
+// What to save: z12-16 along the route, unless that comes to over 50 MB. Then: an overview (z12)
+// along the road and street detail near each stop: z16 within 2 tiles (about 1 km), z15 within 1.
+// Zooms 13-14 then stay blank offline.
+const OFFLINE_MAX_MB = 50;
+function offlineTiles() {
+  const full = routeTiles([12, 13, 14, 15, 16]);
+  if (estimateMB(full) <= OFFLINE_MAX_MB) return { keys: full, reduced: false };
+  const route = state.lastRoute, ends = route.solved || {};
+  const byId = new Map(state.phones.map(p => [p.id, p]));
+  const stops = [ends.start, ends.end, ...(ends.vias || [])].filter(p => p?.lat != null).map(p => [p.lat, p.lon])
+    .concat(route.ordered_ids.map(id => byId.get(id)).filter(Boolean).map(p => [p.lat, p.lon]));
+  return { keys: new Set([...routeTiles([12]), ...tilesNear(stops, 16, 2), ...tilesNear(stops, 15, 1)]), reduced: true };
 }
 
 // Greyed, with the reason under it, until it can work: a route to save along and a trusted certificate
@@ -2947,10 +2986,13 @@ async function saveRouteMap() {
   const btn = document.getElementById('save-map-btn'), route = state.lastRoute;
   try {
     clearTimeout(_dropMap);  // an earlier End Route's pending delete would wipe this save
-    const want = routeTiles(), cache = await caches.open('tiles');
+    const { keys: want, reduced } = offlineTiles(), cache = await caches.open('tiles');
     const have = new Set((await cache.keys()).map(r => new URL(r.url).pathname));
-    const todo = [...want].filter(k => !have.has(k)), total = todo.length;
-    if (!confirm(`Save the map along this route for offline use? About ${total} tiles, ${Math.max(1, Math.round(total * TILE_KB / 1000))} MB. It's deleted when you end the route, or after 30 days.`)) return;
+    const todo = [...want].filter(k => !have.has(k)), total = todo.length, mb = Math.max(1, Math.round(estimateMB(todo)));
+    const size = `About ${total.toLocaleString()} tiles, ${mb} MB${mb > OFFLINE_MAX_MB ? ' — a large download' : ''}.`;
+    if (!confirm((reduced
+      ? `This route is long, so the offline map keeps street detail within about 1 km of each stop and an overview along the road. ${size}`
+      : `Save the map along this route for offline use? ${size}`) + " It's deleted when you end the route, or after 30 days.")) return;
     btn.disabled = true;
     navigator.storage?.persist?.().catch(() => {});
     for (const k of have) if (!want.has(k)) await cache.delete(`https://basemaps.cartocdn.com${k}`);  // an earlier route's
