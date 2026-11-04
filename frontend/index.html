@@ -36,16 +36,23 @@
 <!-- ── Selection tools: picking phones happens on the map ──────── -->
 <div id="tool-dock">
   <button id="review-back" class="chip" hidden onclick="this.hidden = true; findPlannedRoute()">Back to Review</button>
+  <div id="path-chips" class="chips" role="group" aria-labelledby="path-label" hidden>
+    <span class="chips-label" id="path-label">Along Path:</span>
+    <button class="chip" onclick="selectAlongPath(0.5)">500 m</button>
+    <button class="chip" onclick="selectAlongPath(1)">1 km</button>
+    <button class="chip" onclick="selectAlongPath(2)">2 km</button>
+  </div>
   <div id="lasso-chips" class="chips" role="group" aria-labelledby="lasso-skip" hidden>
     <span class="chips-label" id="lasso-skip">Skip:</span>
-    <button class="chip" data-filter="lassoOnlyNew" aria-pressed="false" title="Lasso skips every phone you have ever captured"><span class="icon icon-check" aria-hidden="true"></span>Visited</button>
-    <button class="chip" data-filter="lassoExcludeOwned" aria-pressed="false" title="Lasso skips phones you hold right now"><span class="icon icon-check" aria-hidden="true"></span>Mine</button>
-    <button class="chip" data-filter="lassoExcludeCellmates" aria-pressed="false" title="Lasso skips phones held by your cellmates"><span class="icon icon-check" aria-hidden="true"></span>Cellmates</button>
+    <button class="chip" data-filter="lassoOnlyNew" aria-pressed="false" title="Skips every phone you have ever captured"><span class="icon icon-check" aria-hidden="true"></span>Visited</button>
+    <button class="chip" data-filter="lassoExcludeOwned" aria-pressed="false" title="Skips phones you hold right now"><span class="icon icon-check" aria-hidden="true"></span>Mine</button>
+    <button class="chip" data-filter="lassoExcludeCellmates" aria-pressed="false" title="Skips phones held by your cellmates"><span class="icon icon-check" aria-hidden="true"></span>Cellmates</button>
   </div>
   <div class="segmented" role="group" aria-label="Map selection tools">
     <button id="dock-clear" onclick="clearSelection()" aria-label="Clear selected phones" hidden><span class="icon icon-close" aria-hidden="true"></span><span class="badge" id="sel-badge"></span></button>
     <button id="lasso-add" aria-pressed="false" onclick="toggleLasso('lasso')"><span class="icon icon-lasso" aria-hidden="true"></span>Lasso</button>
     <button id="lasso-remove" aria-pressed="false" onclick="toggleLasso('lasso-deselect')"><span class="icon icon-deselect" aria-hidden="true"></span>Deselect</button>
+    <button id="path-tool" aria-pressed="false" onclick="toggleLasso('path')" aria-label="Along Path" title="Select Along Path" hidden><span class="icon icon-route" aria-hidden="true"></span><span class="tool-label">Path</span></button>
   </div>
 </div>
 
@@ -74,12 +81,12 @@
       </div>
       <div class="field">
         <div class="field-head"><div class="sec-title">Start &amp; End</div>
-          <button class="text-btn" id="clear-ends" onclick="clearEnds()" hidden>Clear</button></div>
-        <div class="place-wrap">
-          <button class="place-field" id="start-field" onclick="openSearch('start')"><span class="pin-dot"></span><span class="pf-text" id="start-text"></span></button>
-          <button class="pf-gps" id="start-gps" onclick="useMyLocation('start')" aria-label="Use my location" title="Use My Location" hidden><span class="icon icon-gps" aria-hidden="true"></span></button>
-        </div>
-        <button class="place-field" id="end-field" onclick="openSearch('end')"><span class="pin-dot pin-end"></span><span class="pf-text" id="end-text"></span></button>
+          <span class="head-btns">
+            <button class="text-btn icon-btn" id="path-eye" onclick="togglePathLine()" aria-label="Show path" aria-pressed="true" hidden><span class="icon icon-eye" aria-hidden="true"></span></button>
+            <button class="text-btn" id="add-stop" onclick="openSearch(state.vias.length)">Add Stop</button>
+            <button class="text-btn" id="clear-ends" onclick="clearEnds()" hidden>Clear</button></span></div>
+        <!-- Rows: [place] [remove, or the crosshair on Start] [drag handle]; built by renderPlaces() -->
+        <div id="places"></div>
       </div>
       <div class="field" id="arrive-field" hidden>
         <div class="field-head"><div class="sec-title">Arrive By</div></div>
@@ -262,12 +269,17 @@ const state = {
   markers:         {},
   selectedIds:     new Set(),
   username:        '',      // optional agent name (in-game)
-  mode:            'click',  // 'click' | 'lasso' | 'lasso-deselect' | 'setStart' | 'setEnd'
+  mode:            'click',  // 'click' | 'lasso' | 'lasso-deselect' | 'path' | 'pick'
+  pickWhich:       null,     // while picking on the map: 'start' | 'end' | a stop index
   profile:         'car',
   start:           null,
   end:             null,
+  vias:            [],       // stops the route passes through, in order: { lat, lon, label }
   startMarker:     null,
   endMarker:       null,
+  viaMarkers:      [],
+  previewPath:     null,     // [[lat, lon], …] of the road preview, while one is drawn
+  showPath:        true,     // the preview line is on the map (Along Path works either way)
   routeLayers:     [],
   decorators:      [],
   waypointMarkers:      [],
@@ -390,10 +402,10 @@ const STATUS_COLORS = {
 // Colours drawn over the basemap, per map style. Light tiles need dark,
 // saturated strokes: white or pastel rings vanish against them.
 const MAP_INK = {
-  dark:  { sel: '#ffffff', isNew: '#fbbf24', newW: 2, photo: '#c084fc', lasso: '#9bbce0', unlasso: '#efa29a', indoor: '#e5e7eb' },
+  dark:  { sel: '#ffffff', isNew: '#fbbf24', newW: 2, photo: '#c084fc', lasso: '#9bbce0', unlasso: '#efa29a', indoor: '#e5e7eb', path: '#9bbce0' },
   // isNew: ultramarine, the one ring tested to stay clear on red, green, blue and grey dots alike
   // (amber vanished on red, olive on green, a mid blue on blue) without being taken for selection or photo
-  light: { sel: '#1f2937', isNew: '#1e1ab8', newW: 3, photo: '#9333ea', lasso: '#1d4f80', unlasso: '#b42318', indoor: '#374151' },
+  light: { sel: '#1f2937', isNew: '#1e1ab8', newW: 3, photo: '#9333ea', lasso: '#1d4f80', unlasso: '#b42318', indoor: '#374151', path: '#1d4f80' },
 };
 function mapInk() { return MAP_INK[state.mapTheme] || MAP_INK.dark; }
 
@@ -524,6 +536,9 @@ function syncSheetH() {
 }
 new ResizeObserver(syncSheetH).observe(sheet);
 desktopPanel.addEventListener('change', syncSheetH);
+// Desktop: the panel stops short of the tool dock under it, however tall the dock's chips make it
+new ResizeObserver(() => document.documentElement.style.setProperty('--dock-h', `${document.getElementById('tool-dock').offsetHeight}px`))
+  .observe(document.getElementById('tool-dock'));
 
 // Swipe the grabber/summary up or down to open or close the plan
 {
@@ -581,27 +596,194 @@ function renderPlan() {
     badge.classList.remove('bump'); void badge.offsetWidth; badge.classList.add('bump');  // restart the pulse
   }
 
-  document.getElementById('clear-ends').hidden = !state.start && !state.end;
-  // Crosshair: back to the live location (hidden while that's already the start)
-  document.getElementById('start-gps').hidden =
-    !navigator.geolocation || gpsBlocked || !!(state.start && state.start.live);
-  for (const which of ['start', 'end']) {
-    const el = document.getElementById(`${which}-text`);
-    const pt = state[which];
-    el.textContent = pt ? endpointLabel(pt) : (which === 'start' ? 'Search for a start' : endPlaceholder());
-    el.classList.toggle('unset', !pt);
-  }
+  document.getElementById('clear-ends').hidden = !state.start && !state.end && !state.vias.length;
+  const add = document.getElementById('add-stop');
+  add.hidden = orienteer;
+  add.disabled = state.vias.length >= MAX_VIAS;
+  add.title = add.disabled ? `At most ${MAX_VIAS} stops` : '';
+  renderPlaces();
 
   const find = document.getElementById('find-btn');
   if (!routeBusy) find.innerHTML = `${orienteer ? 'Find Best Route' : 'Find Optimal Route'} <span class="icon icon-arrow-right" aria-hidden="true"></span>`;
   find.disabled = routeBusy || !!problem;
-  document.getElementById('share-btn').disabled = !n && !state.start && !state.end;
+  document.getElementById('share-btn').disabled = !planHasContent();
   document.getElementById('tool-dock').hidden = inNav() || orienteer;
+  syncPreview();
+}
+function planHasContent() { return !!(state.selectedIds.size || state.start || state.end || state.vias.length); }
+
+// ── Places: start, stops, end ─────────────────────────────────────
+// A place is named 'start', 'end' or by its stop index. Stops belong to Routing; Orienteering
+// keeps them but doesn't show or send them.
+const MAX_VIAS = 8;  // = Google Maps stops per leg - 2, so every Maps leg still reaches a phone
+function getPlace(which) { return typeof which === 'number' ? state.vias[which] || null : state[which]; }
+// A stop index past the end appends: the list may have shrunk since a search or pick began
+function setPlace(which, pt) {
+  if (typeof which !== 'number') state[which] = pt;
+  else if (which < state.vias.length) state.vias[which] = pt;
+  else state.vias.push(pt);
+}
+// Changing the list of places under an open search or map pick would aim it at the wrong slot: close it
+function endPlaceEdit() {
+  if (!searchScreen.hidden) closeSearch();
+  if (state.mode === 'pick') stopPicking();  // not pickCancel: its backup predates this change
+}
+function placeName(which) { return typeof which === 'number' ? `Stop ${which + 1}` : which === 'start' ? 'Start' : 'End'; }
+function placeFieldId(which) { return typeof which === 'number' ? `via-field-${which}` : `${which}-field`; }
+
+let _placesKey = '', _placesDrag = null;
+function renderPlaces() {
+  if (_placesDrag) return;  // rebuilt when the drag ends
+  const rows = ['start', ...(state.routeMode === 'route' ? state.vias.map((_, i) => i) : []), 'end'];
+  const gps = !!navigator.geolocation && !gpsBlocked && !state.start?.live;
+  const text = which => {
+    const pt = getPlace(which);
+    return pt ? endpointLabel(pt) : which === 'start' ? 'Search for a start' : endPlaceholder();
+  };
+  const key = JSON.stringify([rows, rows.map(text), gps]);
+  if (key === _placesKey) return;
+  _placesKey = key;
+  const focused = document.activeElement?.closest?.('#places') ? document.activeElement.id : null;
+  const places = document.getElementById('places'), grew = rows.length > places.children.length;
+  places.innerHTML = rows.map(which => {
+    const via = typeof which === 'number', name = placeName(which), pt = getPlace(which);
+    const slot = via ? `<button class="place-x" onclick="removeStop(${which})" aria-label="Remove ${name}" title="Remove ${name}"><span class="icon icon-close" aria-hidden="true"></span></button>`
+      : which === 'start' && gps ? `<button class="place-x pf-gps" onclick="useMyLocation('start')" aria-label="Use my location" title="Use My Location"><span class="icon icon-gps" aria-hidden="true"></span></button>`
+      : '';
+    const w = via ? which : `'${which}'`;
+    return `<div class="place-row" data-which="${which}">`
+      + `<button class="place-field" id="${placeFieldId(which)}" onclick="openSearch(${w})" aria-label="${name}: ${escapeHtml(text(which))}">`
+      + `<span class="pin-dot${via ? ' pin-via' : which === 'end' ? ' pin-end' : ''}"></span>`
+      + `<span class="pf-text${pt ? '' : ' unset'}">${escapeHtml(text(which))}</span></button>${slot}`
+      + `<button class="drag-handle" id="drag-${which}" aria-label="Move ${name}" title="Drag to reorder"><span class="icon icon-grip" aria-hidden="true"></span></button></div>`;
+  }).join('');
+  if (grew) places.scrollTop = places.scrollHeight;  // a new stop goes in just above the end
+  if (focused) document.getElementById(focused)?.focus();
+  fadePlaces();
+}
+// Past four rows the list scrolls; a faded edge says there's more that way
+function fadePlaces() {
+  const el = document.getElementById('places');
+  el.classList.toggle('fade-top', el.scrollTop > 1);
+  el.classList.toggle('fade-bottom', el.scrollTop + el.clientHeight < el.scrollHeight - 1);
+}
+
+// Put the places back in a new order: the first is the start, the last the end, the rest stops.
+// A live My Location start moved elsewhere freezes where you are (it needs a fix to do that);
+// a plain My Location point moved to the start goes live again. Stops are plain coordinates.
+function setPlaces(list) {
+  if (list.some((pt, i) => pt?.live && i !== 0 && !lastLatLng)) {
+    toast('Waiting for your location — My Location can only be the start until then');
+    _placesKey = ''; renderPlan();
+    return false;
+  }
+  list = list.map((pt, i) => {
+    if (!pt) return pt;
+    if (i === 0) return pt.label === 'My Location' && pt.phone_id == null && !gpsBlocked ? liveStart() : pt;
+    const frozen = pt.live ? { lat: lastLatLng[0], lon: lastLatLng[1], label: 'My Location' } : pt;
+    if (i === list.length - 1) return frozen;
+    return { lat: frozen.lat, lon: frozen.lon, ...(frozen.label && { label: frozen.label }) };
+  });
+  state.start = list[0];
+  state.end = list.at(-1);
+  if (state.routeMode === 'route') state.vias = list.slice(1, -1).filter(Boolean);  // Orienteering only lists start and end
+  _placesKey = '';
+  drawEndpoints(); renderPlan(); saveSession();
+  return true;
+}
+
+// Drag the ≡ handle: the row follows the finger and swaps with a neighbour past its halfway mark
+{
+  const places = document.getElementById('places');
+  const order = () => [...places.children].map(r => r.dataset.which).map(w => /^\d+$/.test(w) ? Number(w) : w);
+  places.addEventListener('scroll', fadePlaces, { passive: true });
+  // Positions are taken in list coordinates (+ scrollTop), so the row stays under the finger as the list scrolls
+  const follow = () => {
+    const d = _placesDrag, y = d.y + places.scrollTop;
+    const prev = d.row.previousElementSibling, next = d.row.nextElementSibling;
+    let dy = y - d.y0;
+    if (next && dy > next.offsetHeight / 2 + 4) { next.after(d.row); d.y0 += next.offsetHeight + 8; }
+    else if (prev && dy < -(prev.offsetHeight / 2 + 4)) { prev.before(d.row); d.y0 -= prev.offsetHeight + 8; }
+    dy = y - d.y0;
+    if (!d.row.nextElementSibling) dy = Math.min(dy, 0);      // nothing to pass: don't push the list
+    if (!d.row.previousElementSibling) dy = Math.max(dy, 0);  // taller (and scroll it along forever)
+    d.row.style.transform = `translateY(${dy}px)`;
+  };
+  // Held near the top or bottom edge, the list scrolls under the row
+  const edgeScroll = () => {
+    const d = _placesDrag;
+    if (!d) return;
+    const r = places.getBoundingClientRect(), top = places.scrollTop;
+    places.scrollTop += d.y < r.top + 28 ? -6 : d.y > r.bottom - 28 ? 6 : 0;
+    if (places.scrollTop !== top) follow();
+    d.raf = requestAnimationFrame(edgeScroll);
+  };
+  places.addEventListener('pointerdown', e => {
+    const handle = e.target.closest('.drag-handle');
+    if (!handle || _placesDrag || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    e.preventDefault();
+    const row = handle.closest('.place-row');
+    _placesDrag = { id: e.pointerId, row, y: e.clientY, y0: e.clientY + places.scrollTop, before: order() };
+    places.setPointerCapture(e.pointerId);
+    row.classList.add('dragging');
+    _placesDrag.raf = requestAnimationFrame(edgeScroll);
+  });
+  places.addEventListener('pointermove', e => {
+    const d = _placesDrag;
+    if (!d || d.id !== e.pointerId) return;
+    d.y = e.clientY;
+    follow();
+  });
+  const drop = e => {
+    const d = _placesDrag;
+    if (!d || d.id !== e.pointerId) return;
+    cancelAnimationFrame(d.raf);
+    _placesDrag = null;
+    d.row.classList.remove('dragging');
+    d.row.style.transform = '';
+    const now = order();
+    // Cancelled, or back where it started: rebuild the rows from the plan (and catch up on changes made mid-drag)
+    if (e.type === 'pointercancel' || String(now) === String(d.before)) { _placesKey = ''; renderPlaces(); return; }
+    if (navigator.vibrate) navigator.vibrate(12);
+    endPlaceEdit();
+    setPlaces(now.map(getPlace));
+  };
+  places.addEventListener('pointerup', drop);
+  places.addEventListener('pointercancel', drop);
+  // Keyboard: arrows on the handle move the row
+  places.addEventListener('keydown', e => {
+    const handle = e.target.closest('.drag-handle');
+    if (!handle || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+    e.preventDefault();
+    const list = order(), i = [...places.children].indexOf(handle.closest('.place-row'));
+    const j = i + (e.key === 'ArrowUp' ? -1 : 1);
+    if (j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    endPlaceEdit();
+    const moved = setPlaces(list.map(getPlace));
+    places.querySelectorAll('.drag-handle')[moved ? j : i]?.focus();
+  });
+}
+
+function removeStop(i) {
+  const pt = state.vias[i];
+  if (!pt) return;
+  endPlaceEdit();
+  state.vias.splice(i, 1);
+  document.getElementById('add-stop').focus();  // the row and its button are gone
+  drawEndpoints(); renderPlan(); saveSession();
+  toast('Stop removed', () => {
+    if (state.vias.length >= MAX_VIAS) { toast(`At most ${MAX_VIAS} stops`); return; }
+    endPlaceEdit();
+    state.vias.splice(Math.min(i, state.vias.length), 0, pt);
+    drawEndpoints(); renderPlan(); saveSession();
+  });
 }
 
 function setPlanMode(mode) {
   state.routeMode = mode === 'orienteer' ? 'orienteer' : 'route';
-  if (state.routeMode === 'orienteer' && isLassoMode()) setMode('click');
+  if (state.routeMode === 'orienteer' && (isLassoMode() || state.mode === 'path')) setMode('click');
+  drawEndpoints();  // stops show in Routing only
   renderPlan();
   saveSession();
 }
@@ -697,8 +879,8 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if (!document.getElementById('search-screen').hidden) closeSearch();
   else if (openPop) closePopover();
-  else if (state.mode === 'setStart' || state.mode === 'setEnd') pickCancel();
-  else if (isLassoMode()) setMode('click');
+  else if (state.mode === 'pick') pickCancel();
+  else if (state.mode !== 'click') setMode('click');
 });
 
 // ── Identity ──────────────────────────────────────────────────────
@@ -948,7 +1130,9 @@ function setMode(mode) {
   const lasso = isLassoMode();
   document.getElementById('lasso-add').setAttribute('aria-pressed', String(mode === 'lasso'));
   document.getElementById('lasso-remove').setAttribute('aria-pressed', String(mode === 'lasso-deselect'));
-  document.getElementById('lasso-chips').hidden = mode !== 'lasso';
+  document.getElementById('path-tool').setAttribute('aria-pressed', String(mode === 'path'));
+  document.getElementById('lasso-chips').hidden = mode !== 'lasso' && mode !== 'path';
+  document.getElementById('path-chips').hidden = mode !== 'path';
   if (mode !== 'click' && state.follow) setFollow(false);  // don't move the map under a stroke or a pick
   if (lasso && !wasLasso) {
     maybeShowLassoHint();
@@ -978,7 +1162,7 @@ function maybeShowLassoHint() {
 }
 
 function toggleLasso(kind) {
-  if (state.mode === 'setStart' || state.mode === 'setEnd') pickCancel();
+  if (state.mode === 'pick') pickCancel();
   setMode(state.mode === kind ? 'click' : kind);
 }
 
@@ -1308,12 +1492,7 @@ function finishLasso() {
   const deselecting = state.mode === 'lasso-deselect';
   let changed = 0;
   state.phones.forEach(phone => {
-    if (!deselecting && state.lassoExcludeOwned && phone.status === 'mine') return;
-    if (!deselecting && state.lassoExcludeCellmates && phone.status === 'cellmate') return;
-    if (!deselecting && state.lassoOnlyNew) {
-      const isNew = state.pastCaptureIds !== null && !state.pastCaptureIds.has(Number(phone.id));
-      if (!isNew) return;
-    }
+    if (!deselecting && skippedByChips(phone)) return;
     if (!pointInPolygon([phone.lat, phone.lon], poly)) return;
     if (deselecting ? state.selectedIds.delete(phone.id)
                     : !state.selectedIds.has(phone.id) && state.selectedIds.add(phone.id)) {
@@ -1347,9 +1526,8 @@ function pointInPolygon(pt, poly) {
 
 // ── Marker click ──────────────────────────────────────────────────
 function onMarkerClick(phone) {
-  if (state.mode === 'setStart' || state.mode === 'setEnd') {
-    setEndpoint(state.mode === 'setStart' ? 'start' : 'end',
-      { lat: phone.lat, lon: phone.lon, phone_id: phone.id, label: `Phone #${phone.id}` });
+  if (state.mode === 'pick') {
+    setEndpoint(state.pickWhich, { lat: phone.lat, lon: phone.lon, phone_id: phone.id, label: `Phone #${phone.id}` });
     return;
   }
   if (inNav() || routeBusy) return;  // the plan is hidden while navigating, and fixed while a route is found
@@ -1362,17 +1540,19 @@ function onMarkerClick(phone) {
 }
 
 // ── Endpoints ─────────────────────────────────────────────────────
-let _pickBackup = null;  // start/end as they were when map picking began
+let _pickBackup = null;  // start, end and stops as they were when map picking began
 
 function startPicking(which) {
-  if (isLassoMode()) setMode('click');
-  _pickBackup = { start: state.start, end: state.end };
-  setMode(which === 'start' ? 'setStart' : 'setEnd');
+  hideToast();  // its Undo could change the places under the pick
+  if (state.mode !== 'click') setMode('click');
+  _pickBackup = { start: state.start, end: state.end, vias: [...state.vias] };
+  setMode('pick');
+  state.pickWhich = which;
   document.body.classList.add('picking');
   syncSheetH();
-  document.getElementById('pick-banner').innerHTML = which === 'start'
-    ? 'Tap the map to set your <b class="start">start</b>'
-    : 'Tap the map to set your <b class="end">end</b>';
+  document.getElementById('pick-banner').innerHTML = typeof which === 'number'
+    ? `Tap the map to set <b class="via">stop ${which + 1}</b>`
+    : `Tap the map to set your <b class="${which}">${which}</b>`;
   document.getElementById('pick-banner').hidden = false;
   document.getElementById('pick-actions').hidden = false;
 }
@@ -1385,31 +1565,44 @@ function stopPicking() {
   renderPlan();
 }
 function pickCancel() {
-  if (_pickBackup) { state.start = _pickBackup.start; state.end = _pickBackup.end; drawEndpoints(); }
+  if (_pickBackup) { ({ start: state.start, end: state.end } = _pickBackup); state.vias = _pickBackup.vias; drawEndpoints(); }
   stopPicking();
 }
 
 function pickOnMap(which, latlng) {
-  const pt = snapPoint(latlng);
+  // Stops are plain points: snapping one to a phone would suggest it's a capture
+  const pt = typeof which === 'number' ? { lat: latlng.lat, lon: latlng.lng } : snapPoint(latlng);
   if (pt.phone_id != null) { pt.label = `Phone #${pt.phone_id}`; setEndpoint(which, pt); return; }
   const w = map.wrapLatLng([pt.lat, pt.lon]);
   pt.lat = w.lat; pt.lon = w.lng;
   pt.label = 'Dropped Pin';
   setEndpoint(which, pt);
+  labelPlace(pt);
+}
+// Name a point from the map (a dropped pin, or one from a share link) once the geocoder answers
+function labelPlace(pt) {
   reverseLabel(pt).then(label => {
-    if (!label || state[which] !== pt) return;  // a newer point replaced it meanwhile
+    if (!label || ![state.start, state.end, ...state.vias].includes(pt)) return;  // replaced meanwhile
     pt.label = label;
     renderPlan(); saveSession();
   });
 }
+function labelPlaces() {
+  for (const pt of [state.start, state.end, ...state.vias]) {
+    if (pt && !pt.live && !pt.label && pt.phone_id == null) labelPlace(pt);
+  }
+}
 
 function clearEnds() {
-  const prev = { start: state.start, end: state.end };
-  if (!prev.start && !prev.end) return;
+  const prev = { start: state.start, end: state.end, vias: state.vias };
+  if (!prev.start && !prev.end && !prev.vias.length) return;
+  endPlaceEdit();
   state.start = state.end = null;
+  state.vias = [];
   drawEndpoints(); renderPlan(); saveSession();
-  toast('Start and end cleared', () => {
-    state.start = prev.start; state.end = prev.end;
+  toast(prev.vias.length ? 'Start, stops and end cleared' : 'Start and end cleared', () => {
+    endPlaceEdit();
+    ({ start: state.start, end: state.end, vias: state.vias } = prev);
     drawEndpoints(); renderPlan(); saveSession();
   });
 }
@@ -1481,8 +1674,9 @@ function sameAsStart() {
 }
 
 function openSearch(which) {
+  hideToast();  // its Undo could change the places under the search
   searchWhich = which;
-  searchInput.placeholder = which === 'start' ? 'Search for a start' : endPlaceholder();
+  searchInput.placeholder = which === 'start' ? 'Search for a start' : which === 'end' ? endPlaceholder() : 'Search for a stop';
   searchInput.value = '';
   showSearchItems(searchFixedItems());
   // Desktop: cover the whole side panel so the fields underneath don't show through
@@ -1494,7 +1688,7 @@ function closeSearch() {
   clearTimeout(searchTimer);
   if (searchCtrl) searchCtrl.abort();
   searchScreen.hidden = true;
-  document.getElementById(`${searchWhich}-field`).focus();
+  (document.getElementById(placeFieldId(searchWhich)) || document.getElementById('add-stop')).focus();  // a new stop has no row yet
 }
 function showSearchItems(items) {
   searchItems = items; searchActive = -1;
@@ -1568,6 +1762,9 @@ function drawEndpoints() {
     if (pt && !pt.live) state[key] = L.marker([pt.lat, pt.lon], { icon: makeEndpointIcon(which, shared),
       zIndexOffset: which === 'start' ? 501 : 500, interactive: false, keyboard: false }).addTo(map);
   });
+  state.viaMarkers.forEach(m => map.removeLayer(m));
+  state.viaMarkers = state.routeMode !== 'route' ? [] : state.vias.map(v => L.marker([v.lat, v.lon],
+    { icon: makeEndpointIcon('via'), zIndexOffset: 499, interactive: false, keyboard: false }).addTo(map));
 }
 
 // Snap to nearest phone within SNAP_PX pixels, otherwise raw coords
@@ -1585,7 +1782,7 @@ function snapPoint(latlng) {
     : { lat: latlng.lat, lon: latlng.lng };
 }
 
-// Shape, not colour, tells them apart: start is round, end is square. A small solid marker,
+// Shape, not colour, tells them apart: start is round, a stop a diamond, end is square. A small solid marker,
 // on top of the phone's dot when snapped to one; it shrinks with zoom like the dots.
 function makeEndpointIcon(which, shared) {
   // When start and end are one point, the end square is a step larger so the circle sits inside it
@@ -1594,8 +1791,12 @@ function makeEndpointIcon(which, shared) {
 }
 
 function setEndpoint(which, point) {
-  const picking = state.mode === 'setStart' || state.mode === 'setEnd';
-  state[which] = point;
+  const picking = state.mode === 'pick';
+  if (typeof which === 'number') {
+    if (Math.min(which, state.vias.length) >= MAX_VIAS) { toast(`At most ${MAX_VIAS} stops`); if (picking) stopPicking(); return; }  // setPlace appends past the end
+    if (point.phone_id != null) point = { lat: point.lat, lon: point.lon, label: point.label };  // stops are plain points
+  }
+  setPlace(which, point);
   drawEndpoints();
   if (picking) stopPicking(); else renderPlan();
   saveSession();
@@ -1642,21 +1843,25 @@ function _decodeEndpoint(raw) {
   return { lat, lon };
 }
 
-function buildShareUrl() {
+// The plan as a query string: a share link's, and what a saved plan keeps. Stops are repeated
+// via=lat,lon in order.
+function shareQuery() {
   const p = new URLSearchParams();
   p.set('profile', state.profile);
   const s = _encodeEndpoint(state.start), e = _encodeEndpoint(state.end);
   if (s) p.set('start', s);
   if (e) p.set('end', e);
+  for (const v of state.vias.filter(Boolean)) p.append('via', _encodeEndpoint({ lat: v.lat, lon: v.lon }));
   if (state.selectedIds.size) p.set('ids', Array.from(state.selectedIds).join(','));
   // Commas are legal unencoded in a query string (RFC 3986 sub-delims) and
   // URLSearchParams escapes them anyway. Put them back: these links get
   // pasted into Discord, and %2C x198 is a lot of noise for no benefit.
-  return `${location.origin}${location.pathname}?${p}`.replace(/%2C/g, ',');
+  return String(p).replace(/%2C/g, ',');
 }
+function buildShareUrl() { return `${location.origin}${location.pathname}?${shareQuery()}`; }
 
 async function shareSelection() {
-  if (!state.selectedIds.size && !state.start && !state.end) {
+  if (!planHasContent()) {
     toast('Nothing to share yet — select some phones first');
     return;
   }
@@ -1690,7 +1895,8 @@ function applyShareParams(p) {
   const rawStart = p.get('start');
   const rawEnd   = p.get('end');
   const rawProf  = p.get('profile');
-  if (!rawIds && !rawStart && !rawEnd && !rawProf) return false;
+  const rawVias  = p.getAll('via');
+  if (!rawIds && !rawStart && !rawEnd && !rawProf && !rawVias.length) return false;
 
   if (['foot', 'bicycle', 'car'].includes(rawProf)) setProfile(rawProf);
 
@@ -1705,6 +1911,7 @@ function applyShareParams(p) {
   }
   state.start = _decodeEndpoint(rawStart);
   state.end   = _decodeEndpoint(rawEnd);
+  state.vias  = rawVias.map(_decodeEndpoint).filter(Boolean).slice(0, MAX_VIAS).map(({ lat, lon }) => ({ lat, lon }));
   // The recipient's own stored route has nothing to do with this selection;
   // loadPhones() would otherwise redraw it straight over the shared one.
   state.lastRoute       = null;
@@ -1713,10 +1920,138 @@ function applyShareParams(p) {
   return true;
 }
 
+// ── Road preview: the way between the plan's points, before a route is found ──
+// Routing only, not while navigating. One request per change of points (debounced, older
+// ones aborted); a live start asks again only once you've moved 500 m.
+const PREVIEW_DEBOUNCE_MS = 400, PREVIEW_LIVE_M = 500;
+let _pv = { key: '', timer: null, ctrl: null, layer: null, liveAt: null };
+function previewKey() {
+  if (state.routeMode !== 'route' || inNav()) return '';
+  const s = state.start;
+  if (s?.live && s.lat != null) {
+    if (!_pv.liveAt || _haversineKm(s.lat, s.lon, ..._pv.liveAt) * 1000 >= PREVIEW_LIVE_M) _pv.liveAt = [s.lat, s.lon];
+  }
+  const pts = [s?.live ? (s.lat != null ? _pv.liveAt : null) : s && [s.lat, s.lon], ...state.vias.map(v => [v.lat, v.lon]),
+               state.end && [state.end.lat, state.end.lon]].filter(p => p && p[0] != null);
+  return pts.length >= 2 ? `${state.profile}|${pts.map(p => `${(+p[0]).toFixed(5)},${(+p[1]).toFixed(5)}`).join(';')}` : '';
+}
+// The line can be hidden to see the phones under it; it stays loaded for Along Path
+function showPathLine() {
+  if (!_pv.layer) return;
+  if (!state.showPath) { map.removeLayer(_pv.layer); return; }
+  _pv.layer.addTo(map).bringToBack();  // under the phone dots
+}
+function togglePathLine() {
+  state.showPath = !state.showPath;
+  showPathLine(); renderPathTool(); saveSession();
+}
+function clearPreview() {
+  if (_pv.layer) map.removeLayer(_pv.layer);
+  _pv.layer = null; state.previewPath = null;
+  renderPathTool();
+}
+function syncPreview() {
+  const key = previewKey();
+  if (key === _pv.key) return;
+  _pv.key = key;
+  clearTimeout(_pv.timer);
+  _pv.ctrl?.abort();
+  if (!key) { clearPreview(); return; }
+  // Until the new road arrives the old one is only a hint: faded, and not for Along Path
+  _pv.layer?.setStyle({ opacity: 0.3 });
+  state.previewPath = null;
+  renderPathTool();
+  _pv.timer = setTimeout(async () => {
+    const ctrl = _pv.ctrl = new AbortController();
+    const [profile, points] = key.split('|');
+    try {
+      const res = await fetch(`/api/path?${new URLSearchParams({ profile, points })}`, { signal: ctrl.signal });
+      if (key !== _pv.key) return;  // the plan moved on
+      if (!res.ok) {
+        clearPreview();
+        if (res.status < 500) toast(await errorDetail(res));
+        return;
+      }
+      const data = await res.json();
+      if (key !== _pv.key) return;
+      const latlngs = data.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+      if (_pv.layer) map.removeLayer(_pv.layer);
+      _pv.layer = L.polyline(latlngs, { color: mapInk().path, weight: 4, opacity: 0.75, interactive: false });
+      showPathLine();
+      state.previewPath = latlngs;
+      renderPathTool();
+    } catch (e) {
+      if (e.name !== 'AbortError' && key === _pv.key) clearPreview();  // offline: no preview
+    }
+  }, PREVIEW_DEBOUNCE_MS);
+}
+
+// ── Along Path: select every phone within 500 m, 1 km or 2 km of the preview line ──
+function renderPathTool() {
+  document.getElementById('path-tool').hidden = !state.previewPath;
+  const eye = document.getElementById('path-eye');
+  eye.hidden = !_pv.key;
+  eye.setAttribute('aria-pressed', String(state.showPath));
+  eye.title = state.showPath ? 'Hide Path' : 'Show Path';
+  eye.firstElementChild.className = `icon icon-eye${state.showPath ? '' : '-off'}`;
+  if (!state.previewPath && state.mode === 'path') setMode('click');
+}
+// The Skip chips, shared by the lasso and Along Path
+function skippedByChips(phone) {
+  if (state.lassoExcludeOwned && phone.status === 'mine') return true;
+  if (state.lassoExcludeCellmates && phone.status === 'cellmate') return true;
+  return state.lassoOnlyNew && !(state.pastCaptureIds !== null && !state.pastCaptureIds.has(Number(phone.id)));
+}
+// Pieces of the line at most km long go in a grid of km-sized cells, each under every cell its
+// km-padded box touches; a phone then only measures the pieces filed under its own cell.
+function phonesNearPath(line, km) {
+  const cell = km / 111, pad = km / 110, grid = new Map(), pieces = [];  // pad: a touch over a km of latitude
+  for (let i = 1; i < line.length; i++) {
+    const [a, b] = [line[i - 1], line[i]];
+    const n = Math.max(1, Math.ceil(_haversineKm(a[0], a[1], b[0], b[1]) / km));
+    for (let k = 0; k < n; k++) {
+      const p = [a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n];
+      const q = [a[0] + (b[0] - a[0]) * (k + 1) / n, a[1] + (b[1] - a[1]) * (k + 1) / n];
+      const padLon = pad / Math.cos(p[0] * Math.PI / 180), idx = pieces.push([p, q]) - 1;
+      const y0 = Math.floor((Math.min(p[0], q[0]) - pad) / cell), y1 = Math.floor((Math.max(p[0], q[0]) + pad) / cell);
+      const x0 = Math.floor((Math.min(p[1], q[1]) - padLon) / cell), x1 = Math.floor((Math.max(p[1], q[1]) + padLon) / cell);
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const key = `${y},${x}`;
+        (grid.get(key) || grid.set(key, []).get(key)).push(idx);
+      }
+    }
+  }
+  return state.phones.filter(phone => {
+    const list = grid.get(`${Math.floor(phone.lat / cell)},${Math.floor(phone.lon / cell)}`);
+    if (!list) return false;
+    const kx = 111.32 * Math.cos(phone.lat * Math.PI / 180), ky = 110.57;
+    return list.some(i => {
+      const [p, q] = pieces[i];
+      const ax = (p[1] - phone.lon) * kx, ay = (p[0] - phone.lat) * ky, dx = (q[1] - p[1]) * kx, dy = (q[0] - p[0]) * ky;
+      const len2 = dx * dx + dy * dy, t = len2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+      return Math.hypot(ax + t * dx, ay + t * dy) <= km;
+    });
+  });
+}
+function selectAlongPath(km) {
+  if (!state.previewPath || routeBusy) return;
+  const added = phonesNearPath(state.previewPath, km).filter(p => !state.selectedIds.has(p.id) && !skippedByChips(p));
+  const within = km < 1 ? `${km * 1000} m` : `${km} km`;
+  if (!added.length) { toast(`No more phones within ${within} of the path`); return; }
+  const restyle = () => added.forEach(refreshMarker);
+  added.forEach(p => state.selectedIds.add(p.id));
+  restyle(); updateSelCount(); saveSession();
+  if (navigator.vibrate) navigator.vibrate(18);
+  setMode('click');
+  toast(`Added ${added.length} phone${added.length === 1 ? '' : 's'} within ${within}`, () => {
+    added.forEach(p => state.selectedIds.delete(p.id));
+    restyle(); updateSelCount(); saveSession();
+  });
+}
+
 // ── Map click: endpoint setting with snap ─────────────────────────
 map.on('click', (e) => {
-  if (state.mode === 'setStart') pickOnMap('start', e.latlng);
-  else if (state.mode === 'setEnd') pickOnMap('end', e.latlng);
+  if (state.mode === 'pick') pickOnMap(state.pickWhich, e.latlng);
   else if (sheetFull && !desktopPanel.matches) setSheetFull(false);  // tap the map to get it back
 });
 
@@ -1725,7 +2060,8 @@ map.on('click', (e) => {
 // Google Maps legs don't drift if the plan's start/end change afterwards.
 function solvedEnds() {
   const pick = pt => pt && { lat: pt.lat, lon: pt.lon, ...(pt.phone_id != null && { phone_id: pt.phone_id }) };
-  return { start: pick(state.start), end: pick(state.end) };
+  const vias = state.routeMode === 'route' ? state.vias.filter(Boolean).map(pick) : [];  // Orienteering has no stops
+  return { start: pick(state.start), end: pick(state.end), ...(vias.length && { vias }) };
 }
 
 async function findRoute() {
@@ -1738,9 +2074,10 @@ async function findRoute() {
       body: JSON.stringify({
         phone_ids: Array.from(state.selectedIds),
         start: ends.start, end: ends.end, profile: state.profile,
+        ...(ends.vias && { vias: ends.vias }),
       }),
     });
-    if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.detail || `HTTP ${res.status}`); }
+    if (!res.ok) throw new Error(await errorDetail(res));
     const data = await res.json();
     data.solved = ends;
     if (isLassoMode()) setMode('click');
@@ -1752,6 +2089,14 @@ async function findRoute() {
   } finally {
     setRouteBusy(false);
   }
+}
+
+// An API error as one readable line: a 422 lists each bad field
+async function errorDetail(res) {
+  const e = await res.json().catch(() => ({}));
+  return Array.isArray(e.detail)
+    ? e.detail.map(d => `${d.loc?.slice(-1)[0] ?? ''}: ${d.msg ?? JSON.stringify(d)}`).join('; ')
+    : (e.detail || `HTTP ${res.status}`);
 }
 
 // ── Orienteer controls ────────────────────────────────────────────
@@ -1802,13 +2147,7 @@ async function findOrienteerRoute() {
         username:       username,
       }),
     });
-    if (!res.ok) {
-      const e = await res.json().catch(() => ({}));
-      const detail = Array.isArray(e.detail)
-        ? e.detail.map(d => `${d.loc?.slice(-1)[0] ?? ''}: ${d.msg ?? JSON.stringify(d)}`).join('; ')
-        : (e.detail || `HTTP ${res.status}`);
-      throw new Error(detail);
-    }
+    if (!res.ok) throw new Error(await errorDetail(res));
     const data = await res.json();
     data.solved = ends;
     displayRoute(data, bufferS);
@@ -1912,22 +2251,33 @@ function buildLegs(data) {
   const phoneLookup = Object.fromEntries(state.phones.map(p => [p.id, p]));
   const mode = { foot: 'walking', bicycle: 'bicycling', car: 'driving' }[state.profile] || 'walking';
 
-  // Full ordered stop list as [lat, lon] pairs
-  const all = [
-    [start.lat, start.lon],
-    ...data.ordered_ids.map(id => { const p = phoneLookup[id]; return p ? [p.lat, p.lon] : null; }).filter(Boolean),
-  ];
-  if (end) all.push([end.lat, end.lon]);  // no end: the last leg finishes at the last phone
+  // Every point in order: n numbers the start (0), the phones and the end; stops have none.
+  // Stop i comes after the first via_after[i] of ordered_ids.
+  const vias = data.solved?.vias || [], at = data.via_after || [];
+  const pts = [{ ll: [start.lat, start.lon], n: 0 }];
+  let n = 0;
+  const addVias = i => vias.forEach((v, k) => { if (at[k] === i) pts.push({ ll: [v.lat, v.lon] }); });
+  data.ordered_ids.forEach((id, i) => {
+    addVias(i);
+    const p = phoneLookup[id];
+    if (p) pts.push({ ll: [p.lat, p.lon], n: ++n });
+  });
+  addVias(data.ordered_ids.length);
+  // No end: the last leg finishes at the last phone, or at the last stop when stops come last
+  if (end) pts.push({ ll: [end.lat, end.lon], n: n + 1 });
+  else if (pts.at(-1).n == null) pts.at(-1).n = n + 1;
 
-  if (all.length < 2) return [];
+  if (pts.length < 2) return [];
 
   // comgooglemaps:// scheme: saddr + daddr joined with +to: (no separate waypoints param)
-  // Each leg: origin + up to 9 more stops = 10 total, overlap of 1 between legs
+  // Each leg: origin + up to 9 more points = 10 total, overlap of 1 between legs. A leg ends on a
+  // phone or the end, never a stop, so firstStop/lastStop always number phones.
   const appMode = { foot: 'walking', bicycle: 'bicycling', car: 'driving' }[state.profile] || 'driving';
   const legs = [];
-  const advance = GMAPS_STOPS_PER_LEG - 1; // 9
-  for (let i = 0; i < all.length - 1; i += advance) {
-    const chunk  = all.slice(i, i + GMAPS_STOPS_PER_LEG);
+  for (let i = 0; i < pts.length - 1; ) {
+    let j = Math.min(i + GMAPS_STOPS_PER_LEG - 1, pts.length - 1);
+    while (j > i + 1 && pts[j].n == null) j--;
+    const chunk  = pts.slice(i, j + 1).map(p => p.ll);
     const saddr  = chunk[0].join(',');
     const daddr  = chunk.slice(1).map(s => s.join(',')).join('+to:');
     // Native app URL — opens Google Maps directly without browser redirect
@@ -1940,7 +2290,8 @@ function buildLegs(data) {
       `&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(dest)}` +
       (wpts ? `&waypoints=${encodeURIComponent(wpts)}` : '') +
       `&travelmode=${mode}`;
-    legs.push({ appUrl, webUrl, firstStop: i, lastStop: Math.min(i + advance, all.length - 1) });
+    legs.push({ appUrl, webUrl, firstStop: pts[i].n, lastStop: pts[j].n });
+    i = j;
   }
   return legs;
 }
@@ -2054,13 +2405,13 @@ function renderNav() {
 function endRoute() {
   const snap = { data: state.lastRoute, extraS: state.lastRouteExtraS, progress: state.routeProgress,
                  nodeStates: { ...state.nodeStates }, leg: state.currentLeg,
-                 start: state.start, end: state.end };
+                 start: state.start, end: state.end, vias: [...state.vias] };
   clearRoute();
   if (!snap.data) return;
   _dropMap = setTimeout(dropRouteMap, 6500);  // the saved route map goes with the route
   toast('Route ended', () => {
     clearTimeout(_dropMap);
-    state.start = snap.start; state.end = snap.end;  // legs are built from these
+    state.start = snap.start; state.end = snap.end; state.vias = snap.vias;  // legs are built from these
     drawEndpoints();
     displayRoute(snap.data, snap.extraS);
     state.lastRoute     = snap.data;
@@ -2227,6 +2578,7 @@ function onPosition(pos) {
   if (gpsBlocked) { gpsBlocked = false; renderPlan(); }
   if (state.start && state.start.live) {
     state.start.lat = lat; state.start.lon = lon;
+    syncPreview();
   } else if (_defaultStartPending && !state.start) {
     // First fix of the visit and no start chosen: start from here. Once only, so
     // clearing the start sticks; the crosshair brings it back.
@@ -2399,6 +2751,7 @@ function setMapTheme(theme) {
   document.documentElement.style.setProperty('--ink-photo', ink.photo);
   document.documentElement.style.setProperty('--ink-indoor', ink.indoor);
   state.phones.forEach(p => refreshMarker(p));
+  _pv.layer?.setStyle({ color: ink.path });
   rebuildTileLayer();
   if (miniMap) {
     miniMap.remove(); miniMap = null;
@@ -2759,6 +3112,7 @@ function saveSession() {
       selectedIds:         Array.from(state.selectedIds),
       start:               state.start,
       end:                 state.end,
+      vias:                state.vias,
       lastRoute:           state.lastRoute,
       progress:            _savedProgress || (inNav() ? { ids: state.routeOrderedIds, at: state.routeProgress,
                              nodeStates: state.nodeStates, leg: state.currentLeg } : null),
@@ -2767,6 +3121,7 @@ function saveSession() {
       mapTheme:            state.mapTheme,
       autoRotate:          state.autoRotate,
       highlight:           state.highlight,
+      showPath:            state.showPath,
       playerEmoji:        state.playerEmoji,
       orienteerArriveBy: document.getElementById('orienteer-arrive-by')?.value || '',
     }));
@@ -2785,12 +3140,15 @@ function restoreSession() {
     // My Location saved as a fixed point (before it was live) means "wherever I am"
     if (state.start && state.start.label === 'My Location' && state.start.phone_id == null) state.start.live = true;
     if (s.end)         state.end       = s.end;
+    if (Array.isArray(s.vias)) state.vias = s.vias.filter(v => typeof v?.lat === 'number' && typeof v.lon === 'number' && isFinite(v.lat + v.lon)).slice(0, MAX_VIAS)
+      .map(v => ({ lat: +v.lat, lon: +v.lon, ...(typeof v.label === 'string' && { label: v.label }) }));
     if (s.lastRoute)   state.lastRoute = s.lastRoute;
     if (s.lastRoute && s.progress) _savedProgress = s.progress;
     if (typeof s.lastRouteExtraS === 'number') state.lastRouteExtraS = s.lastRouteExtraS;
     if (s.mapTheme && TILE_URLS[s.mapTheme]) setMapTheme(s.mapTheme);
     if (typeof s.autoRotate === 'boolean') setAutoRotate(s.autoRotate);
     if (typeof s.highlight === 'string') setHighlight(s.highlight);
+    if (typeof s.showPath === 'boolean') state.showPath = s.showPath;
     else if (typeof s.legFocus === 'boolean') setHighlight(s.legFocus ? 'leg' : 'all');  // the old on/off switch
     // Saved so the avatar doesn't flash the letter before phones load
     if (s.username && typeof s.playerEmoji === 'string') state.playerEmoji = s.playerEmoji;
@@ -3056,15 +3414,7 @@ window.addEventListener('offline', updateRefreshDot);
   drawEndpoints();
   renderAvatar();
   renderNav();
-  for (const which of ['start', 'end']) {
-    const pt = state[which];
-    if (!pt || pt.label || pt.phone_id != null) continue;
-    reverseLabel(pt).then(label => {
-      if (!label || state[which] !== pt) return;
-      pt.label = label;
-      renderPlan(); saveSession();
-    });
-  }
+  labelPlaces();  // points from a share link carry no names
   // The name is optional: ask once on first visit, skippable. A share link goes
   // straight to the map; the avatar is there to add a name later.
   let onboarded = false;

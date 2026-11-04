@@ -91,6 +91,9 @@ button[aria-busy=true] .icon { mask: none; -webkit-mask: none; background: trans
 #tool-dock .segmented { background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.3); border-radius: 22px; }
 #tool-dock .segmented button { flex: none; border-radius: 18px; padding: 8px 14px; }
 /* Clear shares the pill with the tools, set apart by a hairline */
+@media (max-width: 399px) { #path-tool .tool-label { display: none; } #tool-dock #path-tool { padding: 8px 11px; } }
+#path-chips { flex-wrap: nowrap; gap: 4px; padding: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 22px; box-shadow: 0 3px 12px rgba(0,0,0,.3); }
+#path-chips .chip { box-shadow: none; background: var(--raised); border-color: transparent; }
 #tool-dock #dock-clear { border-right: 1px solid var(--divider); border-radius: 18px 0 0 18px; padding: 8px 10px 8px 12px; color: var(--text); }
 .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 12px; background: var(--accent); color: var(--surface); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 @keyframes bump { 40% { transform: scale(1.3); } }
@@ -127,12 +130,28 @@ body.picking #sheet { transform: translateY(110%); }
 /* Start/End fields open a full-screen search with the input pinned to the top,
    so the on-screen keyboard can never cover the suggestions */
 .place-field { width: 100%; justify-content: flex-start; gap: 10px; text-align: left; font-size: 16px; font-weight: 400; color: var(--text); }
-#end-field { margin-top: 8px; }
-.place-wrap { position: relative; }
-.place-wrap .place-field { padding-right: 48px; }
-.pf-gps { position: absolute; top: 0; right: 0; width: 44px; height: 100%; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--accent); }
+/* Field-head buttons get a 44px target without making the heading row taller */
+.field-head .text-btn { min-height: 44px; margin-block: -6px; }
+.field-head .head-btns { gap: 4px; }
+.field-head .icon-btn { width: 44px; padding: 0; }
+/* Each place is one box: [field] [remove / crosshair] [drag handle], 44px tall with its border */
+/* Four rows show (4 x 44 + 3 x 8 gaps); more scroll. The 4px padding (cancelled by the margin) keeps focus rings unclipped */
+#places { display: flex; flex-direction: column; gap: 8px; max-height: 208px; overflow-y: auto; overscroll-behavior: contain; padding: 4px; margin: -4px; scrollbar-width: thin; scrollbar-color: #4c5359 transparent; }
+#places.fade-bottom { -webkit-mask-image: linear-gradient(#000 calc(100% - 28px), transparent); mask-image: linear-gradient(#000 calc(100% - 28px), transparent); }
+#places.fade-top { -webkit-mask-image: linear-gradient(transparent, #000 28px); mask-image: linear-gradient(transparent, #000 28px); }
+#places.fade-top.fade-bottom { -webkit-mask-image: linear-gradient(transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+.place-row { display: flex; align-items: center; min-width: 0; background: var(--raised); border: 1px solid var(--border); border-radius: 8px; }
+.place-row > button { height: 42px; min-height: 42px; border: 0; border-radius: 0; background: transparent; }
+.place-row > button:first-child { border-radius: 7px 0 0 7px; }
+.place-row > button:last-child { border-radius: 0 7px 7px 0; }
+.place-row.dragging { position: relative; z-index: 1; opacity: .92; border-color: var(--accent); box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+.place-x, .drag-handle { flex: none; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.place-x.pf-gps { color: var(--accent); }
+.drag-handle { cursor: grab; touch-action: none; }
+.place-row.dragging .drag-handle { cursor: grabbing; color: var(--text); }
 .place-field .pin-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--text); }
 .place-field .pin-end { border-radius: 2px; }
+.place-field .pin-via { width: 9px; height: 9px; margin: 0 .5px; border-radius: 1px; transform: rotate(45deg); }
 .place-field .pf-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .place-field .pf-text.unset { color: var(--muted); }
 #search-screen { position: fixed; inset: 0; z-index: 1250; background: var(--surface); display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); }
@@ -206,6 +225,7 @@ input[type=checkbox][role=switch]:disabled { opacity: .45; cursor: not-allowed; 
 #pick-banner { position: fixed; z-index: 1100; top: 0; left: 0; right: 0; text-align: center; padding: max(14px, env(safe-area-inset-top)) 16px 14px; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 15px; color: var(--text); }
 #pick-banner b::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; background: currentColor; border-radius: 50%; }
 #pick-banner b.end::before { border-radius: 2px; }
+#pick-banner b.via::before { width: 9px; height: 9px; border-radius: 1px; transform: rotate(45deg); }
 #pick-actions { position: fixed; z-index: 1100; left: 50%; transform: translateX(-50%); bottom: max(24px, env(safe-area-inset-bottom)); display: flex; gap: 8px; }
 #pick-actions button { flex: none; padding: 10px 24px; border-radius: 22px; background: var(--surface); box-shadow: 0 3px 12px rgba(0,0,0,.3); }
 #onboard { position: fixed; inset: 0; z-index: 1300; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.6); }
@@ -241,7 +261,7 @@ body.picking #tool-dock { display: none; }
   /* Bottom-left, under the panel. While the tools show (planning a route), the panel stops short of
      them, so on a short window it scrolls rather than running into them */
   #tool-dock { left: 16px; bottom: 20px; }
-  body:has(#tool-dock:not([hidden])) #sheet { max-height: calc(100dvh - 210px); }
+  body:has(#tool-dock:not([hidden])) #sheet { max-height: calc(100dvh - var(--dock-h, 44px) - 68px); }  /* 16 top, 20 bottom, 32 gap */
   #toast { left: 50%; right: auto; transform: translateX(-50%); width: 420px; }
   .scrim { background: transparent; }
   .popover { left: auto; right: 72px; top: 16px; bottom: auto; width: 320px; border-radius: 12px; border: 1px solid var(--divider); }
@@ -283,6 +303,9 @@ body.picking #tool-dock { display: none; }
 /* ── Start/end markers: round = start, square = end; no colour ── */
 .ep { background: #fff; border: 2px solid #101112; border-radius: 50%; box-shadow: 0 1px 5px rgba(0,0,0,.5); }
 .ep-end { border-radius: 3px; }
+/* A stop: a smaller diamond, so it reads as on the way rather than an end */
+.ep-via { background: none; border: 0; box-shadow: none; }  /* Leaflet's transform positions the marker, so the diamond is a pseudo-element */
+.ep-via::before { content: ""; position: absolute; inset: 12%; background: #fff; border: 2px solid #101112; border-radius: 2px; transform: rotate(45deg); box-shadow: 0 1px 5px rgba(0,0,0,.5); }
 
 /* ── Live location dot ───────────────────────────────────── */
 .loc-dot {
@@ -329,6 +352,9 @@ body.picking #tool-dock { display: none; }
 .icon-gear { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222.2%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212%22%20r%3D%223%22%2F%3E%3Cpath%20d%3D%22M19.4%2015a1.65%201.65%200%200%200%20.33%201.82l.06.06a2%202%200%200%201%200%202.83%202%202%200%200%201-2.83%200l-.06-.06a1.65%201.65%200%200%200-1.82-.33%201.65%201.65%200%200%200-1%201.51V21a2%202%200%200%201-2%202%202%202%200%200%201-2-2v-.09A1.65%201.65%200%200%200%209%2019.4a1.65%201.65%200%200%200-1.82.33l-.06.06a2%202%200%200%201-2.83%200%202%202%200%200%201%200-2.83l.06-.06a1.65%201.65%200%200%200%20.33-1.82%201.65%201.65%200%200%200-1.51-1H3a2%202%200%200%201-2-2%202%202%200%200%201%202-2h.09A1.65%201.65%200%200%200%204.6%209a1.65%201.65%200%200%200-.33-1.82l-.06-.06a2%202%200%200%201%200-2.83%202%202%200%200%201%202.83%200l.06.06a1.65%201.65%200%200%200%201.82.33H9a1.65%201.65%200%200%200%201-1.51V3a2%202%200%200%201%202-2%202%202%200%200%201%202%202v.09a1.65%201.65%200%200%200%201%201.51%201.65%201.65%200%200%200%201.82-.33l.06-.06a2%202%200%200%201%202.83%200%202%202%200%200%201%200%202.83l-.06.06a1.65%201.65%200%200%200-.33%201.82V9a1.65%201.65%200%200%200%201.51%201H21a2%202%200%200%201%202%202%202%202%200%200%201-2%202h-.09a1.65%201.65%200%200%200-1.51%201z%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-info { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%226.5%22%2F%3E%3Cpath%20d%3D%22M9%208.3v3.9M9%205.8v.1%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-route { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%224.5%22%20cy%3D%2213.5%22%20r%3D%221.8%22%2F%3E%3Ccircle%20cx%3D%2213.5%22%20cy%3D%224.5%22%20r%3D%221.8%22%2F%3E%3Cpath%20d%3D%22M6.3%2013.5H11a2.5%202.5%200%20000-5H7a2.5%202.5%200%20010-5h4.7%22%2F%3E%3C%2Fsvg%3E"); }
+.icon-eye { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M1.5%209s2.7-5%207.5-5%207.5%205%207.5%205-2.7%205-7.5%205-7.5-5-7.5-5z%22%2F%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%222.2%22%2F%3E%3C%2Fsvg%3E"); }
+.icon-eye-off { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M1.5%209s2.7-5%207.5-5%207.5%205%207.5%205-2.7%205-7.5%205-7.5-5-7.5-5z%22%2F%3E%3Ccircle%20cx%3D%229%22%20cy%3D%229%22%20r%3D%222.2%22%2F%3E%3Cpath%20d%3D%22M3%203l12%2012%22%2F%3E%3C%2Fsvg%3E"); }
+.icon-grip { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M4%206h10M4%209h10M4%2012h10%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-lock { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223.5%22%20y%3D%228%22%20width%3D%2211%22%20height%3D%227.5%22%20rx%3D%221.5%22%2F%3E%3Cpath%20d%3D%22M6%208V5.5a3%203%200%20016%200V8%22%2F%3E%3C%2Fsvg%3E"); }
 .icon-warning { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M9%202.5L16.2%2015.2H1.8L9%202.5zM9%207.2v3.6M9%2013v.1%22%2F%3E%3C%2Fsvg%3E"); }
 /* Probably-locked review before routing: the list scrolls so Find Route stays in view; min-width lets long rows end in an ellipsis */
