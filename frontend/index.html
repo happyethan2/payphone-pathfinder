@@ -140,6 +140,15 @@
     <button id="save-map-btn" onclick="saveRouteMap()">Save Route Map Offline</button>
     <div class="note" id="save-map-note"></div>
   </div>
+  <div class="field">
+    <div class="sec-title">Saved Plans</div>
+    <div id="plan-list"></div>
+    <div class="name-row">
+      <input type="text" id="plan-name" maxlength="40" aria-label="Plan name" autocomplete="off" enterkeyhint="done">
+      <button id="plan-save" onclick="savePlan()">Save</button>
+    </div>
+    <div class="note" id="plan-note"></div>
+  </div>
 </div>
 
 <div class="popover" id="pop-settings" role="dialog" aria-modal="true" aria-labelledby="pop-settings-h" hidden>
@@ -862,7 +871,7 @@ function openPopover(which) {
   openPop = document.getElementById(`pop-${which}`);
   popReturn = document.activeElement;
   if (which === 'avatar') document.getElementById('name-input').value = state.username;
-  if (which === 'avatar') renderSaveMapBtn();
+  if (which === 'avatar') { renderSaveMapBtn(); renderPlans(); }
   document.getElementById('scrim').hidden = false;
   openPop.style.minHeight = which === 'legend' && prevHeight ? `${prevHeight}px` : '';
   openPop.hidden = false;
@@ -1918,6 +1927,98 @@ function applyShareParams(p) {
   state.routeOrderedIds = [];
   state.routeProgress   = 0;
   return true;
+}
+
+// ── Saved plans (profile popover): named share links kept on this device ──
+// Only the query is kept, so a plan survives the instance moving to another address.
+const PLANS_KEY = 'payphone_pathfinder_plans', PLANS_MAX = 20;
+function loadPlans() {
+  try {
+    const list = JSON.parse(localStorage.getItem(PLANS_KEY) || '[]');
+    return Array.isArray(list) ? list.filter(pl => typeof pl?.name === 'string' && typeof pl.q === 'string') : [];
+  } catch (_) { return []; }
+}
+function storePlans(list) {
+  try { localStorage.setItem(PLANS_KEY, JSON.stringify(list)); return true; }
+  catch (_) { toast("Couldn't save plans on this device"); return false; }
+}
+function planDefaultName() {
+  const s = state.start && endpointLabel(state.start), e = state.end && endpointLabel(state.end);
+  return (s && e ? `${s} to ${e}` : s || e || '').slice(0, 40);
+}
+function planNote(pl) {
+  const p = new URLSearchParams(pl.q), ids = (p.get('ids') || '').split(',').filter(Boolean).length, vias = p.getAll('via').length;
+  return [`${ids} phone${ids === 1 ? '' : 's'}`, vias && `${vias} stop${vias === 1 ? '' : 's'}`,
+          new Date(pl.at).toLocaleDateString([], { day: 'numeric', month: 'short' })].filter(Boolean).join(' · ');
+}
+function renderPlans() {
+  const plans = loadPlans(), nav = inNav(), full = plans.length >= PLANS_MAX, empty = !planHasContent();
+  document.getElementById('plan-list').innerHTML = plans.map((pl, i) => `<div class="plan-row">`
+    + `<button class="plan-open" onclick="openPlan(${i})"${nav ? ' disabled' : ''}><span class="t">${escapeHtml(pl.name)}</span>`
+    + `<span class="s">${escapeHtml(planNote(pl))}</span></button>`
+    + `<button class="place-x" onclick="deletePlan(${i})" aria-label="Delete ${escapeHtml(pl.name)}" title="Delete Plan">`
+    + `<span class="icon icon-close" aria-hidden="true"></span></button></div>`).join('');
+  document.getElementById('plan-name').placeholder = planDefaultName() || 'Plan name';
+  document.getElementById('plan-save').disabled = empty || full;
+  document.getElementById('plan-note').textContent = nav && plans.length ? 'End the route to open a plan.'
+    : full ? `${PLANS_MAX} plans saved. Delete one to save another.` : empty ? 'Set a start or select phones to save a plan.' : '';
+}
+function savePlan() {
+  if (!planHasContent()) return;
+  const input = document.getElementById('plan-name');
+  const name = (input.value.trim() || planDefaultName() || 'Plan').slice(0, 40);
+  const plans = loadPlans().filter(pl => pl.name.toLowerCase() !== name.toLowerCase());  // the same name replaces it
+  if (plans.length >= PLANS_MAX) { toast(`${PLANS_MAX} plans saved. Delete one to save another.`); return; }
+  plans.unshift({ name, q: shareQuery(), at: Date.now() });
+  if (!storePlans(plans)) return;
+  input.value = '';
+  renderPlans();
+  toast(`Saved "${name}"`);
+}
+document.getElementById('plan-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); if (!document.getElementById('plan-save').disabled) savePlan(); }
+});
+function deletePlan(i) {
+  const plans = loadPlans(), [gone] = plans.splice(i, 1);
+  if (!gone || !storePlans(plans)) return;
+  renderPlans();
+  toast(`Deleted "${gone.name}"`, () => {
+    const now = loadPlans();
+    if (now.length >= PLANS_MAX) { toast(`${PLANS_MAX} plans saved. Delete one to bring this back.`); return; }
+    now.splice(Math.min(i, now.length), 0, gone);
+    if (storePlans(now) && openPop?.id === 'pop-avatar') renderPlans();
+  });
+}
+function openPlan(i) {
+  const pl = loadPlans()[i];
+  if (!pl || inNav()) return;
+  const snap = { ids: [...state.selectedIds], start: state.start, end: state.end, vias: state.vias,
+                 profile: state.profile, mode: state.routeMode };
+  const restyle = ids => { const byId = new Map(state.phones.map(p => [p.id, p])); ids.forEach(id => byId.has(id) && refreshMarker(byId.get(id))); };
+  endPlaceEdit();
+  applyShareParams(new URLSearchParams(pl.q));
+  // A plan saved from My Location (which links leave out) starts from wherever you are now
+  if (!state.start && navigator.geolocation && !gpsBlocked) state.start = liveStart();
+  restyle(new Set([...snap.ids, ...state.selectedIds]));
+  drawEndpoints();
+  setPlanMode('route');
+  labelPlaces();
+  const pts = [state.start, state.end, ...state.vias].filter(p => p?.lat != null).map(p => [p.lat, p.lon])
+    .concat(state.phones.filter(p => state.selectedIds.has(p.id)).map(p => [p.lat, p.lon]));
+  setFollow(false);
+  if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [50, 50], maxZoom: 16 });
+  closePopover();
+  toast(`Opened "${pl.name}"`, () => {
+    endPlaceEdit();
+    const now = [...state.selectedIds];
+    state.selectedIds.clear();
+    snap.ids.forEach(id => state.selectedIds.add(id));
+    ({ start: state.start, end: state.end, vias: state.vias } = snap);
+    restyle(new Set([...now, ...snap.ids]));
+    setProfile(snap.profile);
+    drawEndpoints();
+    setPlanMode(snap.mode);
+  });
 }
 
 // ── Road preview: the way between the plan's points, before a route is found ──

@@ -213,6 +213,14 @@ input[type=checkbox][role=switch]:disabled { opacity: .45; cursor: not-allowed; 
 .row-select:focus-visible { outline: none; color: var(--text); }
 .status-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin-top: 8px; }
 .status-line:has(#load-status:empty) { display: none; }
+/* Saved plans: each row opens its plan; the ✕ beside it deletes */
+#plan-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+#plan-list:empty { display: none; }
+.plan-row { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; gap: 4px; }
+.plan-open { flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
+.plan-open .t, .plan-open .s { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-open .t { font-size: 14px; color: var(--text); }
+.plan-open .s { font-size: 12px; color: var(--muted); }
 .name-row { display: flex; gap: 8px; }
 .name-row button { flex: none; }
 .name-row input { flex: 1; min-width: 0; }
